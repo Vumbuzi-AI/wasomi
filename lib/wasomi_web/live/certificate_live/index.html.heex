@@ -1,0 +1,49 @@
+<.header>
+  Listing Certificates
+  <:actions>
+    <.link patch={~p"/certificates/new"}>
+      <.button>New Certificate</.button>
+    </.link>
+  </:actions>
+</.header>
+
+<.table
+  id="certificates"
+  rows={@streams.certificates}
+  row_click={fn {_id, certificate} -> JS.navigate(~p"/certificates/#{certificate}") end}
+>
+  <:col :let={{_id, certificate}} label="Type">{certificate.type}</:col>
+  <:col :let={{_id, certificate}} label="Serial number">{certificate.serial_number}</:col>
+  <:col :let={{_id, certificate}} label="File key">{certificate.file_key}</:col>
+  <:col :let={{_id, certificate}} label="Issued at">{certificate.issued_at}</:col>
+  <:action :let={{_id, certificate}}>
+    <div class="sr-only">
+      <.link navigate={~p"/certificates/#{certificate}"}>Show</.link>
+    </div>
+    <.link patch={~p"/certificates/#{certificate}/edit"}>Edit</.link>
+  </:action>
+  <:action :let={{id, certificate}}>
+    <.link
+      phx-click={JS.push("delete", value: %{id: certificate.id}) |> hide("##{id}")}
+      data-confirm="Are you sure?"
+    >
+      Delete
+    </.link>
+  </:action>
+</.table>
+
+<.modal
+  :if={@live_action in [:new, :edit]}
+  id="certificate-modal"
+  show
+  on_cancel={JS.patch(~p"/certificates")}
+>
+  <.live_component
+    module={WasomiWeb.CertificateLive.FormComponent}
+    id={@certificate.id || :new}
+    title={@page_title}
+    action={@live_action}
+    certificate={@certificate}
+    patch={~p"/certificates"}
+  />
+</.modal>

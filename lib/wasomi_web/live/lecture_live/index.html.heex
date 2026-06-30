@@ -1,0 +1,51 @@
+<.header>
+  Listing Lectures
+  <:actions>
+    <.link patch={~p"/lectures/new"}>
+      <.button>New Lecture</.button>
+    </.link>
+  </:actions>
+</.header>
+
+<.table
+  id="lectures"
+  rows={@streams.lectures}
+  row_click={fn {_id, lecture} -> JS.navigate(~p"/lectures/#{lecture}") end}
+>
+  <:col :let={{_id, lecture}} label="Title">{lecture.title}</:col>
+  <:col :let={{_id, lecture}} label="Description">{lecture.description}</:col>
+  <:col :let={{_id, lecture}} label="Video provider">{lecture.video_provider}</:col>
+  <:col :let={{_id, lecture}} label="Video asset">{lecture.video_asset_id}</:col>
+  <:col :let={{_id, lecture}} label="Duration seconds">{lecture.duration_seconds}</:col>
+  <:col :let={{_id, lecture}} label="Position">{lecture.position}</:col>
+  <:action :let={{_id, lecture}}>
+    <div class="sr-only">
+      <.link navigate={~p"/lectures/#{lecture}"}>Show</.link>
+    </div>
+    <.link patch={~p"/lectures/#{lecture}/edit"}>Edit</.link>
+  </:action>
+  <:action :let={{id, lecture}}>
+    <.link
+      phx-click={JS.push("delete", value: %{id: lecture.id}) |> hide("##{id}")}
+      data-confirm="Are you sure?"
+    >
+      Delete
+    </.link>
+  </:action>
+</.table>
+
+<.modal
+  :if={@live_action in [:new, :edit]}
+  id="lecture-modal"
+  show
+  on_cancel={JS.patch(~p"/lectures")}
+>
+  <.live_component
+    module={WasomiWeb.LectureLive.FormComponent}
+    id={@lecture.id || :new}
+    title={@page_title}
+    action={@live_action}
+    lecture={@lecture}
+    patch={~p"/lectures"}
+  />
+</.modal>

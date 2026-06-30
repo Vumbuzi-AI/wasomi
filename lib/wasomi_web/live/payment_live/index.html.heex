@@ -1,0 +1,52 @@
+<.header>
+  Listing Payments
+  <:actions>
+    <.link patch={~p"/payments/new"}>
+      <.button>New Payment</.button>
+    </.link>
+  </:actions>
+</.header>
+
+<.table
+  id="payments"
+  rows={@streams.payments}
+  row_click={fn {_id, payment} -> JS.navigate(~p"/payments/#{payment}") end}
+>
+  <:col :let={{_id, payment}} label="Provider">{payment.provider}</:col>
+  <:col :let={{_id, payment}} label="Provider reference">{payment.provider_reference}</:col>
+  <:col :let={{_id, payment}} label="Amount minor">{payment.amount_minor}</:col>
+  <:col :let={{_id, payment}} label="Currency">{payment.currency}</:col>
+  <:col :let={{_id, payment}} label="Status">{payment.status}</:col>
+  <:col :let={{_id, payment}} label="Raw payload">{payment.raw_payload}</:col>
+  <:col :let={{_id, payment}} label="Paid at">{payment.paid_at}</:col>
+  <:action :let={{_id, payment}}>
+    <div class="sr-only">
+      <.link navigate={~p"/payments/#{payment}"}>Show</.link>
+    </div>
+    <.link patch={~p"/payments/#{payment}/edit"}>Edit</.link>
+  </:action>
+  <:action :let={{id, payment}}>
+    <.link
+      phx-click={JS.push("delete", value: %{id: payment.id}) |> hide("##{id}")}
+      data-confirm="Are you sure?"
+    >
+      Delete
+    </.link>
+  </:action>
+</.table>
+
+<.modal
+  :if={@live_action in [:new, :edit]}
+  id="payment-modal"
+  show
+  on_cancel={JS.patch(~p"/payments")}
+>
+  <.live_component
+    module={WasomiWeb.PaymentLive.FormComponent}
+    id={@payment.id || :new}
+    title={@page_title}
+    action={@live_action}
+    payment={@payment}
+    patch={~p"/payments"}
+  />
+</.modal>

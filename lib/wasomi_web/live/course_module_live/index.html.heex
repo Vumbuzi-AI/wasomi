@@ -1,0 +1,48 @@
+<.header>
+  Listing Modules
+  <:actions>
+    <.link patch={~p"/modules/new"}>
+      <.button>New Course module</.button>
+    </.link>
+  </:actions>
+</.header>
+
+<.table
+  id="modules"
+  rows={@streams.modules}
+  row_click={fn {_id, course_module} -> JS.navigate(~p"/modules/#{course_module}") end}
+>
+  <:col :let={{_id, course_module}} label="Title">{course_module.title}</:col>
+  <:col :let={{_id, course_module}} label="Description">{course_module.description}</:col>
+  <:col :let={{_id, course_module}} label="Position">{course_module.position}</:col>
+  <:action :let={{_id, course_module}}>
+    <div class="sr-only">
+      <.link navigate={~p"/modules/#{course_module}"}>Show</.link>
+    </div>
+    <.link patch={~p"/modules/#{course_module}/edit"}>Edit</.link>
+  </:action>
+  <:action :let={{id, course_module}}>
+    <.link
+      phx-click={JS.push("delete", value: %{id: course_module.id}) |> hide("##{id}")}
+      data-confirm="Are you sure?"
+    >
+      Delete
+    </.link>
+  </:action>
+</.table>
+
+<.modal
+  :if={@live_action in [:new, :edit]}
+  id="course_module-modal"
+  show
+  on_cancel={JS.patch(~p"/modules")}
+>
+  <.live_component
+    module={WasomiWeb.CourseModuleLive.FormComponent}
+    id={@course_module.id || :new}
+    title={@page_title}
+    action={@live_action}
+    course_module={@course_module}
+    patch={~p"/modules"}
+  />
+</.modal>

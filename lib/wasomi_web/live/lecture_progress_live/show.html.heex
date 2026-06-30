@@ -1,0 +1,36 @@
+<.header>
+  Lecture progress {@lecture_progress.id}
+  <:subtitle>This is a lecture_progress record from your database.</:subtitle>
+  <:actions>
+    <.link
+      patch={~p"/lecture_progress/#{@lecture_progress}/show/edit"}
+      phx-click={JS.push_focus()}
+    >
+      <.button>Edit lecture_progress</.button>
+    </.link>
+  </:actions>
+</.header>
+
+<.list>
+  <:item title="Status">{@lecture_progress.status}</:item>
+  <:item title="Last position seconds">{@lecture_progress.last_position_seconds}</:item>
+  <:item title="Completed at">{@lecture_progress.completed_at}</:item>
+</.list>
+
+<.back navigate={~p"/lecture_progress"}>Back to lecture_progress</.back>
+
+<.modal
+  :if={@live_action == :edit}
+  id="lecture_progress-modal"
+  show
+  on_cancel={JS.patch(~p"/lecture_progress/#{@lecture_progress}")}
+>
+  <.live_component
+    module={WasomiWeb.LectureProgressLive.FormComponent}
+    id={@lecture_progress.id}
+    title={@page_title}
+    action={@live_action}
+    lecture_progress={@lecture_progress}
+    patch={~p"/lecture_progress/#{@lecture_progress}"}
+  />
+</.modal>

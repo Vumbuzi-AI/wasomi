@@ -1,0 +1,48 @@
+<.header>
+  Listing Enrollments
+  <:actions>
+    <.link patch={~p"/enrollments/new"}>
+      <.button>New Enrollment</.button>
+    </.link>
+  </:actions>
+</.header>
+
+<.table
+  id="enrollments"
+  rows={@streams.enrollments}
+  row_click={fn {_id, enrollment} -> JS.navigate(~p"/enrollments/#{enrollment}") end}
+>
+  <:col :let={{_id, enrollment}} label="Status">{enrollment.status}</:col>
+  <:col :let={{_id, enrollment}} label="Enrolled at">{enrollment.enrolled_at}</:col>
+  <:col :let={{_id, enrollment}} label="Activated at">{enrollment.activated_at}</:col>
+  <:action :let={{_id, enrollment}}>
+    <div class="sr-only">
+      <.link navigate={~p"/enrollments/#{enrollment}"}>Show</.link>
+    </div>
+    <.link patch={~p"/enrollments/#{enrollment}/edit"}>Edit</.link>
+  </:action>
+  <:action :let={{id, enrollment}}>
+    <.link
+      phx-click={JS.push("delete", value: %{id: enrollment.id}) |> hide("##{id}")}
+      data-confirm="Are you sure?"
+    >
+      Delete
+    </.link>
+  </:action>
+</.table>
+
+<.modal
+  :if={@live_action in [:new, :edit]}
+  id="enrollment-modal"
+  show
+  on_cancel={JS.patch(~p"/enrollments")}
+>
+  <.live_component
+    module={WasomiWeb.EnrollmentLive.FormComponent}
+    id={@enrollment.id || :new}
+    title={@page_title}
+    action={@live_action}
+    enrollment={@enrollment}
+    patch={~p"/enrollments"}
+  />
+</.modal>

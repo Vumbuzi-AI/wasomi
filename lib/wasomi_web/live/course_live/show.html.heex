@@ -1,0 +1,39 @@
+<.header>
+  Course {@course.id}
+  <:subtitle>This is a course record from your database.</:subtitle>
+  <:actions>
+    <.link patch={~p"/courses/#{@course}/show/edit"} phx-click={JS.push_focus()}>
+      <.button>Edit course</.button>
+    </.link>
+  </:actions>
+</.header>
+
+<.list>
+  <:item title="Slug">{@course.slug}</:item>
+  <:item title="Title">{@course.title}</:item>
+  <:item title="Subtitle">{@course.subtitle}</:item>
+  <:item title="Description">{@course.description}</:item>
+  <:item title="Thumbnail key">{@course.thumbnail_key}</:item>
+  <:item title="Price minor">{@course.price_minor}</:item>
+  <:item title="Currency">{@course.currency}</:item>
+  <:item title="Status">{@course.status}</:item>
+  <:item title="Position">{@course.position}</:item>
+</.list>
+
+<.back navigate={~p"/courses"}>Back to courses</.back>
+
+<.modal
+  :if={@live_action == :edit}
+  id="course-modal"
+  show
+  on_cancel={JS.patch(~p"/courses/#{@course}")}
+>
+  <.live_component
+    module={WasomiWeb.CourseLive.FormComponent}
+    id={@course.id}
+    title={@page_title}
+    action={@live_action}
+    course={@course}
+    patch={~p"/courses/#{@course}"}
+  />
+</.modal>

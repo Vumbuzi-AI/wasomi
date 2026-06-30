@@ -1,0 +1,36 @@
+<.header>
+  Lecture {@lecture.id}
+  <:subtitle>This is a lecture record from your database.</:subtitle>
+  <:actions>
+    <.link patch={~p"/lectures/#{@lecture}/show/edit"} phx-click={JS.push_focus()}>
+      <.button>Edit lecture</.button>
+    </.link>
+  </:actions>
+</.header>
+
+<.list>
+  <:item title="Title">{@lecture.title}</:item>
+  <:item title="Description">{@lecture.description}</:item>
+  <:item title="Video provider">{@lecture.video_provider}</:item>
+  <:item title="Video asset">{@lecture.video_asset_id}</:item>
+  <:item title="Duration seconds">{@lecture.duration_seconds}</:item>
+  <:item title="Position">{@lecture.position}</:item>
+</.list>
+
+<.back navigate={~p"/lectures"}>Back to lectures</.back>
+
+<.modal
+  :if={@live_action == :edit}
+  id="lecture-modal"
+  show
+  on_cancel={JS.patch(~p"/lectures/#{@lecture}")}
+>
+  <.live_component
+    module={WasomiWeb.LectureLive.FormComponent}
+    id={@lecture.id}
+    title={@page_title}
+    action={@live_action}
+    lecture={@lecture}
+    patch={~p"/lectures/#{@lecture}"}
+  />
+</.modal>

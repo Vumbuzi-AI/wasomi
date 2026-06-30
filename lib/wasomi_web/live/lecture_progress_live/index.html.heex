@@ -1,0 +1,52 @@
+<.header>
+  Listing Lecture progress
+  <:actions>
+    <.link patch={~p"/lecture_progress/new"}>
+      <.button>New Lecture progress</.button>
+    </.link>
+  </:actions>
+</.header>
+
+<.table
+  id="lecture_progress"
+  rows={@streams.lecture_progress_collection}
+  row_click={
+    fn {_id, lecture_progress} -> JS.navigate(~p"/lecture_progress/#{lecture_progress}") end
+  }
+>
+  <:col :let={{_id, lecture_progress}} label="Status">{lecture_progress.status}</:col>
+  <:col :let={{_id, lecture_progress}} label="Last position seconds">
+    {lecture_progress.last_position_seconds}
+  </:col>
+  <:col :let={{_id, lecture_progress}} label="Completed at">{lecture_progress.completed_at}</:col>
+  <:action :let={{_id, lecture_progress}}>
+    <div class="sr-only">
+      <.link navigate={~p"/lecture_progress/#{lecture_progress}"}>Show</.link>
+    </div>
+    <.link patch={~p"/lecture_progress/#{lecture_progress}/edit"}>Edit</.link>
+  </:action>
+  <:action :let={{id, lecture_progress}}>
+    <.link
+      phx-click={JS.push("delete", value: %{id: lecture_progress.id}) |> hide("##{id}")}
+      data-confirm="Are you sure?"
+    >
+      Delete
+    </.link>
+  </:action>
+</.table>
+
+<.modal
+  :if={@live_action in [:new, :edit]}
+  id="lecture_progress-modal"
+  show
+  on_cancel={JS.patch(~p"/lecture_progress")}
+>
+  <.live_component
+    module={WasomiWeb.LectureProgressLive.FormComponent}
+    id={@lecture_progress.id || :new}
+    title={@page_title}
+    action={@live_action}
+    lecture_progress={@lecture_progress}
+    patch={~p"/lecture_progress"}
+  />
+</.modal>

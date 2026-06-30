@@ -10,12 +10,13 @@
 # We recommend using the bang functions (`insert!`, `update!`
 # and so on) as they will fail if something goes wrong.
 
+alias Ecto.Changeset
+alias Wasomi.Accounts
+alias Wasomi.Accounts.User
 alias Wasomi.Catalog.{Course, CourseModule, Lecture}
 alias Wasomi.Enrollments.Enrollment
 alias Wasomi.Payments.Payment
-alias Wasomi.Accounts.User
 alias Wasomi.Repo
-alias Ecto.Changeset
 
 admin_attrs = %{
   name: "Wasomi Admin",
@@ -40,7 +41,7 @@ courses = [
       description:
         "Turn complex technical thinking into clear messages, persuasive presentations, and productive workplace conversations.",
       thumbnail_key: "/images/human-stack-course.svg",
-      price_minor: 15_000_00,
+      price_minor: 1_500_000,
       currency: "KES",
       status: :published,
       position: 1
@@ -99,7 +100,7 @@ courses = [
         "Learn the everyday analytics workflow: clean data, ask sharper questions, query datasets, and present reliable insights.",
       thumbnail_key:
         "https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=900&q=80",
-      price_minor: 18_500_00,
+      price_minor: 1_850_000,
       currency: "KES",
       status: :published,
       position: 2
@@ -134,7 +135,7 @@ courses = [
         "Move from user insight to polished product flows with practical research, wireframing, prototyping, and usability testing.",
       thumbnail_key:
         "https://images.unsplash.com/photo-1561070791-2526d30994b5?auto=format&fit=crop&w=900&q=80",
-      price_minor: 16_000_00,
+      price_minor: 1_600_000,
       currency: "KES",
       status: :published,
       position: 3
@@ -170,7 +171,7 @@ courses = [
         "Create a practical growth engine with positioning, content planning, conversion funnels, email campaigns, and performance reporting.",
       thumbnail_key:
         "https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&w=900&q=80",
-      price_minor: 13_500_00,
+      price_minor: 1_350_000,
       currency: "KES",
       status: :published,
       position: 4
@@ -205,7 +206,7 @@ courses = [
         "Learn lightweight project management methods for software, design, marketing, and operations teams.",
       thumbnail_key:
         "https://images.unsplash.com/photo-1552664730-d307ca884978?auto=format&fit=crop&w=900&q=80",
-      price_minor: 14_000_00,
+      price_minor: 1_400_000,
       currency: "KES",
       status: :published,
       position: 5
@@ -240,7 +241,7 @@ courses = [
         "Build the financial confidence to price offers, track cash, read reports, and make disciplined business decisions.",
       thumbnail_key:
         "https://images.unsplash.com/photo-1554224155-6726b3ff858f?auto=format&fit=crop&w=900&q=80",
-      price_minor: 12_500_00,
+      price_minor: 1_250_000,
       currency: "KES",
       status: :published,
       position: 6
@@ -281,11 +282,13 @@ Repo.transaction(fn ->
 
   case Repo.get_by(User, email: admin_attrs.email) do
     nil ->
-      %User{}
-      |> User.registration_changeset(admin_attrs)
-      |> Changeset.put_change(:role, :admin)
+      {:ok, admin} = Accounts.register_user(admin_attrs)
+
+      admin
+      |> User.role_changeset(%{role: :admin})
+      |> Changeset.put_change(:phone, admin_attrs.phone)
       |> Changeset.put_change(:confirmed_at, confirmed_at)
-      |> Repo.insert!()
+      |> Repo.update!()
 
     admin ->
       admin
@@ -300,11 +303,13 @@ Repo.transaction(fn ->
   student =
     case Repo.get_by(User, email: student_attrs.email) do
       nil ->
-        %User{}
-        |> User.registration_changeset(student_attrs)
-        |> Changeset.put_change(:role, :learner)
+        {:ok, student} = Accounts.register_user(student_attrs)
+
+        student
+        |> User.role_changeset(%{role: :learner})
+        |> Changeset.put_change(:phone, student_attrs.phone)
         |> Changeset.put_change(:confirmed_at, confirmed_at)
-        |> Repo.insert!()
+        |> Repo.update!()
 
       student ->
         student

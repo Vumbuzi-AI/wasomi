@@ -79,6 +79,8 @@ Before opening a pull request:
 
 ## Documentation
 
+
+
 - [Architecture](docs/ARCHITECTURE.md)
 - [Domains](docs/DOMAINS.md)
 - [Portals and Routes](docs/PORTALS.md)

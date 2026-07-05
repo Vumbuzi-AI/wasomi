@@ -77,9 +77,18 @@ Before opening a pull request:
 3. Add screenshots or screen recordings for UI changes. Use `N/A` when there are no visual changes.
 4. Complete the pull request checklist, including docs, migrations, seeds, and secrets checks when relevant.
 
+### Commit Messages
+
+Use the format `name/what-pr-does` for commit messages.
+
+Examples:
+
+```sh
+michael/add-lab-order-filters
+sarah/fix-prescription-validation
+```
+
 ## Documentation
-
-
 
 - [Architecture](docs/ARCHITECTURE.md)
 - [Domains](docs/DOMAINS.md)

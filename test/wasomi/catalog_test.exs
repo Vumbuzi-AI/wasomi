@@ -108,7 +108,7 @@ defmodule Wasomi.CatalogTest do
       second = course_fixture(position: 2, status: :published)
       first = course_fixture(position: 1, status: :published)
 
-      assert Catalog.list_published_courses() == [first, second]
+      assert Enum.map(Catalog.list_published_courses(), & &1.id) == [first.id, second.id]
     end
 
     test "pricing helpers preserve integer minor units and currency" do

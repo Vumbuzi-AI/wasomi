@@ -5,13 +5,14 @@ defmodule Wasomi.Payments.Workers.ReconcilePendingPayments do
     unique: [period: 55, fields: [:worker]]
 
   alias Wasomi.Payments
+  alias Wasomi.Payments.Workers.ProcessPaystackWebhook
 
   @impl Oban.Worker
   def perform(%Oban.Job{}) do
     Payments.list_stale_pending_payments()
     |> Enum.each(fn payment ->
       %{"reference" => payment.provider_reference, "event" => %{"event" => "reconciliation"}}
-      |> Wasomi.Payments.Workers.ProcessPaystackWebhook.new()
+      |> ProcessPaystackWebhook.new()
       |> Oban.insert()
     end)
 

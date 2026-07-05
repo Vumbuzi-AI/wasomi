@@ -6,7 +6,7 @@ defmodule Wasomi.Accounts do
   import Ecto.Query, warn: false
   alias Wasomi.Repo
 
-  alias Wasomi.Accounts.{User, UserToken, UserNotifier}
+  alias Wasomi.Accounts.{User, UserNotifier, UserToken}
 
   ## Database getters
 

@@ -1,0 +1,289 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Adjust these to match your .tool-versions / mix.exs requirements
+env:
+  ELIXIR_VERSION: "1.17"
+  OTP_VERSION: "27.0"
+
+jobs:
+  test:
+    name: Test / Format / Credo
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        ports: ["5432:5432"]
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - name: Cache deps and _build
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
+          restore-keys: ${{ runner.os }}-mix-
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Check formatting
+        run: mix format --check-formatted
+
+      - name: Run Credo
+        run: mix credo --strict
+
+      - name: Run tests
+        run: mix test
+        env:
+          MIX_ENV: test
+          DATABASE_URL: ecto://postgres:postgres@localhost/myapp_test
+
+  ai-review:
+    name: AI Code Review (OpenAI gpt-5-mini)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      pull-requests: write
+      contents: read
+      issues: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Generate PR diff
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git diff --unified=80 "$BASE_SHA" "$HEAD_SHA" -- '*.ex' '*.exs' > diff.txt
+          # Keep the payload a reasonable size to control token cost
+          head -c 100000 diff.txt > diff_trimmed.txt
+
+      - name: Ask OpenAI to review the diff
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: gpt-5-mini
+        run: |
+          if [ ! -s diff_trimmed.txt ]; then
+            cat > review.json <<'JSON'
+          {"summary":"No Elixir changes to review.","findings":[]}
+          JSON
+            exit 0
+          fi
+
+          if [ -z "$OPENAI_API_KEY" ]; then
+            cat > review.json <<'JSON'
+          {"summary":"AI review skipped because OPENAI_API_KEY is not configured.","findings":[]}
+          JSON
+            exit 0
+          fi
+
+          DIFF_CONTENT=$(cat diff_trimmed.txt)
+
+          PROMPT=$(cat <<EOF
+          You are reviewing a pull request diff for an Elixir/Phoenix project.
+          Focus only on actionable issues introduced or exposed by this PR:
+          bugs, missing edge cases, Ecto/query issues, security issues
+          (unsafe params, missing auth checks, unsafe URLs), test gaps for new
+          behavior, and clear maintainability problems. Ignore formatting and
+          generic style that mix format/credo already catch.
+
+          Review only changed lines from the diff. Do not report pre-existing
+          issues unless the PR changed nearby code in a way that makes them
+          newly risky. Prefer a few high-signal findings over a long list.
+
+          Return only valid JSON in this exact shape:
+          {
+            "summary": "1-3 sentences. Say plainly if there are no notable issues.",
+            "findings": [
+              {
+                "path": "lib/example.ex",
+                "line": 123,
+                "severity": "critical|high|medium|low",
+                "title": "Short title",
+                "body": "Explain the risk and suggest a concrete fix. Mention tests when relevant.",
+                "confidence": "high|medium|low"
+              }
+            ]
+          }
+
+          Requirements for each finding:
+          - path must be a file path from the diff.
+          - line must be the new-file line number for a changed line in the diff.
+          - body must be suitable as an inline GitHub review comment.
+          - maximum 8 findings.
+
+          Diff:
+          $DIFF_CONTENT
+          EOF
+          )
+
+          jq -n --arg prompt "$PROMPT" --arg model "$OPENAI_MODEL" \
+            '{model: $model, response_format: {type: "json_object"}, messages: [{role: "user", content: $prompt}]}' \
+            > payload.json
+
+          RAW=$(curl -s -w "\n%{http_code}" https://api.openai.com/v1/chat/completions \
+            -H "Authorization: Bearer $OPENAI_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d @payload.json)
+
+          HTTP_CODE=$(echo "$RAW" | tail -n1)
+          RESPONSE=$(echo "$RAW" | sed '$d')
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            jq -n --arg summary "AI review failed (HTTP $HTTP_CODE): $(echo "$RESPONSE" | jq -r '.error.message // "unknown error"')" \
+              '{summary: $summary, findings: []}' > review.json
+          else
+            CONTENT=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // empty')
+            if [ -z "$CONTENT" ]; then
+              jq -n --arg summary "AI review failed: empty response from $OPENAI_MODEL" \
+                '{summary: $summary, findings: []}' > review.json
+            else
+              printf '%s' "$CONTENT" \
+                | sed -n '/^{/,$p' \
+                | jq '{summary: (.summary // "AI review complete."), findings: (.findings // [])}' > review.json \
+                || jq -n --arg summary "$CONTENT" '{summary: $summary, findings: []}' > review.json
+            fi
+          fi
+
+      - name: Post PR review
+        uses: actions/github-script@v7
+        env:
+          OPENAI_MODEL: gpt-5-mini
+        with:
+          script: |
+            const fs = require('fs');
+            const review = JSON.parse(fs.readFileSync('review.json', 'utf8'));
+            const summary = (review.summary || 'AI review complete.').trim();
+            const findings = Array.isArray(review.findings) ? review.findings : [];
+            const pull_number = context.issue.number;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const commit_id = context.payload.pull_request.head.sha;
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner,
+              repo,
+              pull_number,
+              per_page: 100
+            });
+
+            function changedLinesByFile(files) {
+              const changed = new Map();
+
+              for (const file of files) {
+                const lines = new Set();
+                let newLine = 0;
+                const patch = file.patch || '';
+
+                for (const patchLine of patch.split('\n')) {
+                  const hunk = patchLine.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+
+                  if (hunk) {
+                    newLine = Number(hunk[1]);
+                    continue;
+                  }
+
+                  if (!patchLine || patchLine.startsWith('\\')) {
+                    continue;
+                  }
+
+                  if (patchLine.startsWith('+')) {
+                    lines.add(newLine);
+                    newLine += 1;
+                  } else if (patchLine.startsWith(' ')) {
+                    newLine += 1;
+                  }
+                }
+
+                changed.set(file.filename, lines);
+              }
+
+              return changed;
+            }
+
+            const changed = changedLinesByFile(files);
+            const comments = [];
+            const skipped = [];
+
+            for (const finding of findings.slice(0, 8)) {
+              const path = String(finding.path || '').trim();
+              const line = Number(finding.line);
+              const title = String(finding.title || 'Review finding').trim();
+              const severity = String(finding.severity || 'medium').trim();
+              const confidence = String(finding.confidence || 'medium').trim();
+              const body = String(finding.body || '').trim();
+
+              if (!path || !Number.isInteger(line) || !body || !changed.get(path)?.has(line)) {
+                skipped.push(finding);
+                continue;
+              }
+
+              comments.push({
+                path,
+                line,
+                side: 'RIGHT',
+                body: `**${severity.toUpperCase()}: ${title}**\n\n${body}\n\n_Confidence: ${confidence}_`
+              });
+            }
+
+            const reviewBody = [
+              `### AI Code Review (${process.env.OPENAI_MODEL})`,
+              '',
+              summary,
+              '',
+              comments.length
+                ? `Added ${comments.length} inline review comment${comments.length === 1 ? '' : 's'} on changed lines.`
+                : 'No inline review comments were added.',
+              skipped.length
+                ? `${skipped.length} finding${skipped.length === 1 ? ' was' : 's were'} skipped because they did not map to changed lines in this PR.`
+                : '',
+              '',
+              '<sub>This is an automated review. Treat it as a second pair of eyes, not a substitute for human review.</sub>'
+            ].filter(Boolean).join('\n');
+
+            if (comments.length > 0) {
+              await github.rest.pulls.createReview({
+                owner,
+                repo,
+                pull_number,
+                commit_id,
+                event: 'COMMENT',
+                body: reviewBody,
+                comments
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: pull_number,
+                body: reviewBody
+              });
+            }

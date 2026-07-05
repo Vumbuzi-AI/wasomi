@@ -2,6 +2,8 @@ defmodule Wasomi.Payments.Payment do
   use Ecto.Schema
   import Ecto.Changeset
 
+  alias Wasomi.Accounts.User
+
   schema "payments" do
     field :status, Ecto.Enum, values: [:pending, :successful, :failed], default: :pending
     field :currency, :string
@@ -34,7 +36,7 @@ defmodule Wasomi.Payments.Payment do
       :course_id,
       :enrollment_id
     ])
-    |> update_change(:phone, &Wasomi.Accounts.User.normalize_phone/1)
+    |> update_change(:phone, &User.normalize_phone/1)
     |> validate_format(:phone, ~r/^2547\d{8}$/,
       message: "must be a valid Kenyan mobile number (07XXXXXXXX)"
     )

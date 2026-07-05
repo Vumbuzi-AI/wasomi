@@ -1,7 +1,7 @@
 defmodule WasomiWeb.CheckoutLive do
   use WasomiWeb, :live_view
 
-  alias Wasomi.{Catalog, Enrollments, Payments}
+  alias Wasomi.{Accounts.User, Catalog, Enrollments, Payments}
 
   @impl true
   def mount(%{"slug" => slug}, _session, socket) do
@@ -26,7 +26,7 @@ defmodule WasomiWeb.CheckoutLive do
 
   @impl true
   def handle_event("pay", %{"phone" => phone}, socket) do
-    normalized = Wasomi.Accounts.User.normalize_phone(String.trim(phone))
+    normalized = User.normalize_phone(String.trim(phone))
 
     if normalized =~ ~r/^2547\d{8}$/ do
       socket = assign(socket, submitting: true, phone: normalized, phone_error: nil)

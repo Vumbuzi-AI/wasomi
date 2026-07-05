@@ -45,10 +45,10 @@ Open http://localhost:4590.
 
 ## Seeded Logins
 
-| Role | Email | Password | Notes |
-| --- | --- | --- | --- |
-| Admin | `admin@wasomi.test` | `password12345` | Redirects to `/admin` after login. |
-| Learner | `student@wasomi.test` | `student12345` | Has an active enrollment and successful payment for the first seeded course. |
+| Role    | Email                 | Password        | Notes                                                                        |
+| ------- | --------------------- | --------------- | ---------------------------------------------------------------------------- |
+| Admin   | `admin@wasomi.test`   | `password12345` | Redirects to `/admin` after login.                                           |
+| Learner | `student@wasomi.test` | `student12345`  | Has an active enrollment and successful payment for the first seeded course. |
 
 Seeds also create six published courses with modules and playable demo HLS lectures.
 
@@ -67,6 +67,15 @@ mix assets.deploy  # minified assets and phx.digest for release builds
 ```
 
 `mix ecto.reset` is destructive because it drops the local database. There are no custom aliases that intentionally block destructive operations.
+
+## Opening a Pull Request
+
+Before opening a pull request:
+
+1. Run `./scripts/check_linters.sh` and fix any formatting, Credo, or test failures.
+2. Fill out the pull request summary, changes, and how-to-test sections.
+3. Add screenshots or screen recordings for UI changes. Use `N/A` when there are no visual changes.
+4. Complete the pull request checklist, including docs, migrations, seeds, and secrets checks when relevant.
 
 ## Documentation
 

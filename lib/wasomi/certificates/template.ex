@@ -5,10 +5,12 @@ defmodule Wasomi.Certificates.Template do
 
   use Phoenix.Component
 
+  alias Phoenix.HTML.Safe
+
   def render_html(assigns) do
     assigns
     |> certificate()
-    |> Phoenix.HTML.Safe.to_iodata()
+    |> Safe.to_iodata()
     |> IO.iodata_to_binary()
   end
 

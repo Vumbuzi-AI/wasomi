@@ -12,8 +12,13 @@
 
 1.
 
+## Screenshots
+
+<!-- Add screenshots or screen recordings for UI changes. Use "N/A" if this PR has no visual changes. -->
+
 ## Checklist
 
+- [ ] Ran `./scripts/check_linters.sh`
 - [ ] Ran `mix format`
 - [ ] Ran `mix credo`
 - [ ] Ran `mix test` and tests pass

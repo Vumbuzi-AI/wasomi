@@ -15,6 +15,14 @@ defmodule Wasomi.Catalog.LectureResource do
     timestamps(type: :utc_datetime)
   end
 
+  defp validate_byte_size(changeset) do
+    if is_nil(get_field(changeset, :byte_size)) do
+      changeset
+    else
+      validate_number(changeset, :byte_size, greater_than: 0)
+    end
+  end
+
   def changeset(resource, attrs) do
     resource
     |> cast(attrs, [
@@ -29,7 +37,7 @@ defmodule Wasomi.Catalog.LectureResource do
     ])
     |> validate_required([:kind, :name, :position, :lecture_id])
     |> validate_length(:name, min: 1, max: 200)
-    |> validate_number(:byte_size, greater_than: 0)
+    |> validate_byte_size()
     |> validate_number(:position, greater_than: 0)
     |> validate_resource_target()
     |> assoc_constraint(:lecture)
@@ -48,7 +56,11 @@ defmodule Wasomi.Catalog.LectureResource do
         changeset
 
       kind in [:document, :video] and is_binary(storage_key) and storage_key != "" ->
-        changeset
+        if is_integer(get_field(changeset, :byte_size)) and get_field(changeset, :byte_size) > 0 do
+          changeset
+        else
+          add_error(changeset, :byte_size, "must be greater than 0 for uploaded resources")
+        end
 
       kind == :link ->
         add_error(changeset, :url, "must be a valid http or https URL")

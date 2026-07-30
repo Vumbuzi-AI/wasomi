@@ -468,7 +468,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
            File.cp!(tmp_path, Path.join(dir, filename))
            {:ok, "/uploads/lectures/#{filename}"}
          end) do
-      [url | _] -> Map.merge(params, %{"video_asset_id" => url, "video_provider" => "mux"})
+      [url | _] -> Map.merge(params, %{"video_asset_id" => url, "video_provider" => :mux})
       [] -> params
     end
   end

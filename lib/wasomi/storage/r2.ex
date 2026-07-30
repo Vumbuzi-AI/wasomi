@@ -138,8 +138,13 @@ defmodule Wasomi.Storage.R2 do
   end
 
   defp public_url(key) do
-    base = Application.get_env(:wasomi, :r2_public_url, "") |> String.trim_trailing("/")
-    if base == "", do: key, else: base <> "/" <> key
+    case Application.get_env(:wasomi, :r2_public_url) do
+      base when is_binary(base) and base != "" ->
+        String.trim_trailing(base, "/") <> "/" <> key
+
+      _ ->
+        nil
+    end
   end
 
   defp upload_expiry do

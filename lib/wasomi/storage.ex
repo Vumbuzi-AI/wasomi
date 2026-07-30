@@ -4,7 +4,7 @@ defmodule Wasomi.Storage do
   @type upload :: %{
           key: String.t(),
           url: String.t(),
-          public_url: String.t(),
+          public_url: String.t() | nil,
           expires_in: pos_integer()
         }
 

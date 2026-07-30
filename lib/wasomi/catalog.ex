@@ -125,10 +125,31 @@ defmodule Wasomi.Catalog do
     lectures_query =
       from(lecture in Lecture,
         order_by: [asc: lecture.position],
-        preload: [:resources, :questions]
+        preload: [
+          resources: ^ordered_resources_query(),
+          questions: ^ordered_questions_query()
+        ]
       )
 
     Repo.preload(course_or_courses, modules: {modules_query, lectures: lectures_query})
+  end
+
+  @doc """
+  Preloads a lecture's resources and questions in their persisted display order.
+  """
+  def preload_lecture_content(%Lecture{} = lecture) do
+    Repo.preload(lecture,
+      resources: ordered_resources_query(),
+      questions: ordered_questions_query()
+    )
+  end
+
+  defp ordered_resources_query do
+    from(resource in LectureResource, order_by: [asc: resource.position])
+  end
+
+  defp ordered_questions_query do
+    from(question in LectureQuestion, order_by: [asc: question.position])
   end
 
   @doc """
@@ -379,7 +400,7 @@ defmodule Wasomi.Catalog do
            :ok <- delete_lecture_content(lecture.id),
            {:ok, _resources} <- insert_resources(lecture.id, resources),
            {:ok, _questions} <- insert_questions(lecture.id, questions) do
-        Repo.preload(lecture, [:resources, :questions])
+        preload_lecture_content(lecture)
       else
         {:error, %Ecto.Changeset{} = changeset} -> Repo.rollback(changeset)
       end

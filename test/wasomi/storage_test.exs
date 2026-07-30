@@ -79,4 +79,35 @@ defmodule Wasomi.StorageTest do
     assert %URI{scheme: "https", host: "r2.example.test", path: "/test-bucket/" <> _} =
              URI.parse(url)
   end
+
+  test "R2 presigned uploads return nil public_url without a public base" do
+    previous = %{
+      bucket: Application.get_env(:wasomi, :r2_bucket),
+      endpoint: Application.get_env(:wasomi, :r2_endpoint),
+      public_url: Application.get_env(:wasomi, :r2_public_url),
+      access_key_id: Application.get_env(:ex_aws, :access_key_id),
+      secret_access_key: Application.get_env(:ex_aws, :secret_access_key)
+    }
+
+    on_exit(fn ->
+      Application.put_env(:wasomi, :r2_bucket, previous.bucket)
+      Application.put_env(:wasomi, :r2_endpoint, previous.endpoint)
+      Application.put_env(:wasomi, :r2_public_url, previous.public_url)
+      Application.put_env(:ex_aws, :access_key_id, previous.access_key_id)
+      Application.put_env(:ex_aws, :secret_access_key, previous.secret_access_key)
+    end)
+
+    Application.put_env(:wasomi, :r2_bucket, "test-bucket")
+    Application.put_env(:wasomi, :r2_endpoint, "https://r2.example.test")
+    Application.delete_env(:wasomi, :r2_public_url)
+    Application.put_env(:ex_aws, :access_key_id, "test-access-key")
+    Application.put_env(:ex_aws, :secret_access_key, "test-secret-key")
+
+    assert {:ok, %{public_url: nil}} =
+             R2.presign_upload(nil, %{
+               "filename" => "notes.pdf",
+               "content_type" => "application/pdf",
+               "size" => 100
+             })
+  end
 end

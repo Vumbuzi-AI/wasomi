@@ -456,9 +456,15 @@ defmodule WasomiWeb.LectureLive.FormComponent do
 
   defp preload_content(%{resources: resources, questions: questions} = lecture)
        when is_list(resources) and is_list(questions),
-       do: lecture
+       do: %{
+         lecture
+         | resources: sort_by_position(resources),
+           questions: sort_by_position(questions)
+       }
 
-  defp preload_content(lecture), do: Wasomi.Repo.preload(lecture, [:resources, :questions])
+  defp preload_content(lecture), do: Catalog.preload_lecture_content(lecture)
+
+  defp sort_by_position(records), do: Enum.sort_by(records, & &1.position)
 
   defp put_uploaded_video(socket, params) do
     case consume_uploaded_entries(socket, :video, fn %{path: tmp_path}, entry ->
@@ -530,16 +536,23 @@ defmodule WasomiWeb.LectureLive.FormComponent do
   defp normalize_questions(questions) when is_map(questions) do
     questions
     |> Enum.sort_by(fn {index, _} -> parse_integer(index) end)
-    |> Enum.map(fn {_index, attrs} ->
-      %{
-        question: String.trim(attrs["question"] || ""),
-        answer: String.trim(attrs["answer"] || "")
-      }
-    end)
+    |> Enum.map(fn {_index, attrs} -> normalize_question(attrs) end)
     |> Enum.reject(&(&1.question == "" and &1.answer == ""))
   end
 
   defp normalize_questions(_), do: []
+
+  defp normalize_question(attrs) when is_map(attrs) do
+    %{
+      question: trim_param(attrs["question"]),
+      answer: trim_param(attrs["answer"])
+    }
+  end
+
+  defp normalize_question(_attrs), do: %{question: "", answer: ""}
+
+  defp trim_param(value) when is_binary(value), do: String.trim(value)
+  defp trim_param(_value), do: ""
 
   defp save_disabled?(form, resources, questions, uploads) do
     required = [

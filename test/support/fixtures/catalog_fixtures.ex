@@ -3,6 +3,7 @@ defmodule Wasomi.CatalogFixtures do
   This module defines test helpers for creating
   entities via the `Wasomi.Catalog` context.
   """
+  alias Wasomi.Catalog.{LectureQuestion, LectureResource}
 
   @doc """
   Generate a unique course slug.
@@ -91,8 +92,8 @@ defmodule Wasomi.CatalogFixtures do
       })
 
     {:ok, resource} =
-      %Wasomi.Catalog.LectureResource{}
-      |> Wasomi.Catalog.LectureResource.changeset(resource_attrs)
+      %LectureResource{}
+      |> LectureResource.changeset(resource_attrs)
       |> Wasomi.Repo.insert()
 
     resource
@@ -112,8 +113,8 @@ defmodule Wasomi.CatalogFixtures do
       })
 
     {:ok, question} =
-      %Wasomi.Catalog.LectureQuestion{}
-      |> Wasomi.Catalog.LectureQuestion.changeset(question_attrs)
+      %LectureQuestion{}
+      |> LectureQuestion.changeset(question_attrs)
       |> Wasomi.Repo.insert()
 
     question

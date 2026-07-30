@@ -168,7 +168,10 @@ defmodule WasomiWeb.LectureLive.FormComponent do
                 <p class="text-xs capitalize text-muted">
                   {resource.kind} · {resource.content_type || resource.url}
                 </p>
-                <div :if={resource_status(resource) == :uploading} class="mt-2 flex items-center gap-2">
+                <div
+                  :if={resource_status(resource) == :uploading}
+                  class="mt-2 flex items-center gap-2"
+                >
                   <div class="h-1.5 w-40 overflow-hidden rounded-full bg-black/10">
                     <div class="h-full w-1/3 animate-pulse rounded-full bg-primary"></div>
                   </div>
@@ -339,6 +342,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
           status: :uploading,
           client_ref: params["client_ref"]
         }
+
         {:noreply,
          socket
          |> assign(resource_rows: socket.assigns.resource_rows ++ [pending])
@@ -361,11 +365,17 @@ defmodule WasomiWeb.LectureLive.FormComponent do
 
     {:noreply,
      assign(socket,
-       resource_rows: replace_pending_resource(socket.assigns.resource_rows, params["client_ref"], row),
+       resource_rows:
+         replace_pending_resource(socket.assigns.resource_rows, params["client_ref"], row),
        resource_error: nil
      )}
   end
-  def handle_event("resource-upload-failed", %{"client_ref" => client_ref, "message" => message}, socket) do
+
+  def handle_event(
+        "resource-upload-failed",
+        %{"client_ref" => client_ref, "message" => message},
+        socket
+      ) do
     {:noreply,
      assign(socket,
        resource_rows: mark_resource_error(socket.assigns.resource_rows, client_ref, message),

@@ -1,7 +1,7 @@
 defmodule Wasomi.StorageTest do
   use Wasomi.DataCase
-
   alias Wasomi.Storage
+  alias Wasomi.Storage.R2
 
   defmodule Adapter do
     def presign_upload(user, attrs), do: {:ok, %{user: user, attrs: attrs}}
@@ -20,14 +20,14 @@ defmodule Wasomi.StorageTest do
 
   test "R2 rejects unsupported or oversized upload metadata" do
     assert {:error, :unsupported_content_type} =
-             Wasomi.Storage.R2.presign_upload(nil, %{
+             R2.presign_upload(nil, %{
                "filename" => "notes.zip",
                "content_type" => "application/zip",
                "size" => 100
              })
 
     assert {:error, :document_too_large} =
-             Wasomi.Storage.R2.presign_upload(nil, %{
+             R2.presign_upload(nil, %{
                "filename" => "notes.pdf",
                "content_type" => "application/pdf",
                "size" => 50_000_001

@@ -16,6 +16,8 @@ defmodule Wasomi.Catalog.Lecture do
     timestamps(type: :utc_datetime)
   end
 
+  def video_provider_values, do: [:mux, :cloudflare, :bunny]
+
   @doc false
   def changeset(lecture, attrs) do
     lecture

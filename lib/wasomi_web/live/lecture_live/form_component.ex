@@ -68,7 +68,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
               field={@form[:video_provider]}
               type="select"
               label="Video provider"
-              options={Ecto.Enum.values(Catalog.Lecture, :video_provider)}
+              options={Catalog.Lecture.video_provider_values()}
               required
             />
             <.input

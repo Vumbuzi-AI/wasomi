@@ -349,14 +349,20 @@ defmodule Wasomi.CatalogTest do
       course = course_fixture()
       course_module = course_module_fixture(course_id: course.id, position: 1)
       lecture = lecture_fixture(module_id: course_module.id, position: 1)
-      resource = lecture_resource_fixture(lecture_id: lecture.id)
-      question = lecture_question_fixture(lecture_id: lecture.id)
+
+      later_resource =
+        lecture_resource_fixture(lecture_id: lecture.id, position: 2, name: "Later")
+
+      first_resource =
+        lecture_resource_fixture(lecture_id: lecture.id, position: 1, name: "First")
+
+      later_question = lecture_question_fixture(lecture_id: lecture.id, position: 2)
+      first_question = lecture_question_fixture(lecture_id: lecture.id, position: 1)
 
       loaded = Catalog.get_course_with_outline!(course.id)
       loaded_lecture = loaded.modules |> hd() |> Map.fetch!(:lectures) |> hd()
-
-      assert hd(loaded_lecture.resources).id == resource.id
-      assert hd(loaded_lecture.questions).id == question.id
+      assert Enum.map(loaded_lecture.resources, & &1.id) == [first_resource.id, later_resource.id]
+      assert Enum.map(loaded_lecture.questions, & &1.id) == [first_question.id, later_question.id]
     end
 
     test "slug lookup preloads modules and lectures in position order" do

@@ -529,4 +529,43 @@ defmodule WasomiWeb.AdminLive.QuizShowTest do
     [job] = all_enqueued(worker: GenerateQuizFromPDFWorker)
     refute Map.has_key?(job.args, "question_count")
   end
+
+  test "a PDF over the 25MB limit is rejected with a clear message", %{conn: conn} do
+    quiz = quiz_fixture()
+    {:ok, view, _html} = live(conn, quiz_path(quiz))
+
+    pdf =
+      file_input(view, "#generate-questions-form", :source_pdf, [
+        %{name: "huge.pdf", content: String.duplicate("a", 26_000_000), type: "application/pdf"}
+      ])
+
+    assert {:error, [[_ref, :too_large]]} = render_upload(pdf, "huge.pdf")
+    assert render(view) =~ "File is too large (max 25MB)."
+    refute_enqueued(worker: GenerateQuizFromPDFWorker)
+  end
+
+  test "a generation-record creation failure shows an error instead of crashing", %{conn: conn} do
+    quiz = quiz_fixture()
+    {:ok, view, _html} = live(conn, quiz_path(quiz))
+
+    # Force Assessments.create_generation/3 to fail its assoc_constraint(:quiz)
+    # check by deleting the quiz out from under the already-mounted socket.
+    Assessments.delete_quiz(quiz)
+
+    pdf =
+      file_input(view, "#generate-questions-form", :source_pdf, [
+        %{name: "manual.pdf", content: "%PDF-1.4 fake", type: "application/pdf"}
+      ])
+
+    assert render_upload(pdf, "manual.pdf") =~ ~s(value="100")
+
+    html =
+      view
+      |> form("#generate-questions-form", %{})
+      |> render_submit()
+
+    assert html =~ "Could not start generation"
+    refute_enqueued(worker: GenerateQuizFromPDFWorker)
+    assert Process.alive?(view.pid)
+  end
 end

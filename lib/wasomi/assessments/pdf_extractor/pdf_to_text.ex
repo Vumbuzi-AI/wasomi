@@ -16,16 +16,21 @@ defmodule Wasomi.Assessments.PdfExtractor.PdfToText do
     path = Path.join(System.tmp_dir!(), "wasomi-pdf-#{System.unique_integer([:positive])}.pdf")
 
     try do
-      File.write!(path, pdf_binary)
-
-      case System.cmd("pdftotext", [path, "-"], stderr_to_stdout: false) do
-        {text, 0} -> {:ok, text}
-        {error_output, status} -> {:error, {:pdftotext_failed, status, error_output}}
+      case File.write(path, pdf_binary) do
+        :ok -> run_pdftotext(path)
+        {:error, reason} -> {:error, {:temp_file_write_failed, reason}}
       end
     rescue
       e in ErlangError -> {:error, {:pdftotext_not_available, e}}
     after
       File.rm(path)
+    end
+  end
+
+  defp run_pdftotext(path) do
+    case System.cmd("pdftotext", [path, "-"], stderr_to_stdout: true) do
+      {text, 0} -> {:ok, text}
+      {error_output, status} -> {:error, {:pdftotext_failed, status, error_output}}
     end
   end
 end

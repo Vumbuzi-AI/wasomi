@@ -375,72 +375,58 @@ defmodule Wasomi.Catalog do
   def update_lecture_content(%Lecture{} = lecture, lecture_attrs, resources, questions)
       when is_list(resources) and is_list(questions) do
     Repo.transaction(fn ->
-      lecture =
-        lecture
-        |> Lecture.changeset(lecture_attrs)
-        |> Repo.update!()
+      with {:ok, lecture} <- Repo.update(Lecture.changeset(lecture, lecture_attrs)),
+           :ok <- delete_lecture_content(lecture.id),
+           {:ok, _resources} <- insert_resources(lecture.id, resources),
+           {:ok, _questions} <- insert_questions(lecture.id, questions) do
+        Repo.preload(lecture, [:resources, :questions])
+      else
+        {:error, %Ecto.Changeset{} = changeset} -> Repo.rollback(changeset)
+      end
+    end)
+  end
 
-      Repo.delete_all(
-        from(resource in LectureResource, where: resource.lecture_id == ^lecture.id)
-      )
+  defp delete_lecture_content(lecture_id) do
+    Repo.delete_all(from(resource in LectureResource, where: resource.lecture_id == ^lecture_id))
+    Repo.delete_all(from(question in LectureQuestion, where: question.lecture_id == ^lecture_id))
+    :ok
+  end
 
-      Repo.delete_all(
-        from(question in LectureQuestion, where: question.lecture_id == ^lecture.id)
-      )
+  defp insert_resources(lecture_id, resources) do
+    insert_content_records(LectureResource, lecture_id, resources)
+  end
 
-      resources
-      |> Enum.with_index(1)
-      |> Enum.each(fn {attrs, position} ->
+  defp insert_questions(lecture_id, questions) do
+    insert_content_records(LectureQuestion, lecture_id, questions)
+  end
+
+  defp insert_content_records(schema, lecture_id, records) do
+    records
+    |> Enum.with_index(1)
+    |> Enum.reduce_while({:ok, []}, fn {attrs, position}, {:ok, inserted} ->
+      changeset =
         attrs
         |> Map.new()
-        |> Map.merge(%{lecture_id: lecture.id, position: position})
-        |> then(&LectureResource.changeset(%LectureResource{}, &1))
-        |> Repo.insert!()
-      end)
+        |> Map.merge(%{lecture_id: lecture_id, position: position})
+        |> then(&apply(schema, :changeset, [struct(schema), &1]))
 
-      questions
-      |> Enum.with_index(1)
-      |> Enum.each(fn {attrs, position} ->
-        attrs
-        |> Map.new()
-        |> Map.merge(%{lecture_id: lecture.id, position: position})
-        |> then(&LectureQuestion.changeset(%LectureQuestion{}, &1))
-        |> Repo.insert!()
-      end)
-
-      Repo.preload(lecture, [:resources, :questions])
+      case Repo.insert(changeset) do
+        {:ok, record} -> {:cont, {:ok, [record | inserted]}}
+        {:error, changeset} -> {:halt, {:error, changeset}}
+      end
     end)
   end
 
   def create_lecture_content(lecture_attrs, resources, questions)
       when is_list(resources) and is_list(questions) do
     Repo.transaction(fn ->
-      lecture =
-        %Lecture{}
-        |> Lecture.changeset(lecture_attrs)
-        |> Repo.insert!()
-
-      resources
-      |> Enum.with_index(1)
-      |> Enum.each(fn {attrs, position} ->
-        attrs
-        |> Map.new()
-        |> Map.merge(%{lecture_id: lecture.id, position: position})
-        |> then(&LectureResource.changeset(%LectureResource{}, &1))
-        |> Repo.insert!()
-      end)
-
-      questions
-      |> Enum.with_index(1)
-      |> Enum.each(fn {attrs, position} ->
-        attrs
-        |> Map.new()
-        |> Map.merge(%{lecture_id: lecture.id, position: position})
-        |> then(&LectureQuestion.changeset(%LectureQuestion{}, &1))
-        |> Repo.insert!()
-      end)
-
-      Repo.preload(lecture, [:resources, :questions])
+      with {:ok, lecture} <- Repo.insert(Lecture.changeset(%Lecture{}, lecture_attrs)),
+           {:ok, _resources} <- insert_resources(lecture.id, resources),
+           {:ok, _questions} <- insert_questions(lecture.id, questions) do
+        Repo.preload(lecture, [:resources, :questions])
+      else
+        {:error, %Ecto.Changeset{} = changeset} -> Repo.rollback(changeset)
+      end
     end)
   end
 

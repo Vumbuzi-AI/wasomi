@@ -300,10 +300,13 @@ defmodule WasomiWeb.LectureLive.FormComponent do
     questions = question_params(params)
     changeset = Catalog.change_lecture(socket.assigns.lecture, lecture_params)
 
+    question_rows =
+      if Map.has_key?(params, "questions"), do: questions, else: socket.assigns.question_rows
+
     {:noreply,
      assign(socket,
        form: to_form(changeset, action: :validate),
-       question_rows: if(questions == [], do: socket.assigns.question_rows, else: questions)
+       question_rows: question_rows
      )}
   end
 
@@ -400,42 +403,54 @@ defmodule WasomiWeb.LectureLive.FormComponent do
     lecture_params = put_uploaded_video(socket, lecture_params)
     questions = question_params(params, socket.assigns.question_rows)
 
-    result =
-      if socket.assigns.action == :new do
-        lecture_params = Map.put(lecture_params, "module_id", socket.assigns.lecture.module_id)
-        Catalog.create_lecture_content(lecture_params, socket.assigns.resource_rows, questions)
-      else
-        Catalog.update_lecture_content(
-          socket.assigns.lecture,
-          lecture_params,
-          socket.assigns.resource_rows,
-          questions
-        )
-      end
+    case validate_resources(socket.assigns.resource_rows) do
+      :ok ->
+        result =
+          if socket.assigns.action == :new do
+            lecture_params =
+              Map.put(lecture_params, "module_id", socket.assigns.lecture.module_id)
 
-    case result do
-      {:ok, lecture} ->
-        notify_parent({:saved, lecture})
+            Catalog.create_lecture_content(
+              lecture_params,
+              socket.assigns.resource_rows,
+              questions
+            )
+          else
+            Catalog.update_lecture_content(
+              socket.assigns.lecture,
+              lecture_params,
+              socket.assigns.resource_rows,
+              questions
+            )
+          end
 
-        {:noreply,
-         socket
-         |> put_flash(
-           :info,
-           if(socket.assigns.action == :new,
-             do: "Lecture created successfully",
-             else: "Lecture updated successfully"
-           )
-         )
-         |> push_patch(to: socket.assigns.patch)}
+        case result do
+          {:ok, lecture} ->
+            notify_parent({:saved, lecture})
 
-      {:error, %Ecto.Changeset{} = changeset} ->
-        {:noreply, assign(socket, form: to_form(changeset, action: :validate))}
+            {:noreply,
+             socket
+             |> put_flash(
+               :info,
+               if(socket.assigns.action == :new,
+                 do: "Lecture created successfully",
+                 else: "Lecture updated successfully"
+               )
+             )
+             |> push_patch(to: socket.assigns.patch)}
 
-      {:error, _reason} ->
-        {:noreply,
-         assign(socket,
-           resource_error: "Could not save this lecture. Check the highlighted fields."
-         )}
+          {:error, %Ecto.Changeset{} = changeset} ->
+            {:noreply, assign(socket, form: to_form(changeset, action: :validate))}
+
+          {:error, _reason} ->
+            {:noreply,
+             assign(socket,
+               resource_error: "Could not save this lecture. Check the highlighted fields."
+             )}
+        end
+
+      {:error, message} ->
+        {:noreply, assign(socket, resource_error: message)}
     end
   end
 
@@ -464,6 +479,31 @@ defmodule WasomiWeb.LectureLive.FormComponent do
   defp question_attrs(question), do: Map.take(question, [:question, :answer])
 
   defp resource_status(resource), do: Map.get(resource, :status, :ready)
+
+  defp validate_resources(resources) do
+    if Enum.all?(resources, &resource_ready?/1) do
+      :ok
+    else
+      {:error, "Finish or remove all resource uploads before saving."}
+    end
+  end
+
+  defp resource_ready?(resource) do
+    resource_status(resource) == :ready and
+      is_binary(resource[:name]) and resource[:name] != "" and
+      case resource[:kind] do
+        :link ->
+          valid_url?(resource[:url])
+
+        kind when kind in [:document, :video] ->
+          is_binary(resource[:storage_key]) and resource[:storage_key] != "" and
+            is_binary(resource[:content_type]) and resource[:content_type] != "" and
+            is_integer(resource[:byte_size]) and resource[:byte_size] > 0
+
+        _ ->
+          false
+      end
+  end
 
   defp resource_key(resource, index), do: resource[:client_ref] || resource[:storage_key] || index
 
@@ -549,6 +589,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
   defp parse_integer(_), do: 0
 
   defp string_to_kind("video"), do: :video
+  defp string_to_kind("link"), do: :link
   defp string_to_kind(_), do: :document
 
   defp upload_error(:unsupported_content_type), do: "That file type is not supported."

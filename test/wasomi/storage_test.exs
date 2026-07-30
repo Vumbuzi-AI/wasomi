@@ -33,4 +33,38 @@ defmodule Wasomi.StorageTest do
                "size" => 50_000_001
              })
   end
+
+  test "R2 presigned URLs use the configured endpoint scheme" do
+    previous = %{
+      bucket: Application.get_env(:wasomi, :r2_bucket),
+      endpoint: Application.get_env(:wasomi, :r2_endpoint),
+      public_url: Application.get_env(:wasomi, :r2_public_url),
+      access_key_id: Application.get_env(:ex_aws, :access_key_id),
+      secret_access_key: Application.get_env(:ex_aws, :secret_access_key)
+    }
+
+    on_exit(fn ->
+      Enum.each(previous, fn {key, value} ->
+        app = if key in [:access_key_id, :secret_access_key], do: :ex_aws, else: :wasomi
+        app_key = if app == :ex_aws, do: key, else: :"r2_#{key}"
+        Application.put_env(app, app_key, value)
+      end)
+    end)
+
+    Application.put_env(:wasomi, :r2_bucket, "test-bucket")
+    Application.put_env(:wasomi, :r2_endpoint, "https://r2.example.test")
+    Application.put_env(:wasomi, :r2_public_url, "https://cdn.example.test")
+    Application.put_env(:ex_aws, :access_key_id, "test-access-key")
+    Application.put_env(:ex_aws, :secret_access_key, "test-secret-key")
+
+    assert {:ok, %{url: url}} =
+             R2.presign_upload(nil, %{
+               "filename" => "notes.pdf",
+               "content_type" => "application/pdf",
+               "size" => 100
+             })
+
+    assert %URI{scheme: "https", host: "r2.example.test", path: "/test-bucket/" <> _} =
+             URI.parse(url)
+  end
 end

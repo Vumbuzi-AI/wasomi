@@ -329,6 +329,22 @@ defmodule Wasomi.CatalogTest do
       assert [%{question: "Why?", position: 1}] = updated.questions
     end
 
+    test "returns a changeset and rolls back invalid lecture content" do
+      lecture = lecture_fixture()
+      resource = lecture_resource_fixture(lecture_id: lecture.id)
+
+      assert {:error, %Ecto.Changeset{}} =
+               Catalog.update_lecture_content(
+                 lecture,
+                 %{title: "Updated lecture"},
+                 [%{kind: :document, name: "Missing storage key"}],
+                 []
+               )
+
+      assert Catalog.get_lecture!(lecture.id).title == lecture.title
+      assert Wasomi.Repo.get!(Wasomi.Catalog.LectureResource, resource.id).id == resource.id
+    end
+
     test "course outlines preload ordered resources and questions" do
       course = course_fixture()
       course_module = course_module_fixture(course_id: course.id, position: 1)

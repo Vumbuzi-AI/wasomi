@@ -20,7 +20,7 @@ defmodule Wasomi.Repo.Migrations.CreateAssessments do
     create table(:questions) do
       add :quiz_id, references(:quizzes, on_delete: :delete_all), null: false
       add :prompt, :text, null: false
-      add :status, :string, null: false, default: "published"
+      add :status, :string, null: false, default: "draft"
       add :position, :integer, null: false
 
       timestamps(type: :utc_datetime)

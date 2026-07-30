@@ -6,7 +6,7 @@ defmodule Wasomi.Assessments.Question do
 
   schema "questions" do
     field :prompt, :string
-    field :status, Ecto.Enum, values: [:draft, :published], default: :published
+    field :status, Ecto.Enum, values: [:draft, :published], default: :draft
     field :position, :integer
 
     belongs_to :quiz, Wasomi.Assessments.Quiz

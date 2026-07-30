@@ -24,27 +24,29 @@ defmodule Wasomi.Assessments.Workers.GenerateQuizFromPDFWorker do
   def perform(%Oban.Job{
         attempt: attempt,
         max_attempts: max_attempts,
-        args: %{"generation_id" => generation_id, "pdf_base64" => pdf_base64}
+        args: %{"generation_id" => generation_id, "pdf_storage_key" => key}
       }) do
     generation = Assessments.get_generation!(generation_id)
 
-    case run(generation, pdf_base64) do
+    case run(generation, key) do
       :ok ->
+        storage().delete(key)
         :ok
 
       {:error, reason} ->
         if attempt >= max_attempts do
           Assessments.mark_generation_failed(generation, inspect(reason))
+          storage().delete(key)
         end
 
         {:error, reason}
     end
   end
 
-  defp run(generation, pdf_base64) do
+  defp run(generation, key) do
     Assessments.mark_generation_processing(generation)
 
-    with {:ok, pdf_binary} <- decode(pdf_base64),
+    with {:ok, pdf_binary} <- storage().download(key),
          {:ok, text} <- pdf_extractor().extract_text(pdf_binary),
          {min_count, max_count} = question_count_range(text),
          {:ok, drafts} <-
@@ -72,12 +74,8 @@ defmodule Wasomi.Assessments.Workers.GenerateQuizFromPDFWorker do
     {min_count, max_count}
   end
 
-  defp decode(pdf_base64) do
-    case Base.decode64(pdf_base64) do
-      {:ok, binary} -> {:ok, binary}
-      :error -> {:error, :invalid_base64}
-    end
-  end
+  defp storage,
+    do: Application.get_env(:wasomi, :assessments_storage, Wasomi.Assessments.Storage.R2)
 
   defp pdf_extractor,
     do: Application.get_env(:wasomi, :pdf_extractor, Wasomi.Assessments.PdfExtractor.PdfToText)

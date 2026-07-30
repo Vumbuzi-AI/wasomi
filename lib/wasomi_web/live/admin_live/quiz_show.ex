@@ -303,10 +303,12 @@ defmodule WasomiWeb.AdminLive.QuizShow do
 
   defp start_generation(quiz, user, filename, path) do
     with {:ok, pdf_binary} <- File.read(path),
-         {:ok, generation} <- Assessments.create_generation(quiz, user, filename) do
+         {:ok, generation} <- Assessments.create_generation(quiz, user, filename),
+         key = "quiz-generations/#{generation.id}.pdf",
+         :ok <- storage().upload(key, pdf_binary) do
       %{
         "generation_id" => generation.id,
-        "pdf_base64" => Base.encode64(pdf_binary)
+        "pdf_storage_key" => key
       }
       |> GenerateQuizFromPDFWorker.new()
       |> Oban.insert()
@@ -314,6 +316,9 @@ defmodule WasomiWeb.AdminLive.QuizShow do
       generation
     end
   end
+
+  defp storage,
+    do: Application.get_env(:wasomi, :assessments_storage, Wasomi.Assessments.Storage.R2)
 
   @impl true
   def render(assigns) do

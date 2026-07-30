@@ -10,16 +10,26 @@ defmodule Wasomi.Assessments.Workers.GenerateQuizFromPDFWorkerTest do
   setup :verify_on_exit!
 
   setup do
+    stub(Wasomi.AssessmentsStorageMock, :delete, fn _key -> :ok end)
     %{generation: quiz_generation_fixture()}
   end
 
-  defp args(generation, pdf_binary \\ "%PDF-1.4 fake") do
-    %{"generation_id" => generation.id, "pdf_base64" => Base.encode64(pdf_binary)}
+  defp args(generation) do
+    %{
+      "generation_id" => generation.id,
+      "pdf_storage_key" => "quiz-generations/#{generation.id}.pdf"
+    }
+  end
+
+  defp stub_storage_download(pdf_binary \\ "%PDF-1.4 fake") do
+    expect(Wasomi.AssessmentsStorageMock, :download, fn _key -> {:ok, pdf_binary} end)
   end
 
   test "extracts text, generates drafts, and marks the generation ready", %{
     generation: generation
   } do
+    stub_storage_download()
+
     expect(Wasomi.PdfExtractorMock, :extract_text, fn _binary ->
       {:ok, "Extracted training text."}
     end)
@@ -42,6 +52,7 @@ defmodule Wasomi.Assessments.Workers.GenerateQuizFromPDFWorkerTest do
   test "a short document still generates the minimum question range", %{
     generation: generation
   } do
+    stub_storage_download()
     short_text = Enum.map_join(1..50, " ", fn _ -> "word" end)
 
     expect(Wasomi.PdfExtractorMock, :extract_text, fn _binary -> {:ok, short_text} end)
@@ -56,6 +67,7 @@ defmodule Wasomi.Assessments.Workers.GenerateQuizFromPDFWorkerTest do
   end
 
   test "the question count range scales with document length", %{generation: generation} do
+    stub_storage_download()
     text = Enum.map_join(1..2000, " ", fn _ -> "word" end)
 
     expect(Wasomi.PdfExtractorMock, :extract_text, fn _binary -> {:ok, text} end)
@@ -72,6 +84,7 @@ defmodule Wasomi.Assessments.Workers.GenerateQuizFromPDFWorkerTest do
   test "a very long document is capped at the maximum question count on both ends", %{
     generation: generation
   } do
+    stub_storage_download()
     long_text = Enum.map_join(1..20_000, " ", fn _ -> "word" end)
 
     expect(Wasomi.PdfExtractorMock, :extract_text, fn _binary -> {:ok, long_text} end)
@@ -85,18 +98,20 @@ defmodule Wasomi.Assessments.Workers.GenerateQuizFromPDFWorkerTest do
     assert :ok = Oban.Testing.perform_job(GenerateQuizFromPDFWorker, args(generation), [])
   end
 
-  test "invalid base64 fails without calling the extractor or generator", %{
+  test "a storage download failure fails without calling the extractor or generator", %{
     generation: generation
   } do
-    args = %{"generation_id" => generation.id, "pdf_base64" => "not-valid-base64!!"}
+    expect(Wasomi.AssessmentsStorageMock, :download, fn _key -> {:error, :not_found} end)
 
-    assert {:error, :invalid_base64} =
-             Oban.Testing.perform_job(GenerateQuizFromPDFWorker, args, [])
+    assert {:error, :not_found} =
+             Oban.Testing.perform_job(GenerateQuizFromPDFWorker, args(generation), [])
   end
 
   test "a PDF extraction failure leaves the generation processing before the final attempt", %{
     generation: generation
   } do
+    stub_storage_download()
+
     expect(Wasomi.PdfExtractorMock, :extract_text, fn _binary ->
       {:error, :pdftotext_not_available}
     end)
@@ -115,6 +130,8 @@ defmodule Wasomi.Assessments.Workers.GenerateQuizFromPDFWorkerTest do
   test "a PDF extraction failure marks the generation failed on the last attempt", %{
     generation: generation
   } do
+    stub_storage_download()
+
     expect(Wasomi.PdfExtractorMock, :extract_text, fn _binary ->
       {:error, :pdftotext_not_available}
     end)
@@ -133,6 +150,8 @@ defmodule Wasomi.Assessments.Workers.GenerateQuizFromPDFWorkerTest do
   test "an LLM failure is reported and retried the same way as an extraction failure", %{
     generation: generation
   } do
+    stub_storage_download()
+
     expect(Wasomi.PdfExtractorMock, :extract_text, fn _binary -> {:ok, "some text"} end)
 
     expect(Wasomi.QuestionGeneratorMock, :generate_questions, fn _text, _opts ->
@@ -147,5 +166,20 @@ defmodule Wasomi.Assessments.Workers.GenerateQuizFromPDFWorkerTest do
 
     updated = Assessments.get_generation!(generation.id)
     assert updated.status == :failed
+  end
+
+  test "the generation succeeds, the stored PDF is deleted", %{generation: generation} do
+    stub_storage_download()
+
+    expect(Wasomi.PdfExtractorMock, :extract_text, fn _binary -> {:ok, "some text"} end)
+
+    expect(Wasomi.QuestionGeneratorMock, :generate_questions, fn _text, _opts ->
+      {:ok, [draft_question_attrs()]}
+    end)
+
+    key = "quiz-generations/#{generation.id}.pdf"
+    expect(Wasomi.AssessmentsStorageMock, :delete, fn ^key -> :ok end)
+
+    assert :ok = Oban.Testing.perform_job(GenerateQuizFromPDFWorker, args(generation), [])
   end
 end

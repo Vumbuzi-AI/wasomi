@@ -3,12 +3,15 @@ defmodule WasomiWeb.AdminLive.QuizShowTest do
   use Oban.Testing, repo: Wasomi.Repo
 
   import Phoenix.LiveViewTest
+  import Mox
   import Wasomi.AccountsFixtures
   import Wasomi.AssessmentsFixtures
   import Wasomi.CatalogFixtures
 
   alias Wasomi.Assessments
   alias Wasomi.Assessments.Workers.GenerateQuizFromPDFWorker
+
+  setup :verify_on_exit!
 
   defp admin_fixture(attrs \\ %{}) do
     user = user_fixture(attrs)
@@ -510,6 +513,8 @@ defmodule WasomiWeb.AdminLive.QuizShowTest do
   } do
     quiz = quiz_fixture()
     {:ok, view, _html} = live(conn, quiz_path(quiz))
+
+    expect(Wasomi.AssessmentsStorageMock, :upload, fn _key, _binary -> :ok end)
 
     refute has_element?(view, "input[name='question_count']")
 

@@ -39,3 +39,8 @@ npm-debug.log
 # User-uploaded media (keep the dir, ignore the files)
 /priv/static/uploads/*
 !/priv/static/uploads/.gitkeep
+
+# Local secrets (API keys, etc.) — never commit these.
+.env
+.env.*
+!.env.example

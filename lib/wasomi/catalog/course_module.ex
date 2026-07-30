@@ -12,6 +12,8 @@ defmodule Wasomi.Catalog.CourseModule do
       foreign_key: :module_id,
       preload_order: [asc: :position]
 
+    has_one :quiz, Wasomi.Assessments.Quiz, foreign_key: :module_id
+
     timestamps(type: :utc_datetime)
   end
 

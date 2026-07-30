@@ -10,7 +10,7 @@ defmodule Wasomi.Storage do
 
   @callback presign_upload(User.t(), map()) :: {:ok, upload()} | {:error, term()}
 
-  def presign_upload(user, attrs, adapter \\ configured_adapter())
+  def presign_upload(user, attrs), do: presign_upload(user, attrs, configured_adapter())
 
   def presign_upload(%User{role: :admin} = user, attrs, adapter) do
     adapter.presign_upload(user, attrs)

@@ -577,16 +577,38 @@ defmodule WasomiWeb.LectureLive.FormComponent do
   defp valid_url?(_), do: false
 
   defp remove_at(rows, index) do
-    index = parse_integer(index)
+    case parse_index(index) do
+      {:ok, index} ->
+        Enum.with_index(rows)
+        |> Enum.reject(fn {_row, row_index} -> row_index == index end)
+        |> Enum.map(&elem(&1, 0))
 
-    Enum.with_index(rows)
-    |> Enum.reject(fn {_row, row_index} -> row_index == index end)
-    |> Enum.map(&elem(&1, 0))
+      :error ->
+        rows
+    end
   end
 
   defp parse_integer(value) when is_integer(value), do: value
-  defp parse_integer(value) when is_binary(value), do: String.to_integer(value)
+
+  defp parse_integer(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {value, ""} -> value
+      _ -> 0
+    end
+  end
+
   defp parse_integer(_), do: 0
+
+  defp parse_index(value) when is_integer(value) and value >= 0, do: {:ok, value}
+
+  defp parse_index(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {value, ""} when value >= 0 -> {:ok, value}
+      _ -> :error
+    end
+  end
+
+  defp parse_index(_), do: :error
 
   defp string_to_kind("video"), do: :video
   defp string_to_kind("link"), do: :link

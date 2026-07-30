@@ -18,6 +18,18 @@ defmodule Wasomi.StorageTest do
              Storage.presign_upload(admin, %{filename: "notes.pdf"}, Adapter)
   end
 
+  test "presign_upload/2 reads the configured adapter at runtime" do
+    previous = Application.get_env(:wasomi, :storage_provider)
+    on_exit(fn -> Application.put_env(:wasomi, :storage_provider, previous) end)
+    Application.put_env(:wasomi, :storage_provider, Adapter)
+
+    admin = Wasomi.AccountsFixtures.user_fixture()
+    {:ok, admin} = Wasomi.Accounts.update_user_role(admin, :admin)
+
+    assert {:ok, %{user: ^admin, attrs: %{filename: "notes.pdf"}}} =
+             Storage.presign_upload(admin, %{filename: "notes.pdf"})
+  end
+
   test "R2 rejects unsupported or oversized upload metadata" do
     assert {:error, :unsupported_content_type} =
              R2.presign_upload(nil, %{

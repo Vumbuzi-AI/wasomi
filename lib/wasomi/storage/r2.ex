@@ -125,6 +125,7 @@ defmodule Wasomi.Storage.R2 do
         case URI.parse(endpoint) do
           %URI{scheme: scheme, host: host} = uri
           when scheme in ["http", "https"] and is_binary(host) ->
+            # ExAws.S3 expects the scheme with its trailing `://`.
             {:ok, %{scheme: "#{scheme}://", host: host, port: uri.port}}
 
           _ ->

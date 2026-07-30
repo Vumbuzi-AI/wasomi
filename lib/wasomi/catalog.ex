@@ -408,7 +408,7 @@ defmodule Wasomi.Catalog do
         attrs
         |> Map.new()
         |> Map.merge(%{lecture_id: lecture_id, position: position})
-        |> then(&apply(schema, :changeset, [struct(schema), &1]))
+        |> then(&schema.changeset(struct(schema), &1))
 
       case Repo.insert(changeset) do
         {:ok, record} -> {:cont, {:ok, [record | inserted]}}

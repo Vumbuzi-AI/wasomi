@@ -6,7 +6,7 @@ defmodule Wasomi.Catalog do
   import Ecto.Query, warn: false
   alias Wasomi.Repo
 
-  alias Wasomi.Catalog.{Course, CourseModule, Lecture}
+  alias Wasomi.Catalog.{Course, CourseModule, Lecture, LectureQuestion, LectureResource}
 
   @doc """
   Returns the list of courses.
@@ -121,7 +121,12 @@ defmodule Wasomi.Catalog do
 
   defp preload_outline(course_or_courses) do
     modules_query = from(module in CourseModule, order_by: [asc: module.position])
-    lectures_query = from(lecture in Lecture, order_by: [asc: lecture.position])
+
+    lectures_query =
+      from(lecture in Lecture,
+        order_by: [asc: lecture.position],
+        preload: [:resources, :questions]
+      )
 
     Repo.preload(course_or_courses, modules: {modules_query, lectures: lectures_query})
   end
@@ -363,6 +368,101 @@ defmodule Wasomi.Catalog do
     |> Lecture.changeset(attrs)
     |> Repo.update()
   end
+
+  @doc """
+  Updates a lecture and replaces its ordered resources and learner questions atomically.
+  """
+  def update_lecture_content(%Lecture{} = lecture, lecture_attrs, resources, questions)
+      when is_list(resources) and is_list(questions) do
+    Repo.transaction(fn ->
+      lecture =
+        lecture
+        |> Lecture.changeset(lecture_attrs)
+        |> Repo.update!()
+
+      Repo.delete_all(
+        from(resource in LectureResource, where: resource.lecture_id == ^lecture.id)
+      )
+
+      Repo.delete_all(
+        from(question in LectureQuestion, where: question.lecture_id == ^lecture.id)
+      )
+
+      resources
+      |> Enum.with_index(1)
+      |> Enum.each(fn {attrs, position} ->
+        attrs
+        |> Map.new()
+        |> Map.merge(%{lecture_id: lecture.id, position: position})
+        |> then(&LectureResource.changeset(%LectureResource{}, &1))
+        |> Repo.insert!()
+      end)
+
+      questions
+      |> Enum.with_index(1)
+      |> Enum.each(fn {attrs, position} ->
+        attrs
+        |> Map.new()
+        |> Map.merge(%{lecture_id: lecture.id, position: position})
+        |> then(&LectureQuestion.changeset(%LectureQuestion{}, &1))
+        |> Repo.insert!()
+      end)
+
+      Repo.preload(lecture, [:resources, :questions])
+    end)
+  end
+
+  def create_lecture_content(lecture_attrs, resources, questions)
+      when is_list(resources) and is_list(questions) do
+    Repo.transaction(fn ->
+      lecture =
+        %Lecture{}
+        |> Lecture.changeset(lecture_attrs)
+        |> Repo.insert!()
+
+      resources
+      |> Enum.with_index(1)
+      |> Enum.each(fn {attrs, position} ->
+        attrs
+        |> Map.new()
+        |> Map.merge(%{lecture_id: lecture.id, position: position})
+        |> then(&LectureResource.changeset(%LectureResource{}, &1))
+        |> Repo.insert!()
+      end)
+
+      questions
+      |> Enum.with_index(1)
+      |> Enum.each(fn {attrs, position} ->
+        attrs
+        |> Map.new()
+        |> Map.merge(%{lecture_id: lecture.id, position: position})
+        |> then(&LectureQuestion.changeset(%LectureQuestion{}, &1))
+        |> Repo.insert!()
+      end)
+
+      Repo.preload(lecture, [:resources, :questions])
+    end)
+  end
+
+  def lecture_resource_count(%Lecture{resources: resources}) when is_list(resources),
+    do: length(resources)
+
+  def lecture_resource_count(%Lecture{} = lecture),
+    do:
+      Repo.aggregate(
+        from(resource in LectureResource, where: resource.lecture_id == ^lecture.id),
+        :count
+      )
+
+  def lecture_question_count(%Lecture{questions: questions}) when is_list(questions),
+    do: length(questions)
+
+  def lecture_question_count(%Lecture{} = lecture),
+    do:
+      Repo.aggregate(
+        from(question in LectureQuestion, where: question.lecture_id == ^lecture.id),
+        :count
+      )
 
   @doc """
   Reorders all lectures in a module using the given lecture ids.

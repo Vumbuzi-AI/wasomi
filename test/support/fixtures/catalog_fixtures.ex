@@ -73,4 +73,49 @@ defmodule Wasomi.CatalogFixtures do
 
     lecture
   end
+
+  def lecture_resource_fixture(attrs \\ %{}) do
+    attrs = Map.new(attrs)
+    lecture_id = Map.get_lazy(attrs, :lecture_id, fn -> lecture_fixture().id end)
+
+    resource_attrs =
+      attrs
+      |> Map.put(:lecture_id, lecture_id)
+      |> Enum.into(%{
+        byte_size: 100,
+        content_type: "application/pdf",
+        kind: :document,
+        name: "Notes",
+        position: 1,
+        storage_key: "lectures/notes.pdf"
+      })
+
+    {:ok, resource} =
+      %Wasomi.Catalog.LectureResource{}
+      |> Wasomi.Catalog.LectureResource.changeset(resource_attrs)
+      |> Wasomi.Repo.insert()
+
+    resource
+  end
+
+  def lecture_question_fixture(attrs \\ %{}) do
+    attrs = Map.new(attrs)
+    lecture_id = Map.get_lazy(attrs, :lecture_id, fn -> lecture_fixture().id end)
+
+    question_attrs =
+      attrs
+      |> Map.put(:lecture_id, lecture_id)
+      |> Enum.into(%{
+        answer: "The answer",
+        position: 1,
+        question: "What is this?"
+      })
+
+    {:ok, question} =
+      %Wasomi.Catalog.LectureQuestion{}
+      |> Wasomi.Catalog.LectureQuestion.changeset(question_attrs)
+      |> Wasomi.Repo.insert()
+
+    question
+  end
 end

@@ -10,6 +10,8 @@ defmodule Wasomi.Catalog.Lecture do
     field :video_asset_id, :string
     field :duration_seconds, :integer
     belongs_to :module, Wasomi.Catalog.CourseModule
+    has_many :resources, Wasomi.Catalog.LectureResource, preload_order: [asc: :position]
+    has_many :questions, Wasomi.Catalog.LectureQuestion, preload_order: [asc: :position]
 
     timestamps(type: :utc_datetime)
   end

@@ -573,4 +573,29 @@ defmodule WasomiWeb.AdminLive.QuizShowTest do
     refute_enqueued(worker: GenerateQuizFromPDFWorker)
     assert Process.alive?(view.pid)
   end
+
+  test "a storage upload failure shows an error instead of crashing", %{conn: conn} do
+    quiz = quiz_fixture()
+    {:ok, view, _html} = live(conn, quiz_path(quiz))
+
+    expect(Wasomi.AssessmentsStorageMock, :upload, fn _key, _binary ->
+      {:error, :r2_not_configured}
+    end)
+
+    pdf =
+      file_input(view, "#generate-questions-form", :source_pdf, [
+        %{name: "manual.pdf", content: "%PDF-1.4 fake", type: "application/pdf"}
+      ])
+
+    assert render_upload(pdf, "manual.pdf") =~ ~s(value="100")
+
+    html =
+      view
+      |> form("#generate-questions-form", %{})
+      |> render_submit()
+
+    assert html =~ "Could not start generation"
+    refute_enqueued(worker: GenerateQuizFromPDFWorker)
+    assert Process.alive?(view.pid)
+  end
 end

@@ -41,6 +41,32 @@ defmodule WasomiWeb.AdminLive.QuizShowTest do
     assert Assessments.get_quiz!(quiz.id).passing_score_percent == 85
   end
 
+  test "a prominent loading banner shows while a generation is pending or processing", %{
+    conn: conn
+  } do
+    quiz = quiz_fixture()
+    generation = quiz_generation_fixture(%{quiz: quiz, source_filename: "lecture-notes.pdf"})
+
+    {:ok, view, html} = live(conn, quiz_path(quiz))
+
+    assert html =~ "Generating questions from lecture-notes.pdf"
+    assert has_element?(view, "span[class*='animate-spin']")
+
+    Assessments.mark_generation_processing(generation)
+    assert render(view) =~ "Generating questions from lecture-notes.pdf"
+  end
+
+  test "the loading banner disappears once a generation finishes or fails", %{conn: conn} do
+    quiz = quiz_fixture()
+    generation = quiz_generation_fixture(%{quiz: quiz})
+
+    {:ok, view, html} = live(conn, quiz_path(quiz))
+    assert html =~ "Generating questions from"
+
+    Assessments.mark_generation_failed(generation, "boom")
+    refute render(view) =~ "Generating questions from"
+  end
+
   test "a course_id that doesn't match the quiz's real course 404s", %{conn: conn} do
     quiz = quiz_fixture()
     other_course = course_fixture()

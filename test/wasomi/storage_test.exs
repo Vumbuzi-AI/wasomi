@@ -154,16 +154,22 @@ defmodule Wasomi.StorageTest do
     previous_client = Application.get_env(:ex_aws, :http_client)
     previous_bucket = Application.get_env(:wasomi, :r2_bucket)
     previous_endpoint = Application.get_env(:wasomi, :r2_endpoint)
+    previous_access = Application.get_env(:ex_aws, :access_key_id)
+    previous_secret = Application.get_env(:ex_aws, :secret_access_key)
 
     on_exit(fn ->
       Application.put_env(:ex_aws, :http_client, previous_client)
       Application.put_env(:wasomi, :r2_bucket, previous_bucket)
       Application.put_env(:wasomi, :r2_endpoint, previous_endpoint)
+      Application.put_env(:ex_aws, :access_key_id, previous_access)
+      Application.put_env(:ex_aws, :secret_access_key, previous_secret)
     end)
 
     Application.put_env(:ex_aws, :http_client, MockExAwsHttpClient)
     Application.put_env(:wasomi, :r2_bucket, "test-bucket")
     Application.put_env(:wasomi, :r2_endpoint, "https://r2.example.test")
+    Application.put_env(:ex_aws, :access_key_id, "test-access-key")
+    Application.put_env(:ex_aws, :secret_access_key, "test-secret-key")
 
     assert :ok = R2.delete_upload(nil, "lectures/123/notes.pdf")
 
@@ -181,16 +187,22 @@ defmodule Wasomi.StorageTest do
     previous_client = Application.get_env(:ex_aws, :http_client)
     previous_bucket = Application.get_env(:wasomi, :r2_bucket)
     previous_endpoint = Application.get_env(:wasomi, :r2_endpoint)
+    previous_access = Application.get_env(:ex_aws, :access_key_id)
+    previous_secret = Application.get_env(:ex_aws, :secret_access_key)
 
     on_exit(fn ->
       Application.put_env(:ex_aws, :http_client, previous_client)
       Application.put_env(:wasomi, :r2_bucket, previous_bucket)
       Application.put_env(:wasomi, :r2_endpoint, previous_endpoint)
+      Application.put_env(:ex_aws, :access_key_id, previous_access)
+      Application.put_env(:ex_aws, :secret_access_key, previous_secret)
     end)
 
     Application.put_env(:ex_aws, :http_client, ErrorHttpClient)
     Application.put_env(:wasomi, :r2_bucket, "test-bucket")
     Application.put_env(:wasomi, :r2_endpoint, "https://r2.example.test")
+    Application.put_env(:ex_aws, :access_key_id, "test-access-key")
+    Application.put_env(:ex_aws, :secret_access_key, "test-secret-key")
 
     assert {:error, {:http_error, 404, _body}} =
              R2.delete_upload(nil, "lectures/123/notes.pdf")

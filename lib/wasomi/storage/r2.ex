@@ -75,7 +75,8 @@ defmodule Wasomi.Storage.R2 do
         ExAws.Config.new(:s3, host: endpoint.host, port: endpoint.port, scheme: endpoint.scheme)
 
       case ExAws.S3.delete_object(bucket, key) |> ExAws.request(config) do
-        {:ok, _response} -> :ok
+        {:ok, %{status_code: code}} when code >= 200 and code < 300 -> :ok
+        {:ok, %{status_code: code, body: body}} -> {:error, {:http_error, code, body}}
         {:error, reason} -> {:error, reason}
       end
     end

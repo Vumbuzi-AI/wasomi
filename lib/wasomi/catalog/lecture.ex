@@ -10,9 +10,13 @@ defmodule Wasomi.Catalog.Lecture do
     field :video_asset_id, :string
     field :duration_seconds, :integer
     belongs_to :module, Wasomi.Catalog.CourseModule
+    has_many :resources, Wasomi.Catalog.LectureResource
+    has_many :questions, Wasomi.Catalog.LectureQuestion
 
     timestamps(type: :utc_datetime)
   end
+
+  def video_provider_values, do: [:mux, :cloudflare, :bunny]
 
   @doc false
   def changeset(lecture, attrs) do

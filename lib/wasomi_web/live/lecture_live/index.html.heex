@@ -18,6 +18,12 @@
   <:col :let={{_id, lecture}} label="Video asset">{lecture.video_asset_id}</:col>
   <:col :let={{_id, lecture}} label="Duration seconds">{lecture.duration_seconds}</:col>
   <:col :let={{_id, lecture}} label="Position">{lecture.position}</:col>
+  <:col :let={{_id, lecture}} label="Resources">
+    {Wasomi.Catalog.lecture_resource_count(lecture)}
+  </:col>
+  <:col :let={{_id, lecture}} label="Questions">
+    {Wasomi.Catalog.lecture_question_count(lecture)}
+  </:col>
   <:action :let={{_id, lecture}}>
     <div class="sr-only">
       <.link navigate={~p"/lectures/#{lecture}"}>Show</.link>

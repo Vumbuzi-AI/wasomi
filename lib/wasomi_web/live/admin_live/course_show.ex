@@ -427,6 +427,11 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                         <span class="shrink-0 text-xs text-muted">
                           {minutes(lecture.duration_seconds)} min
                         </span>
+                        <span class="hidden shrink-0 text-xs text-muted sm:inline">
+                          {Catalog.lecture_resource_count(lecture)} resources · {Catalog.lecture_question_count(
+                            lecture
+                          )} Q&A
+                        </span>
                       </span>
                       <span class="flex shrink-0 items-center gap-1.5">
                         <button

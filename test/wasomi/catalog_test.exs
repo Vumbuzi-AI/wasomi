@@ -310,6 +310,61 @@ defmodule Wasomi.CatalogTest do
       assert Enum.map(module.lectures, & &1.position) == [1, 2, 3]
     end
 
+    test "replaces lecture resources and questions atomically" do
+      lecture = lecture_fixture()
+      old_resource = lecture_resource_fixture(lecture_id: lecture.id)
+      old_question = lecture_question_fixture(lecture_id: lecture.id)
+
+      assert {:ok, updated} =
+               Catalog.update_lecture_content(
+                 lecture,
+                 %{title: "Updated lecture"},
+                 [%{kind: :link, name: "Further reading", url: "https://example.com/reading"}],
+                 [%{question: "Why?", answer: "Because."}]
+               )
+
+      refute Wasomi.Repo.get(Wasomi.Catalog.LectureResource, old_resource.id)
+      refute Wasomi.Repo.get(Wasomi.Catalog.LectureQuestion, old_question.id)
+      assert [%{kind: :link, position: 1, url: "https://example.com/reading"}] = updated.resources
+      assert [%{question: "Why?", position: 1}] = updated.questions
+    end
+
+    test "returns a changeset and rolls back invalid lecture content" do
+      lecture = lecture_fixture()
+      resource = lecture_resource_fixture(lecture_id: lecture.id)
+
+      assert {:error, %Ecto.Changeset{}} =
+               Catalog.update_lecture_content(
+                 lecture,
+                 %{title: "Updated lecture"},
+                 [%{kind: :document, name: "Missing storage key"}],
+                 []
+               )
+
+      assert Catalog.get_lecture!(lecture.id).title == lecture.title
+      assert Wasomi.Repo.get!(Wasomi.Catalog.LectureResource, resource.id).id == resource.id
+    end
+
+    test "course outlines preload ordered resources and questions" do
+      course = course_fixture()
+      course_module = course_module_fixture(course_id: course.id, position: 1)
+      lecture = lecture_fixture(module_id: course_module.id, position: 1)
+
+      later_resource =
+        lecture_resource_fixture(lecture_id: lecture.id, position: 2, name: "Later")
+
+      first_resource =
+        lecture_resource_fixture(lecture_id: lecture.id, position: 1, name: "First")
+
+      later_question = lecture_question_fixture(lecture_id: lecture.id, position: 2)
+      first_question = lecture_question_fixture(lecture_id: lecture.id, position: 1)
+
+      loaded = Catalog.get_course_with_outline!(course.id)
+      loaded_lecture = loaded.modules |> hd() |> Map.fetch!(:lectures) |> hd()
+      assert Enum.map(loaded_lecture.resources, & &1.id) == [first_resource.id, later_resource.id]
+      assert Enum.map(loaded_lecture.questions, & &1.id) == [first_question.id, later_question.id]
+    end
+
     test "slug lookup preloads modules and lectures in position order" do
       course = course_fixture(status: :published)
       later_module = course_module_fixture(course_id: course.id, position: 2)

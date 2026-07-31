@@ -6,7 +6,7 @@ defmodule Wasomi.Catalog do
   import Ecto.Query, warn: false
   alias Wasomi.Repo
 
-  alias Wasomi.Catalog.{Course, CourseModule, Lecture}
+  alias Wasomi.Catalog.{Course, CourseModule, Lecture, LectureQuestion, LectureResource}
 
   @doc """
   Returns the list of courses.
@@ -121,9 +121,35 @@ defmodule Wasomi.Catalog do
 
   defp preload_outline(course_or_courses) do
     modules_query = from(module in CourseModule, order_by: [asc: module.position])
-    lectures_query = from(lecture in Lecture, order_by: [asc: lecture.position])
+
+    lectures_query =
+      from(lecture in Lecture,
+        order_by: [asc: lecture.position],
+        preload: [
+          resources: ^ordered_resources_query(),
+          questions: ^ordered_questions_query()
+        ]
+      )
 
     Repo.preload(course_or_courses, modules: {modules_query, lectures: lectures_query})
+  end
+
+  @doc """
+  Preloads a lecture's resources and questions in their persisted display order.
+  """
+  def preload_lecture_content(%Lecture{} = lecture) do
+    Repo.preload(lecture,
+      resources: ordered_resources_query(),
+      questions: ordered_questions_query()
+    )
+  end
+
+  defp ordered_resources_query do
+    from(resource in LectureResource, order_by: [asc: resource.position])
+  end
+
+  defp ordered_questions_query do
+    from(question in LectureQuestion, order_by: [asc: question.position])
   end
 
   @doc """
@@ -363,6 +389,87 @@ defmodule Wasomi.Catalog do
     |> Lecture.changeset(attrs)
     |> Repo.update()
   end
+
+  @doc """
+  Updates a lecture and replaces its ordered resources and learner questions atomically.
+  """
+  def update_lecture_content(%Lecture{} = lecture, lecture_attrs, resources, questions)
+      when is_list(resources) and is_list(questions) do
+    Repo.transaction(fn ->
+      with {:ok, lecture} <- Repo.update(Lecture.changeset(lecture, lecture_attrs)),
+           :ok <- delete_lecture_content(lecture.id),
+           {:ok, _resources} <- insert_resources(lecture.id, resources),
+           {:ok, _questions} <- insert_questions(lecture.id, questions) do
+        preload_lecture_content(lecture)
+      else
+        {:error, %Ecto.Changeset{} = changeset} -> Repo.rollback(changeset)
+      end
+    end)
+  end
+
+  defp delete_lecture_content(lecture_id) do
+    Repo.delete_all(from(resource in LectureResource, where: resource.lecture_id == ^lecture_id))
+    Repo.delete_all(from(question in LectureQuestion, where: question.lecture_id == ^lecture_id))
+    :ok
+  end
+
+  defp insert_resources(lecture_id, resources) do
+    insert_content_records(LectureResource, lecture_id, resources)
+  end
+
+  defp insert_questions(lecture_id, questions) do
+    insert_content_records(LectureQuestion, lecture_id, questions)
+  end
+
+  defp insert_content_records(schema, lecture_id, records) do
+    records
+    |> Enum.with_index(1)
+    |> Enum.reduce_while({:ok, []}, fn {attrs, position}, {:ok, inserted} ->
+      changeset =
+        attrs
+        |> Map.new()
+        |> Map.merge(%{lecture_id: lecture_id, position: position})
+        |> then(&schema.changeset(struct(schema), &1))
+
+      case Repo.insert(changeset) do
+        {:ok, record} -> {:cont, {:ok, [record | inserted]}}
+        {:error, changeset} -> {:halt, {:error, changeset}}
+      end
+    end)
+  end
+
+  def create_lecture_content(lecture_attrs, resources, questions)
+      when is_list(resources) and is_list(questions) do
+    Repo.transaction(fn ->
+      with {:ok, lecture} <- Repo.insert(Lecture.changeset(%Lecture{}, lecture_attrs)),
+           {:ok, _resources} <- insert_resources(lecture.id, resources),
+           {:ok, _questions} <- insert_questions(lecture.id, questions) do
+        Repo.preload(lecture, [:resources, :questions])
+      else
+        {:error, %Ecto.Changeset{} = changeset} -> Repo.rollback(changeset)
+      end
+    end)
+  end
+
+  def lecture_resource_count(%Lecture{resources: resources}) when is_list(resources),
+    do: length(resources)
+
+  def lecture_resource_count(%Lecture{} = lecture),
+    do:
+      Repo.aggregate(
+        from(resource in LectureResource, where: resource.lecture_id == ^lecture.id),
+        :count
+      )
+
+  def lecture_question_count(%Lecture{questions: questions}) when is_list(questions),
+    do: length(questions)
+
+  def lecture_question_count(%Lecture{} = lecture),
+    do:
+      Repo.aggregate(
+        from(question in LectureQuestion, where: question.lecture_id == ^lecture.id),
+        :count
+      )
 
   @doc """
   Reorders all lectures in a module using the given lecture ids.

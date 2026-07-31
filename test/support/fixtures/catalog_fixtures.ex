@@ -3,6 +3,7 @@ defmodule Wasomi.CatalogFixtures do
   This module defines test helpers for creating
   entities via the `Wasomi.Catalog` context.
   """
+  alias Wasomi.Catalog.{LectureQuestion, LectureResource}
 
   @doc """
   Generate a unique course slug.
@@ -72,5 +73,50 @@ defmodule Wasomi.CatalogFixtures do
       |> Wasomi.Catalog.create_lecture()
 
     lecture
+  end
+
+  def lecture_resource_fixture(attrs \\ %{}) do
+    attrs = Map.new(attrs)
+    lecture_id = Map.get_lazy(attrs, :lecture_id, fn -> lecture_fixture().id end)
+
+    resource_attrs =
+      attrs
+      |> Map.put(:lecture_id, lecture_id)
+      |> Enum.into(%{
+        byte_size: 100,
+        content_type: "application/pdf",
+        kind: :document,
+        name: "Notes",
+        position: 1,
+        storage_key: "lectures/notes.pdf"
+      })
+
+    {:ok, resource} =
+      %LectureResource{}
+      |> LectureResource.changeset(resource_attrs)
+      |> Wasomi.Repo.insert()
+
+    resource
+  end
+
+  def lecture_question_fixture(attrs \\ %{}) do
+    attrs = Map.new(attrs)
+    lecture_id = Map.get_lazy(attrs, :lecture_id, fn -> lecture_fixture().id end)
+
+    question_attrs =
+      attrs
+      |> Map.put(:lecture_id, lecture_id)
+      |> Enum.into(%{
+        answer: "The answer",
+        position: 1,
+        question: "What is this?"
+      })
+
+    {:ok, question} =
+      %LectureQuestion{}
+      |> LectureQuestion.changeset(question_attrs)
+      |> Wasomi.Repo.insert()
+
+    question
   end
 end

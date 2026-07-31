@@ -49,10 +49,12 @@ Development uses local Swoosh mail storage and watches esbuild/Tailwind assets.
 | `MUX_SIGNING_PRIVATE_KEY` | yes | Mux playback signing private key. |
 | `MUX_API_URL` | optional | Overrides Mux API base URL. |
 | `MUX_CORS_ORIGIN` | optional | Playback/upload CORS origin; prod defaults to `https://#{PHX_HOST}`. |
-| `R2_BUCKET` | yes | Certificate PDF bucket. |
+| `R2_BUCKET` | yes | Lecture resource bucket. |
 | `R2_ACCESS_KEY_ID` | yes | R2/S3 access key. |
 | `R2_SECRET_ACCESS_KEY` | yes | R2/S3 secret key. |
 | `R2_ENDPOINT` | yes | R2/S3-compatible endpoint and ExAws S3 host. |
+| `R2_PUBLIC_URL` | yes | Public base URL used to access uploaded lecture resources. |
+| `R2_UPLOAD_EXPIRY` | optional | Presigned upload URL lifetime in seconds; defaults to `900`. |
 
 `config/config.exs` also sets defaults for `payment_provider`, `media_provider`, `certificate_storage`, Paystack API URL, callback URL, Mux API URL, and Mux CORS origin.
 

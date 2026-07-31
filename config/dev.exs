@@ -13,6 +13,9 @@ config :wasomi, Wasomi.Repo,
 # Stream public HLS samples locally so the course player works without Mux.
 config :wasomi, media_provider: Wasomi.Media.Demo
 
+# Store quiz-generation source PDFs on disk locally so this works without R2.
+config :wasomi, assessments_storage: Wasomi.Assessments.Storage.Local
+
 # For development, we disable any cache and enable
 # debugging and code reloading.
 #

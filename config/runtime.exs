@@ -46,6 +46,15 @@ for {env_name, config_key} <- [
 end
 
 for {env_name, config_key} <- [
+      {"OPENAI_API_KEY", :openai_api_key},
+      {"OPENAI_MODEL", :openai_model}
+    ],
+    value = System.get_env(env_name),
+    value not in [nil, ""] do
+  config :wasomi, config_key, value
+end
+
+for {env_name, config_key} <- [
       {"R2_BUCKET", :r2_bucket},
       {"R2_ACCESS_KEY_ID", :r2_access_key_id},
       {"R2_SECRET_ACCESS_KEY", :r2_secret_access_key}

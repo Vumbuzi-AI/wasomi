@@ -1,7 +1,7 @@
 defmodule WasomiWeb.AdminLive.CourseShow do
   use WasomiWeb, :live_view
 
-  alias Wasomi.{Catalog, Enrollments, Payments}
+  alias Wasomi.{Assessments, Catalog, Enrollments, Payments}
   alias Wasomi.Catalog.{CourseModule, Lecture}
   alias WasomiWeb.CourseModuleLive
   alias WasomiWeb.LectureLive
@@ -15,6 +15,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
      |> assign(:lecture, nil)
      |> assign(:form_title, nil)
      |> assign(:active_tab, :curriculum)
+     |> assign(:deleting_quiz, nil)
      |> load_course(id)}
   end
 
@@ -77,6 +78,44 @@ defmodule WasomiWeb.AdminLive.CourseShow do
   def handle_event("switch_tab", %{"tab" => tab}, socket)
       when tab in ["curriculum", "students"] do
     {:noreply, assign(socket, :active_tab, String.to_existing_atom(tab))}
+  end
+
+  def handle_event("generate_quiz", %{"module-id" => module_id}, socket) do
+    module = Catalog.get_course_module!(module_id)
+
+    quiz =
+      Assessments.get_quiz_for_module(module) ||
+        with {:ok, quiz} <- Assessments.create_quiz(module, %{title: "#{module.title} Quiz"}) do
+          quiz
+        end
+
+    case quiz do
+      %Assessments.Quiz{id: quiz_id} ->
+        course_id = socket.assigns.course.id
+        {:noreply, push_navigate(socket, to: ~p"/admin/courses/#{course_id}/quizzes/#{quiz_id}")}
+
+      _ ->
+        {:noreply, put_flash(socket, :error, "Could not create a quiz for this module.")}
+    end
+  end
+
+  def handle_event("confirm_delete_quiz", %{"id" => id}, socket) do
+    {:noreply, assign(socket, :deleting_quiz, Assessments.get_quiz!(id))}
+  end
+
+  def handle_event("cancel_delete_quiz", _params, socket) do
+    {:noreply, assign(socket, :deleting_quiz, nil)}
+  end
+
+  def handle_event("delete_quiz", %{"id" => id}, socket) do
+    quiz = Assessments.get_quiz!(id)
+    {:ok, _deleted} = Assessments.delete_quiz(quiz)
+
+    {:noreply,
+     socket
+     |> put_flash(:info, "Quiz deleted.")
+     |> assign(:deleting_quiz, nil)
+     |> load_course(socket.assigns.course.id)}
   end
 
   def handle_event("delete_module", %{"id" => id}, socket) do
@@ -158,6 +197,12 @@ defmodule WasomiWeb.AdminLive.CourseShow do
     |> assign(:student_count, length(enrollments))
     |> assign(:lecture_count, lecture_count)
     |> assign(:revenue_minor, Payments.revenue_minor_for_course(course.id))
+    |> assign(:draft_question_counts, Assessments.count_draft_questions_by_module(course.id))
+    |> assign(
+      :published_question_counts,
+      Assessments.count_published_questions_by_module(course.id)
+    )
+    |> assign(:quizzes_by_module, Assessments.get_quizzes_by_module(course.id))
   end
 
   @impl true
@@ -408,13 +453,60 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                     </li>
                   </ul>
 
-                  <button
-                    type="button"
-                    phx-click={JS.push("new_lecture", value: %{"module-id" => module.id})}
-                    class="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-primary transition hover:text-dark"
+                  <div
+                    :for={quiz <- List.wrap(Map.get(@quizzes_by_module, module.id))}
+                    class="mt-2 flex items-center justify-between gap-3 rounded-xl border border-black/5 bg-mint/20 px-4 py-2.5"
                   >
-                    <.icon name="hero-plus-circle" class="h-4 w-4" /> Add lecture
-                  </button>
+                    <span class="flex min-w-0 items-center gap-3 text-sm text-dark">
+                      <.icon
+                        name="hero-clipboard-document-check"
+                        class="h-5 w-5 shrink-0 text-primary"
+                      />
+                      <span class="truncate font-medium">{quiz.title}</span>
+                      <span class="shrink-0 text-xs text-muted">
+                        {Map.get(@published_question_counts, module.id, 0)} published<span :if={
+                          Map.get(@draft_question_counts, module.id, 0) > 0
+                        }>
+                          · {Map.get(@draft_question_counts, module.id)} to review
+                        </span>
+                      </span>
+                    </span>
+                    <span class="flex shrink-0 items-center gap-1.5">
+                      <.link
+                        navigate={~p"/admin/courses/#{@course.id}/quizzes/#{quiz.id}"}
+                        class="grid h-8 w-8 place-items-center rounded-full text-muted transition hover:bg-mint hover:text-primary"
+                        title="Manage quiz"
+                      >
+                        <.icon name="hero-pencil-square" class="h-4 w-4" />
+                      </.link>
+                      <button
+                        type="button"
+                        phx-click={JS.push("confirm_delete_quiz", value: %{id: quiz.id})}
+                        class="grid h-8 w-8 place-items-center rounded-full text-muted transition hover:bg-red-50 hover:text-red-500"
+                        title="Delete quiz"
+                      >
+                        <.icon name="hero-trash" class="h-4 w-4" />
+                      </button>
+                    </span>
+                  </div>
+
+                  <div class="mt-3 flex flex-wrap items-center gap-4">
+                    <button
+                      type="button"
+                      phx-click={JS.push("new_lecture", value: %{"module-id" => module.id})}
+                      class="inline-flex items-center gap-1.5 text-sm font-medium text-primary transition hover:text-dark"
+                    >
+                      <.icon name="hero-plus-circle" class="h-4 w-4" /> Add lecture
+                    </button>
+                    <button
+                      :if={is_nil(Map.get(@quizzes_by_module, module.id))}
+                      type="button"
+                      phx-click={JS.push("generate_quiz", value: %{"module-id" => module.id})}
+                      class="inline-flex items-center gap-1.5 text-sm font-medium text-primary transition hover:text-dark"
+                    >
+                      <.icon name="hero-sparkles" class="h-4 w-4" /> Generate quiz (AI)
+                    </button>
+                  </div>
                 </div>
               </div>
             </article>
@@ -499,6 +591,34 @@ defmodule WasomiWeb.AdminLive.CourseShow do
           current_user={@current_user}
           patch={~p"/admin/courses/#{@course.id}"}
         />
+      </.modal>
+
+      <%!-- Delete quiz confirmation --%>
+      <.modal
+        :if={@deleting_quiz}
+        id="delete-quiz-modal"
+        show
+        on_cancel={JS.push("cancel_delete_quiz")}
+      >
+        <h2 class="text-lg font-semibold text-dark">Delete "{@deleting_quiz.title}"?</h2>
+        <p class="mt-2 text-sm text-body">
+          This can't be undone. All of its questions and options will be permanently removed.
+        </p>
+        <div class="mt-6 flex items-center gap-4">
+          <button
+            phx-click="delete_quiz"
+            phx-value-id={@deleting_quiz.id}
+            class="rounded-full bg-red-600 px-5 py-2 text-sm font-medium text-white transition hover:bg-red-700"
+          >
+            Delete quiz
+          </button>
+          <button
+            phx-click="cancel_delete_quiz"
+            class="text-sm font-medium text-muted hover:text-dark"
+          >
+            Cancel
+          </button>
+        </div>
       </.modal>
     </.admin_layout>
     """

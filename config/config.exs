@@ -13,6 +13,9 @@ config :wasomi,
   payment_provider: Wasomi.Paystack,
   media_provider: Wasomi.Media.Mux,
   certificate_storage: Wasomi.Certificates.Storage.R2,
+  assessments_storage: Wasomi.Assessments.Storage.R2,
+  pdf_extractor: Wasomi.Assessments.PdfExtractor.PdfToText,
+  question_generator: Wasomi.Assessments.QuestionGenerator.OpenAI,
   paystack_api_url: "https://api.paystack.co",
   paystack_callback_url: "http://localhost:4000/payments/paystack/callback",
   mux_api_url: "https://api.mux.com",
@@ -20,7 +23,7 @@ config :wasomi,
 
 config :wasomi, Oban,
   repo: Wasomi.Repo,
-  queues: [payments: 10, certificates: 3, mailers: 5, default: 10],
+  queues: [payments: 10, certificates: 3, mailers: 5, quiz_generation: 2, default: 10],
   plugins: [
     {Oban.Plugins.Cron,
      crontab: [

@@ -6,7 +6,14 @@ defmodule Wasomi.Catalog do
   import Ecto.Query, warn: false
   alias Wasomi.Repo
 
-  alias Wasomi.Catalog.{Course, CourseModule, Lecture, LectureQuestion, LectureResource}
+  alias Wasomi.Catalog.{
+    Course,
+    CourseModule,
+    Lecture,
+    LectureQuestion,
+    LectureResource,
+    PublishGuard
+  }
 
   @doc """
   Returns the list of courses.
@@ -165,9 +172,78 @@ defmodule Wasomi.Catalog do
 
   """
   def create_course(attrs \\ %{}) do
+    attrs =
+      attrs
+      |> put_generated_slug()
+      |> put_default_position()
+
     %Course{}
     |> Course.changeset(attrs)
     |> Repo.insert()
+  end
+
+  defp put_generated_slug(attrs) do
+    attrs = Map.new(attrs)
+    slug_key = if Map.has_key?(attrs, "title"), do: "slug", else: :slug
+    title_key = if Map.has_key?(attrs, "title"), do: "title", else: :title
+
+    if blank?(Map.get(attrs, slug_key)) do
+      slug =
+        attrs
+        |> Map.get(title_key)
+        |> slugify()
+        |> unique_slug()
+
+      Map.put(attrs, slug_key, slug)
+    else
+      attrs
+    end
+  end
+
+  defp put_default_position(attrs) do
+    attrs = Map.new(attrs)
+    position_key = if Map.has_key?(attrs, "title"), do: "position", else: :position
+
+    if blank?(Map.get(attrs, position_key)) do
+      Map.put(attrs, position_key, next_course_position())
+    else
+      attrs
+    end
+  end
+
+  defp next_course_position do
+    (Repo.aggregate(Course, :max, :position) || 0) + 1
+  end
+
+  defp blank?(nil), do: true
+  defp blank?(""), do: true
+  defp blank?(_value), do: false
+
+  defp slugify(nil), do: ""
+
+  defp slugify(text) when is_binary(text) do
+    text
+    |> String.downcase()
+    |> String.trim()
+    |> String.normalize(:nfd)
+    |> String.replace(~r/[^a-z0-9\s-]/u, "")
+    |> String.replace(~r/[\s-]+/, "-")
+    |> String.trim("-")
+  end
+
+  defp unique_slug(base) do
+    base = if base in [nil, ""], do: "course", else: base
+    find_available_slug(base, 1)
+  end
+
+  defp find_available_slug(base, attempt) do
+    candidate = if attempt == 1, do: base, else: "#{base}-#{attempt}"
+
+    if Repo.exists?(from course in Course, where: course.slug == ^candidate) do
+      find_available_slug(base, attempt + 1)
+    else
+      candidate
+    end
   end
 
   @doc """
@@ -184,8 +260,21 @@ defmodule Wasomi.Catalog do
   """
   def update_course(%Course{} = course, attrs) do
     course
-    |> Course.changeset(attrs)
+    |> Course.changeset(reject_direct_publish(attrs))
     |> Repo.update()
+  end
+
+  # :published is reachable only through publish_course/1, which always runs
+  # PublishGuard first — silently dropping a caller-supplied :published here
+  # (rather than raising) keeps update_course/2 a safe, generic entry point
+  # for every other status/field change.
+  defp reject_direct_publish(attrs) do
+    attrs = Map.new(attrs)
+
+    case Map.get(attrs, :status) || Map.get(attrs, "status") do
+      status when status in [:published, "published"] -> Map.drop(attrs, [:status, "status"])
+      _ -> attrs
+    end
   end
 
   @doc """
@@ -215,6 +304,40 @@ defmodule Wasomi.Catalog do
   """
   def change_course(%Course{} = course, attrs \\ %{}) do
     Course.changeset(course, attrs)
+  end
+
+  @doc """
+  Moves a course from `:draft` into `:in_review` — a free transition with no
+  checklist, since it only signals "ready for a publish attempt," not that
+  the course actually is ready.
+  """
+  def submit_course_for_review(%Course{} = course) do
+    update_course(course, %{status: :in_review})
+  end
+
+  @doc """
+  The only path that flips a course's status to `:published`.
+
+  Always re-fetches the course with its current outline before checking —
+  never trusts a possibly-stale in-memory struct — and runs it through
+  `Wasomi.Catalog.PublishGuard`. On success the course is updated to
+  `:published`, making it visible in the public catalog. On failure the
+  course's status is left exactly as it was (a course attempted from
+  `:draft` stays `:draft`) and `{:error, issues}` is returned with the full
+  checklist of what's missing, for the admin UI to render.
+  """
+  def publish_course(%Course{} = course) do
+    course = get_course_with_outline!(course.id)
+
+    case PublishGuard.check(course) do
+      :ok ->
+        course
+        |> Course.changeset(%{status: :published})
+        |> Repo.update()
+
+      {:error, issues} ->
+        {:error, issues}
+    end
   end
 
   @doc """

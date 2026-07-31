@@ -496,5 +496,16 @@ defmodule Wasomi.CatalogTest do
       assert is_list(issues)
       assert Catalog.get_course!(course.id).status == :draft
     end
+
+    test "publish_course/1 succeeds directly from :draft — :in_review is not a required step" do
+      course =
+        course_fixture(status: :draft, price_minor: 150_000, thumbnail_key: "cover.jpg")
+
+      course_module = course_module_fixture(course_id: course.id, position: 1)
+      lecture_fixture(module_id: course_module.id, position: 1, video_asset_id: "abc123")
+
+      assert {:ok, published} = Catalog.publish_course(course)
+      assert published.status == :published
+    end
   end
 end

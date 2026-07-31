@@ -5,6 +5,7 @@ defmodule Wasomi.StorageTest do
 
   defmodule Adapter do
     def presign_upload(user, attrs), do: {:ok, %{user: user, attrs: attrs}}
+    def delete_upload(user, key), do: {:ok, {user, key}}
   end
 
   test "only admins can request presigned uploads" do
@@ -119,5 +120,77 @@ defmodule Wasomi.StorageTest do
                "content_type" => "application/pdf",
                "size" => 100
              })
+  end
+
+  test "only admins can delete uploads" do
+    learner = Wasomi.AccountsFixtures.user_fixture()
+    admin = Wasomi.AccountsFixtures.user_fixture()
+    {:ok, admin} = Wasomi.Accounts.update_user_role(admin, :admin)
+
+    assert {:error, :forbidden} = Storage.delete_upload(learner, "key.pdf", Adapter)
+    assert {:ok, {^admin, "key.pdf"}} = Storage.delete_upload(admin, "key.pdf", Adapter)
+  end
+
+  test "delete_upload/2 reads the configured adapter at runtime" do
+    previous = Application.get_env(:wasomi, :storage_provider)
+    on_exit(fn -> Application.put_env(:wasomi, :storage_provider, previous) end)
+    Application.put_env(:wasomi, :storage_provider, Adapter)
+
+    admin = Wasomi.AccountsFixtures.user_fixture()
+    {:ok, admin} = Wasomi.Accounts.update_user_role(admin, :admin)
+
+    assert {:ok, {^admin, "key.pdf"}} = Storage.delete_upload(admin, "key.pdf")
+  end
+
+  defmodule MockExAwsHttpClient do
+    def request(method, url, body, headers, _opts) do
+      send(self(), {:http_request, method, url, body, headers})
+      {:ok, %{status_code: 200, body: "", headers: []}}
+    end
+  end
+
+  test "R2.delete_upload/2 issues a delete request to S3" do
+    previous_client = Application.get_env(:ex_aws, :http_client)
+    previous_bucket = Application.get_env(:wasomi, :r2_bucket)
+    previous_endpoint = Application.get_env(:wasomi, :r2_endpoint)
+
+    on_exit(fn ->
+      Application.put_env(:ex_aws, :http_client, previous_client)
+      Application.put_env(:wasomi, :r2_bucket, previous_bucket)
+      Application.put_env(:wasomi, :r2_endpoint, previous_endpoint)
+    end)
+
+    Application.put_env(:ex_aws, :http_client, MockExAwsHttpClient)
+    Application.put_env(:wasomi, :r2_bucket, "test-bucket")
+    Application.put_env(:wasomi, :r2_endpoint, "https://r2.example.test")
+
+    assert :ok = R2.delete_upload(nil, "lectures/123/notes.pdf")
+
+    assert_received {:http_request, :delete, url, _, _}
+    assert url =~ "lectures/123/notes.pdf"
+  end
+
+  test "R2.delete_upload/2 handles ExAws request errors" do
+    defmodule ErrorHttpClient do
+      def request(_method, _url, _body, _headers, _opts) do
+        {:error, %{reason: {:http_error, 404, "Not Found"}}}
+      end
+    end
+
+    previous_client = Application.get_env(:ex_aws, :http_client)
+    previous_bucket = Application.get_env(:wasomi, :r2_bucket)
+    previous_endpoint = Application.get_env(:wasomi, :r2_endpoint)
+
+    on_exit(fn ->
+      Application.put_env(:ex_aws, :http_client, previous_client)
+      Application.put_env(:wasomi, :r2_bucket, previous_bucket)
+      Application.put_env(:wasomi, :r2_endpoint, previous_endpoint)
+    end)
+
+    Application.put_env(:ex_aws, :http_client, ErrorHttpClient)
+    Application.put_env(:wasomi, :r2_bucket, "test-bucket")
+    Application.put_env(:wasomi, :r2_endpoint, "https://r2.example.test")
+
+    assert {:error, {:http_error, 404, "Not Found"}} = R2.delete_upload(nil, "lectures/123/notes.pdf")
   end
 end

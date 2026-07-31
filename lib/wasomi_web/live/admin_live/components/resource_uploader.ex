@@ -139,11 +139,14 @@ defmodule WasomiWeb.AdminLive.Components.ResourceUploader do
         ".zip" -> ["application/zip", "application/x-zip-compressed"]
         ".pptx" -> ["application/vnd.openxmlformats-officedocument.presentationml.presentation"]
         ".docx" -> ["application/vnd.openxmlformats-officedocument.wordprocessingml.document"]
+        _ -> []
       end
 
-    if content_type in expected or content_type in [nil, "", "application/octet-stream"],
-      do: :ok,
-      else: {:error, :unsupported_content_type}
+    if expected != [] and (content_type in expected or content_type in [nil, "", "application/octet-stream"]) do
+      :ok
+    else
+      {:error, :unsupported_content_type}
+    end
   end
 
   defp file_icon(filename) do

@@ -365,7 +365,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
   end
 
   def handle_event("cancel-upload", %{"ref" => ref}, socket) do
-    meta = get_in(socket.assigns, [:uploads, :resources, :entry_refs_to_metas, ref]) || %{}
+    meta = socket.assigns.uploads.resources.entry_refs_to_metas[ref] || %{}
     socket = cancel_upload(socket, :resources, ref)
 
     case meta[:key] do

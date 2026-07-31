@@ -64,7 +64,7 @@ defmodule Wasomi.Storage.R2 do
       |> to_string()
       |> String.replace(~r/[^A-Za-z0-9_-]/, "_")
 
-    "lectures/#{prefix}/#{safe_filename(filename)}"
+    "lectures/#{prefix}/#{Ecto.UUID.generate()}/#{safe_filename(filename)}"
   end
 
   @impl true

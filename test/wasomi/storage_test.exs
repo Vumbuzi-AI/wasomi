@@ -88,7 +88,8 @@ defmodule Wasomi.StorageTest do
     assert %URI{scheme: "https", host: "r2.example.test", path: "/test-bucket/" <> _} =
              URI.parse(url)
 
-    assert URI.parse(url).path =~ "/test-bucket/lectures/lecture-42/notes.pdf"
+    assert URI.parse(url).path =~
+             ~r"/test-bucket/lectures/lecture-42/[a-f0-9\-]+/notes\.pdf$"
   end
 
   test "R2 presigned uploads return nil public_url without a public base" do
@@ -173,7 +174,7 @@ defmodule Wasomi.StorageTest do
   test "R2.delete_upload/2 handles ExAws request errors" do
     defmodule ErrorHttpClient do
       def request(_method, _url, _body, _headers, _opts) do
-        {:error, %{reason: {:http_error, 404, "Not Found"}}}
+        {:ok, %{status_code: 404, body: "Not Found", headers: []}}
       end
     end
 
@@ -191,6 +192,7 @@ defmodule Wasomi.StorageTest do
     Application.put_env(:wasomi, :r2_bucket, "test-bucket")
     Application.put_env(:wasomi, :r2_endpoint, "https://r2.example.test")
 
-    assert {:error, {:http_error, 404, "Not Found"}} = R2.delete_upload(nil, "lectures/123/notes.pdf")
+    assert {:error, {:http_error, 404, _body}} =
+             R2.delete_upload(nil, "lectures/123/notes.pdf")
   end
 end

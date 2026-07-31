@@ -14,7 +14,7 @@ if config_env() in [:dev, :test] do
 
       if line != "" and not String.starts_with?(line, "#") and String.contains?(line, "=") do
         [key, value] = String.split(line, "=", parts: 2)
-        key = String.trim(key)
+        key = key |> String.trim() |> String.replace_prefix("export ", "")
         value = value |> String.trim() |> String.trim("\"") |> String.trim("'")
 
         if System.get_env(key) in [nil, ""] do

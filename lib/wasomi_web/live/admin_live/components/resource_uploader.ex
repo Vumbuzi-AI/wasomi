@@ -142,7 +142,8 @@ defmodule WasomiWeb.AdminLive.Components.ResourceUploader do
         _ -> []
       end
 
-    if expected != [] and (content_type in expected or content_type in [nil, "", "application/octet-stream"]) do
+    if expected != [] and
+         (content_type in expected or content_type in [nil, "", "application/octet-stream"]) do
       :ok
     else
       {:error, :unsupported_content_type}

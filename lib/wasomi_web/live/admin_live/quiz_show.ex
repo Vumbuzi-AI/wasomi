@@ -407,6 +407,25 @@ defmodule WasomiWeb.AdminLive.QuizShow do
           </form>
         </section>
 
+        <div
+          :if={active_generation(@generations)}
+          class="flex items-center gap-4 rounded-3xl border border-primary/20 bg-mint/40 p-6"
+        >
+          <span class="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-white text-primary shadow-sm">
+            <.icon name="hero-arrow-path" class="h-6 w-6 animate-spin" />
+          </span>
+          <div>
+            <p class="font-semibold text-dark">
+              Generating questions from {active_generation(@generations).source_filename}…
+            </p>
+            <p class="mt-0.5 text-sm text-body">
+              Extracting the document's text and drafting multiple-choice questions with AI.
+              This usually takes a minute or two — the draft questions will appear below once
+              they're ready.
+            </p>
+          </div>
+        </div>
+
         <details
           :if={@generations != []}
           open
@@ -843,6 +862,9 @@ defmodule WasomiWeb.AdminLive.QuizShow do
     do: Phoenix.Naming.humanize(status)
 
   defp draft_questions(quiz), do: Enum.filter(quiz.questions, &(&1.status == :draft))
+
+  defp active_generation(generations),
+    do: Enum.find(generations, &(&1.status in [:pending, :processing]))
 
   defp relative_time(%DateTime{} = datetime) do
     seconds = DateTime.diff(DateTime.utc_now(), datetime)

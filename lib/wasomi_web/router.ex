@@ -110,6 +110,8 @@ defmodule WasomiWeb.Router do
       live "/payments", AdminLive.Payments, :index
 
       live "/lectures/:id/video", AdminLectureVideoLive, :edit
+
+      live "/courses/:course_id/quizzes/:quiz_id", AdminLive.QuizShow, :show
     end
   end
 

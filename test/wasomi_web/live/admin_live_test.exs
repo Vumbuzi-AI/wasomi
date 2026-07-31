@@ -3,6 +3,7 @@ defmodule WasomiWeb.AdminLiveTest do
 
   import Phoenix.LiveViewTest
   import Wasomi.AccountsFixtures
+  import Wasomi.AssessmentsFixtures
   import Wasomi.CatalogFixtures
 
   defp admin_fixture(attrs \\ %{}) do
@@ -116,6 +117,87 @@ defmodule WasomiWeb.AdminLiveTest do
       assert html =~ "Enrolled students"
       assert html =~ "Course curriculum"
       assert html =~ "cover.jpg"
+    end
+
+    test "shows a draft-question reminder badge only when a module has unreviewed drafts", %{
+      conn: conn
+    } do
+      course = course_fixture()
+      module = course_module_fixture(course_id: course.id, title: "Module One")
+      {:ok, _view, html} = live(conn, ~p"/admin/courses/#{course.id}")
+
+      refute html =~ "to review"
+
+      quiz = quiz_fixture(%{module: module})
+      question_fixture(%{quiz: quiz, status: :draft, position: 1})
+      question_fixture(%{quiz: quiz, status: :draft, position: 2})
+
+      {:ok, _view, html} = live(conn, ~p"/admin/courses/#{course.id}")
+
+      assert html =~ "2 to review"
+    end
+
+    test "a module's quiz appears as a row in the curriculum once one exists", %{conn: conn} do
+      course = course_fixture()
+      module = course_module_fixture(course_id: course.id, title: "Module One")
+      {:ok, view, html} = live(conn, ~p"/admin/courses/#{course.id}")
+
+      assert has_element?(view, "button", "Generate quiz (AI)")
+      refute html =~ "published"
+
+      quiz = quiz_fixture(%{module: module, title: "Module One Quiz"})
+      question_fixture(%{quiz: quiz, status: :published, position: 1})
+      question_fixture(%{quiz: quiz, status: :draft, position: 2})
+
+      {:ok, view, html} = live(conn, ~p"/admin/courses/#{course.id}")
+
+      assert html =~ "Module One Quiz"
+      assert html =~ "1 published"
+      assert html =~ "1 to review"
+      refute has_element?(view, "button", "Generate quiz (AI)")
+      assert has_element?(view, "a[title='Manage quiz']")
+    end
+
+    test "deleting a module's quiz removes it and its questions", %{conn: conn} do
+      course = course_fixture()
+      module = course_module_fixture(course_id: course.id, title: "Module One")
+      quiz = quiz_fixture(%{module: module, title: "Module One Quiz"})
+      question_fixture(%{quiz: quiz, status: :published, position: 1})
+
+      {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.id}")
+
+      assert has_element?(view, "button[title='Delete quiz']")
+      refute has_element?(view, "#delete-quiz-modal")
+
+      view
+      |> element("button[title='Delete quiz']")
+      |> render_click()
+
+      assert has_element?(view, "#delete-quiz-modal")
+      assert Wasomi.Assessments.get_quiz!(quiz.id)
+
+      view
+      |> element("#delete-quiz-modal button", "Delete quiz")
+      |> render_click()
+
+      refute has_element?(view, "#delete-quiz-modal")
+      refute has_element?(view, "button[title='Delete quiz']")
+      assert has_element?(view, "button", "Generate quiz (AI)")
+      assert_raise Ecto.NoResultsError, fn -> Wasomi.Assessments.get_quiz!(quiz.id) end
+    end
+
+    test "cancelling the delete-quiz confirmation leaves the quiz intact", %{conn: conn} do
+      course = course_fixture()
+      module = course_module_fixture(course_id: course.id, title: "Module One")
+      quiz = quiz_fixture(%{module: module, title: "Module One Quiz"})
+
+      {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.id}")
+
+      view |> element("button[title='Delete quiz']") |> render_click()
+      view |> element("#delete-quiz-modal button", "Cancel") |> render_click()
+
+      refute has_element?(view, "#delete-quiz-modal")
+      assert Wasomi.Assessments.get_quiz!(quiz.id)
     end
 
     test "adds a module through the curriculum editor", %{conn: conn} do

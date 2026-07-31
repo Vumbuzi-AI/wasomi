@@ -33,8 +33,8 @@ defmodule Wasomi.StorageTest do
   test "R2 rejects unsupported or oversized upload metadata" do
     assert {:error, :unsupported_content_type} =
              R2.presign_upload(nil, %{
-               "filename" => "notes.zip",
-               "content_type" => "application/zip",
+               "filename" => "notes.exe",
+               "content_type" => "application/x-msdownload",
                "size" => 100
              })
 
@@ -42,6 +42,13 @@ defmodule Wasomi.StorageTest do
              R2.presign_upload(nil, %{
                "filename" => "notes.pdf",
                "content_type" => "application/pdf",
+               "size" => 50_000_001
+             })
+
+    assert {:error, :document_too_large} =
+             R2.presign_upload(nil, %{
+               "filename" => "archive.zip",
+               "content_type" => "application/zip",
                "size" => 50_000_001
              })
   end
@@ -73,11 +80,14 @@ defmodule Wasomi.StorageTest do
              R2.presign_upload(nil, %{
                "filename" => "notes.pdf",
                "content_type" => "application/pdf",
-               "size" => 100
+               "size" => 100,
+               "prefix" => "lecture-42"
              })
 
     assert %URI{scheme: "https", host: "r2.example.test", path: "/test-bucket/" <> _} =
              URI.parse(url)
+
+    assert URI.parse(url).path =~ "/test-bucket/lectures/lecture-42/notes.pdf"
   end
 
   test "R2 presigned uploads return nil public_url without a public base" do

@@ -7,6 +7,8 @@ defmodule Wasomi.Storage.R2 do
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => :document,
     "application/vnd.ms-powerpoint" => :document,
     "application/vnd.openxmlformats-officedocument.presentationml.presentation" => :document,
+    "application/zip" => :document,
+    "application/x-zip-compressed" => :document,
     "text/plain" => :document,
     "video/mp4" => :video,
     "video/quicktime" => :video,
@@ -31,7 +33,7 @@ defmodule Wasomi.Storage.R2 do
          {:ok, bucket} <- bucket(),
          {:ok, endpoint} <- endpoint(),
          {:ok, byte_size} <- normalize_size(byte_size) do
-      key = "lectures/#{Ecto.UUID.generate()}/#{safe_filename(filename)}"
+      key = upload_key(attrs, filename)
 
       config =
         ExAws.Config.new(:s3, host: endpoint.host, port: endpoint.port, scheme: endpoint.scheme)
@@ -54,6 +56,32 @@ defmodule Wasomi.Storage.R2 do
       end
     end
   end
+
+  defp upload_key(attrs, filename) do
+    prefix =
+      attrs
+      |> Map.get("prefix", Map.get(attrs, :prefix, "draft-#{Ecto.UUID.generate()}"))
+      |> to_string()
+      |> String.replace(~r/[^A-Za-z0-9_-]/, "_")
+
+    "lectures/#{prefix}/#{safe_filename(filename)}"
+  end
+
+  @impl true
+  def delete_upload(_user, key) when is_binary(key) and key != "" do
+    with {:ok, bucket} <- bucket(),
+         {:ok, endpoint} <- endpoint() do
+      config =
+        ExAws.Config.new(:s3, host: endpoint.host, port: endpoint.port, scheme: endpoint.scheme)
+
+      case ExAws.S3.delete_object(bucket, key) |> ExAws.request(config) do
+        {:ok, _response} -> :ok
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
+  def delete_upload(_user, _key), do: {:error, :invalid_storage_key}
 
   defp validate_metadata(filename, content_type, byte_size)
        when is_binary(filename) and filename != "" and is_binary(content_type) do
@@ -80,6 +108,7 @@ defmodule Wasomi.Storage.R2 do
       ".docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
       ".ppt" -> "application/vnd.ms-powerpoint"
       ".pptx" -> "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+      ".zip" -> "application/zip"
       ".txt" -> "text/plain"
       ".mp4" -> "video/mp4"
       ".mov" -> "video/quicktime"

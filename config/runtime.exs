@@ -1,5 +1,30 @@
 import Config
 
+# Load local development/test secrets before the runtime configuration reads
+# them. Explicit shell exports take precedence over values in .env.
+if config_env() in [:dev, :test] do
+  dotenv_path = Path.expand("../.env", __DIR__)
+
+  if File.exists?(dotenv_path) do
+    dotenv_path
+    |> File.read!()
+    |> String.split("\n", trim: true)
+    |> Enum.each(fn line ->
+      line = String.trim(line)
+
+      if line != "" and not String.starts_with?(line, "#") and String.contains?(line, "=") do
+        [key, value] = String.split(line, "=", parts: 2)
+        key = String.trim(key)
+        value = value |> String.trim() |> String.trim("\"") |> String.trim("'")
+
+        if System.get_env(key) in [nil, ""] do
+          System.put_env(key, value)
+        end
+      end
+    end)
+  end
+end
+
 # config/runtime.exs is executed for all environments, including
 # during releases. It is executed after compilation and before the
 # system starts, so it is typically used to load production configuration

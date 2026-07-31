@@ -1,23 +1,66 @@
 defmodule WasomiWeb.CoursePlayerLive do
+  @moduledoc """
+  The learner course player, and (via the `:preview` `live_action`, only
+  reachable under the admin-gated `/admin/courses/:slug/preview` route) the
+  admin "view as learner" preview mode.
+
+  Preview mode reuses this exact module — same markup, same navigation,
+  same lecture-unlock rules — rather than a parallel LiveView, so what an
+  admin sees is provably what a learner sees. Two things differ, both
+  gated on `@preview?`:
+
+    * The pay-gate is skipped entirely for `@preview?`, rather than via any
+      bypass in `Wasomi.Enrollments` — that module's checks stay pay-gate-only
+      for every caller, admin or not. `@preview?` is only ever true when
+      `live_action == :preview`, which is itself only reachable through the
+      admin-gated `/admin/courses/:slug/preview` route, so this can't be
+      reached by a non-admin.
+    * Progress is never persisted. Real learners' progress comes from
+      `Wasomi.Learning` (backed by the `lecture_progress` table); preview
+      progress lives only in `@preview_progress`, a plain map kept in the
+      socket for the life of the LiveView process. Closing the tab discards
+      it — nothing is ever written for the admin's own user, so preview
+      clicks can never pollute real completion analytics.
+
+  Both progress sources are fed through the same `Learning.summarize_progress/2`
+  and the same local unlock/next-lecture logic, so the two modes can't drift
+  apart in how they compute "is this lecture unlocked."
+  """
+
   use WasomiWeb, :live_view
 
-  alias Wasomi.{Catalog, Certificates, Enrollments, Learning}
+  alias Wasomi.{Assessments, Catalog, Certificates, Enrollments, Learning}
 
   @impl true
   def mount(%{"slug" => slug}, _session, socket) do
-    course = Catalog.get_published_course_by_slug!(slug)
+    preview? = socket.assigns.live_action == :preview
+    course = fetch_course(slug, preview?)
 
-    case Enrollments.authorize_course(socket.assigns.current_user, course) do
+    authorization =
+      if preview?,
+        do: {:ok, course},
+        else: Enrollments.authorize_course(socket.assigns.current_user, course)
+
+    case authorization do
       {:ok, course} ->
-        if connected?(socket) do
+        if connected?(socket) and not preview? do
           Learning.subscribe(socket.assigns.current_user)
           Certificates.subscribe(socket.assigns.current_user)
         end
 
+        quizzes_by_module = Assessments.get_quizzes_by_module(course.id)
+
         {:ok,
          socket
-         |> assign(:page_title, course.title)
+         |> assign(:page_title, preview_page_title(course, preview?))
          |> assign(:course, course)
+         |> assign(:quizzes_by_module, quizzes_by_module)
+         |> assign(:current_quiz, nil)
+         |> assign(:quiz_answers, %{})
+         |> assign(:quiz_result, nil)
+         |> assign(:current_question_index, 0)
+         |> assign(:preview?, preview?)
+         |> assign(:preview_progress, %{})
          |> refresh_progress()}
 
       {:error, :forbidden} ->
@@ -28,19 +71,164 @@ defmodule WasomiWeb.CoursePlayerLive do
     end
   end
 
+  defp fetch_course(slug, true), do: Catalog.get_course_by_slug!(slug)
+  defp fetch_course(slug, false), do: Catalog.get_published_course_by_slug!(slug)
+
+  defp preview_page_title(course, true), do: "Preview · #{course.title}"
+  defp preview_page_title(course, false), do: course.title
+
+  # `preview=true` is only ever honored server-side (WasomiWeb.MediaController)
+  # if the authenticated session user is actually an admin, so a non-admin
+  # copying this URL gains nothing — the real gate stays intact for them.
+  defp playback_url_path(lecture_id, true),
+    do: ~p"/media/lectures/#{lecture_id}/playback?preview=true"
+
+  defp playback_url_path(lecture_id, false), do: ~p"/media/lectures/#{lecture_id}/playback"
+
   @impl true
   def handle_event("select-lecture", %{"id" => id}, socket) do
     lecture = find_lecture(socket.assigns.course, id)
 
-    if lecture &&
-         Learning.lecture_unlocked?(socket.assigns.current_user, socket.assigns.course, lecture) do
+    if lecture && lecture_unlocked?(socket.assigns.unlocked_lecture_ids, lecture.id) do
       {:noreply,
        socket
+       |> assign(:current_quiz, nil)
+       |> assign(:quiz_result, nil)
        |> assign(:current_lecture, lecture)
-       |> assign(:page_title, "#{lecture.title} · #{socket.assigns.course.title}")}
+       |> assign(:page_title, lecture_page_title(socket, lecture))}
     else
       {:noreply, put_flash(socket, :error, "Complete the previous lecture to unlock this one.")}
     end
+  end
+
+  @impl true
+  def handle_event("select-quiz", %{"module_id" => module_id_str}, socket) do
+    module = Enum.find(socket.assigns.course.modules, &(to_string(&1.id) == module_id_str))
+
+    if module do
+      case Map.get(socket.assigns.quizzes_by_module, module.id) do
+        nil ->
+          {:noreply, put_flash(socket, :error, "No quiz is available for this module yet.")}
+
+        quiz ->
+          questions = Assessments.list_published_questions(quiz)
+
+          if questions == [] do
+            {:noreply,
+             put_flash(socket, :error, "This quiz does not have any published questions yet.")}
+          else
+            existing_submission =
+              if socket.assigns.preview? do
+                nil
+              else
+                user_submissions =
+                  Assessments.list_submissions_for_user(socket.assigns.current_user, quiz)
+
+                List.first(user_submissions)
+              end
+
+            {:noreply,
+             socket
+             |> assign(:current_lecture, nil)
+             |> assign(:current_quiz, %{quiz: quiz, module: module, questions: questions})
+             |> assign(:quiz_answers, %{})
+             |> assign(:quiz_result, existing_submission)
+             |> assign(:current_question_index, 0)
+             |> assign(
+               :page_title,
+               "Module Quiz: #{module.title} · #{socket.assigns.course.title}"
+             )}
+          end
+      end
+    else
+      {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_event(
+        "select-quiz-option",
+        %{"question-id" => q_id, "option-id" => opt_id},
+        socket
+      ) do
+    quiz_answers = Map.put(socket.assigns.quiz_answers, to_string(q_id), to_string(opt_id))
+    {:noreply, assign(socket, :quiz_answers, quiz_answers)}
+  end
+
+  @impl true
+  def handle_event("submit-quiz", _params, socket) do
+    case socket.assigns.current_quiz do
+      %{quiz: quiz, questions: questions} ->
+        answers = socket.assigns.quiz_answers
+
+        if socket.assigns.preview? do
+          normalized = Map.new(answers, fn {k, v} -> {to_string(k), to_string(v)} end)
+
+          correct_count =
+            Enum.count(questions, fn q ->
+              selected = Map.get(normalized, to_string(q.id))
+
+              Enum.any?(
+                q.question_options,
+                &(to_string(&1.id) == selected and &1.correct)
+              )
+            end)
+
+          score_percent =
+            if questions != [], do: round(correct_count / length(questions) * 100), else: 0
+
+          passed = score_percent >= quiz.passing_score_percent
+
+          result = %{
+            score_percent: score_percent,
+            passed: passed,
+            preview?: true,
+            correct_count: correct_count,
+            total_count: length(questions)
+          }
+
+          {:noreply, assign(socket, :quiz_result, result)}
+        else
+          case Assessments.submit_quiz(socket.assigns.current_user, quiz, answers) do
+            {:ok, submission} ->
+              {:noreply,
+               socket
+               |> assign(:quiz_result, submission)
+               |> put_flash(:info, "Quiz submitted successfully!")}
+
+            {:error, :quiz_not_ready} ->
+              {:noreply, put_flash(socket, :error, "This quiz is not ready for submission.")}
+
+            {:error, _changeset} ->
+              {:noreply, put_flash(socket, :error, "Could not submit quiz.")}
+          end
+        end
+
+      nil ->
+        {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_event("retake-quiz", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:quiz_result, nil)
+     |> assign(:quiz_answers, %{})
+     |> assign(:current_question_index, 0)}
+  end
+
+  @impl true
+  def handle_event("next-question", _params, socket) do
+    last_index = length(socket.assigns.current_quiz.questions) - 1
+    next_index = min(socket.assigns.current_question_index + 1, last_index)
+    {:noreply, assign(socket, :current_question_index, next_index)}
+  end
+
+  @impl true
+  def handle_event("prev-question", _params, socket) do
+    prev_index = max(socket.assigns.current_question_index - 1, 0)
+    {:noreply, assign(socket, :current_question_index, prev_index)}
   end
 
   @impl true
@@ -49,13 +237,58 @@ defmodule WasomiWeb.CoursePlayerLive do
         %{"lecture_id" => lecture_id, "position_seconds" => position},
         socket
       ) do
-    with %{} = lecture <- current_lecture(socket, lecture_id),
-         {:ok, _progress, _events} <-
-           Learning.record_progress(socket.assigns.current_user, lecture, position) do
-      {:noreply, refresh_progress(socket)}
-    else
+    case current_lecture(socket, lecture_id) do
       nil ->
         {:noreply, socket}
+
+      lecture ->
+        if socket.assigns.preview? do
+          {:noreply,
+           socket
+           |> put_preview_progress(lecture.id, :in_progress, position)
+           |> refresh_progress()}
+        else
+          persist_progress(socket, lecture, position, false)
+        end
+    end
+  end
+
+  @impl true
+  def handle_event("complete-lecture", %{"lecture_id" => lecture_id}, socket) do
+    case current_lecture(socket, lecture_id) do
+      nil ->
+        {:noreply, socket}
+
+      lecture ->
+        if socket.assigns.preview? do
+          {:noreply,
+           socket
+           |> put_preview_progress(lecture.id, :completed, lecture.duration_seconds)
+           |> refresh_progress()
+           |> put_flash(:info, "Lecture marked complete — preview only, nothing was saved.")}
+        else
+          persist_progress(socket, lecture, lecture.duration_seconds, true)
+        end
+    end
+  end
+
+  defp persist_progress(socket, lecture, position, explicit_complete?) do
+    result =
+      if explicit_complete? do
+        Learning.mark_complete(socket.assigns.current_user, lecture)
+      else
+        Learning.record_progress(socket.assigns.current_user, lecture, position)
+      end
+
+    case result do
+      {:ok, _progress, _events} when explicit_complete? ->
+        {:noreply,
+         socket
+         |> refresh_progress()
+         |> put_flash(:info, "Lecture completed. The next lesson is now unlocked.")}
+
+      {:ok, _progress, _events} ->
+        {:noreply, refresh_progress(socket)}
 
       {:error, :forbidden} ->
         {:noreply, redirect_to_checkout(socket)}
@@ -65,25 +298,21 @@ defmodule WasomiWeb.CoursePlayerLive do
     end
   end
 
-  @impl true
-  def handle_event("complete-lecture", %{"lecture_id" => lecture_id}, socket) do
-    with %{} = lecture <- current_lecture(socket, lecture_id),
-         {:ok, _progress, _events} <-
-           Learning.mark_complete(socket.assigns.current_user, lecture) do
-      {:noreply,
-       socket
-       |> refresh_progress()
-       |> put_flash(:info, "Lecture completed. The next lesson is now unlocked.")}
-    else
-      nil ->
-        {:noreply, socket}
+  defp put_preview_progress(socket, lecture_id, status, position_seconds) do
+    update(socket, :preview_progress, fn preview_progress ->
+      # Sticky completed — mirrors Learning.record_progress/3, so a late
+      # video-progress tick can never un-complete a finished lecture.
+      case Map.get(preview_progress, lecture_id) do
+        %{status: :completed} ->
+          preview_progress
 
-      {:error, :forbidden} ->
-        {:noreply, redirect_to_checkout(socket)}
-
-      {:error, _reason} ->
-        {:noreply, put_flash(socket, :error, "We couldn't complete this lecture.")}
-    end
+        _ ->
+          Map.put(preview_progress, lecture_id, %{
+            status: status,
+            last_position_seconds: position_seconds
+          })
+      end
+    end)
   end
 
   @impl true
@@ -105,12 +334,35 @@ defmodule WasomiWeb.CoursePlayerLive do
     <.student_layout active={:courses} current_user={@current_user}>
       <div id="course-player" class="py-8 lg:py-12">
         <div class="mx-auto max-w-container px-5 lg:px-8">
+          <div
+            :if={@preview?}
+            id="admin-preview-banner"
+            class="mb-6 flex flex-col items-start justify-between gap-3 rounded-2xl bg-dark px-5 py-3.5 text-white sm:flex-row sm:items-center sm:px-6"
+          >
+            <div class="flex flex-wrap items-center gap-3">
+              <span class="inline-flex items-center gap-2 rounded-full bg-amber-500/20 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-amber-400">
+                <.icon name="hero-eye" class="h-4 w-4" /> Admin Preview Mode
+              </span>
+              <p class="text-sm font-medium text-white/90">
+                You are viewing this course as a learner.
+                <span class="text-white/60">— Progress & quiz scores will not be recorded.</span>
+              </p>
+            </div>
+            <.link
+              navigate={~p"/admin/courses/#{@course.id}"}
+              class="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/20 bg-white/10 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-white hover:text-dark"
+            >
+              <.icon name="hero-x-mark" class="h-4 w-4" /> Exit Preview
+            </.link>
+          </div>
+
           <div class="flex flex-col gap-6">
             <div class="flex items-center justify-between gap-4">
               <span class="rounded-full bg-mint px-3 py-1 text-xs font-medium uppercase tracking-wider text-primary">
-                Enrolled
+                {if @preview?, do: "Preview", else: "Enrolled"}
               </span>
               <.link
+                :if={!@preview?}
                 navigate={~p"/courses/#{@course.slug}"}
                 class="inline-flex items-center gap-1.5 text-sm font-medium text-muted transition hover:text-primary"
               >
@@ -144,65 +396,227 @@ defmodule WasomiWeb.CoursePlayerLive do
           </div>
 
           <div class="mt-10 grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_340px] lg:gap-12">
-            <section class="overflow-hidden rounded-3xl bg-dark">
-              <%= if @current_lecture do %>
-                <div
-                  id={"protected-player-#{@current_lecture.id}"}
-                  phx-hook="ProtectedVideo"
-                  phx-update="ignore"
-                  data-playback-url={~p"/media/lectures/#{@current_lecture.id}/playback"}
-                  data-video-title={@current_lecture.title}
-                  data-viewer-id={@current_user.id}
-                  data-lecture-id={@current_lecture.id}
-                  data-start-position={progress_position(@progress, @current_lecture.id)}
-                  class="relative aspect-video overflow-hidden bg-black"
-                  oncontextmenu="return false"
-                >
-                  <div
-                    data-role="player"
-                    class="absolute inset-0 grid place-items-center text-sm text-white/70"
-                  >
-                    Loading protected video…
+            <section class="overflow-hidden rounded-3xl border border-black/5 bg-white">
+              <%= if @current_quiz do %>
+                <div class="p-8 lg:p-10">
+                  <div class="flex flex-wrap items-center justify-between gap-4 border-b border-black/5 pb-6">
+                    <div>
+                      <span class="inline-flex items-center gap-2 rounded-full bg-mint px-3 py-1 text-xs font-semibold uppercase tracking-wider text-primary">
+                        <.icon name="hero-academic-cap" class="h-4 w-4" />
+                        Module {@current_quiz.module.position} Quiz
+                      </span>
+                      <h2 class="mt-2 text-2xl font-semibold tracking-tight text-dark">
+                        {@current_quiz.module.title}
+                      </h2>
+                      <p class="mt-1 text-sm text-muted">
+                        Passing requirement:
+                        <span class="font-semibold text-primary">
+                          {@current_quiz.quiz.passing_score_percent}% score
+                        </span>
+                      </p>
+                    </div>
                   </div>
-                  <div
-                    data-role="watermark"
-                    class="pointer-events-none absolute left-[6%] top-[8%] z-20 max-w-[80%] select-none rounded-full bg-black/30 px-3 py-1 text-xs font-medium text-white/60 backdrop-blur-sm transition-all duration-1000"
-                  >
-                    {@current_user.email}
-                  </div>
-                </div>
-                <div class="p-8 text-white lg:p-10">
-                  <p class="text-xs font-medium uppercase tracking-widest text-primary">
-                    Now playing
-                  </p>
-                  <h2 class="mt-3 text-2xl font-semibold tracking-tight">{@current_lecture.title}</h2>
-                  <p class="mt-3 max-w-2xl leading-relaxed text-white/60">
-                    {@current_lecture.description}
-                  </p>
 
-                  <div class="mt-8 flex flex-wrap items-center gap-3">
-                    <button
-                      :if={progress_status(@progress, @current_lecture.id) != :completed}
-                      id="mark-lecture-complete"
-                      type="button"
-                      phx-click="complete-lecture"
-                      phx-value-lecture_id={@current_lecture.id}
-                      class="rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-white transition hover:bg-white hover:text-dark"
-                    >
-                      Mark complete
-                    </button>
-                    <span
-                      :if={progress_status(@progress, @current_lecture.id) == :completed}
-                      class="inline-flex items-center gap-2 rounded-full bg-primary/20 px-4 py-2 text-sm font-medium text-white"
-                    >
-                      <.icon name="hero-check-circle" class="h-5 w-5 text-primary" /> Completed
-                    </span>
-                  </div>
+                  <%= if @quiz_result do %>
+                    <div class={[
+                      "mt-8 rounded-2xl p-6 text-center sm:p-8",
+                      if(result_passed?(@quiz_result), do: "bg-mint", else: "bg-red-50")
+                    ]}>
+                      <div class={[
+                        "mx-auto flex h-16 w-16 items-center justify-center rounded-full",
+                        if(result_passed?(@quiz_result),
+                          do: "bg-white text-primary",
+                          else: "bg-white text-red-600"
+                        )
+                      ]}>
+                        <.icon
+                          name={
+                            if(result_passed?(@quiz_result),
+                              do: "hero-check-circle",
+                              else: "hero-x-circle"
+                            )
+                          }
+                          class="h-8 w-8"
+                        />
+                      </div>
+
+                      <h3 class="mt-4 text-2xl font-bold text-dark">
+                        {if result_passed?(@quiz_result), do: "Quiz Passed!", else: "Quiz Not Passed"}
+                      </h3>
+                      <p class={[
+                        "mt-2 text-3xl font-extrabold",
+                        if(result_passed?(@quiz_result), do: "text-primary", else: "text-red-600")
+                      ]}>
+                        {result_score(@quiz_result)}%
+                      </p>
+
+                      <p :if={@quiz_result[:preview?]} class="mt-3 text-xs text-muted">
+                        Admin Preview Result — score was evaluated in-memory and not saved.
+                      </p>
+
+                      <div class="mt-6 flex justify-center gap-4">
+                        <button
+                          type="button"
+                          phx-click="retake-quiz"
+                          class="rounded-full border border-black/10 bg-white px-5 py-2.5 text-sm font-semibold text-dark transition hover:bg-dark hover:text-white"
+                        >
+                          Retake Quiz
+                        </button>
+                      </div>
+                    </div>
+                  <% else %>
+                    <% question = Enum.at(@current_quiz.questions, @current_question_index) %>
+                    <% total = length(@current_quiz.questions) %>
+                    <% last_question? = @current_question_index == total - 1 %>
+                    <form phx-submit="submit-quiz" class="mt-8 space-y-6">
+                      <div class="h-1.5 overflow-hidden rounded-full bg-mint">
+                        <div
+                          class="h-full rounded-full bg-primary transition-all duration-300"
+                          style={"width: #{round((@current_question_index + 1) / total * 100)}%"}
+                        >
+                        </div>
+                      </div>
+
+                      <div class="rounded-2xl border border-black/5 p-6">
+                        <p class="text-xs font-semibold uppercase tracking-wider text-primary">
+                          Question {@current_question_index + 1} of {total}
+                        </p>
+                        <h3 class="mt-2 text-lg font-medium leading-snug text-dark">
+                          {question.prompt}
+                        </h3>
+
+                        <div class="mt-4 space-y-2.5">
+                          <label
+                            :for={option <- question.question_options}
+                            class={[
+                              "flex items-center gap-3 rounded-xl border p-3.5 transition cursor-pointer",
+                              if(
+                                to_string(Map.get(@quiz_answers, to_string(question.id))) ==
+                                  to_string(option.id),
+                                do: "border-primary bg-mint text-dark font-medium",
+                                else:
+                                  "border-black/10 text-body hover:border-primary/40 hover:bg-mint/40"
+                              )
+                            ]}
+                          >
+                            <input
+                              type="radio"
+                              name={"question_#{question.id}"}
+                              value={option.id}
+                              checked={
+                                to_string(Map.get(@quiz_answers, to_string(question.id))) ==
+                                  to_string(option.id)
+                              }
+                              phx-click="select-quiz-option"
+                              phx-value-question-id={question.id}
+                              phx-value-option-id={option.id}
+                              class="h-4 w-4 border-black/20 bg-white text-primary focus:ring-primary"
+                            />
+                            <span class="text-sm">{option.label}</span>
+                          </label>
+                        </div>
+                      </div>
+
+                      <div class="flex items-center justify-between border-t border-black/5 pt-6">
+                        <button
+                          type="button"
+                          phx-click="prev-question"
+                          disabled={@current_question_index == 0}
+                          class="inline-flex items-center gap-1.5 rounded-full border border-black/10 px-5 py-2.5 text-sm font-semibold text-dark transition hover:bg-mint disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          <.icon name="hero-arrow-left" class="h-4 w-4" /> Back
+                        </button>
+
+                        <span class="text-xs text-muted">
+                          Answered {map_size(@quiz_answers)} of {total} questions
+                        </span>
+
+                        <button
+                          :if={!last_question?}
+                          type="button"
+                          phx-click="next-question"
+                          class="inline-flex items-center gap-1.5 rounded-full bg-primary px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-dark"
+                        >
+                          Next <.icon name="hero-arrow-right" class="h-4 w-4" />
+                        </button>
+
+                        <button
+                          :if={last_question?}
+                          type="submit"
+                          disabled={map_size(@quiz_answers) < total}
+                          class="rounded-full bg-primary px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-dark disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          Submit Quiz
+                        </button>
+                      </div>
+                    </form>
+                  <% end %>
                 </div>
               <% else %>
-                <div class="grid min-h-80 place-items-center p-8 text-center text-white/70">
-                  This course does not have any lectures yet.
-                </div>
+                <%= if @current_lecture do %>
+                  <div class="p-3">
+                    <div
+                      id={"protected-player-#{@current_lecture.id}"}
+                      phx-hook="ProtectedVideo"
+                      phx-update="ignore"
+                      data-playback-url={playback_url_path(@current_lecture.id, @preview?)}
+                      data-video-title={@current_lecture.title}
+                      data-viewer-id={@current_user.id}
+                      data-lecture-id={@current_lecture.id}
+                      data-start-position={progress_position(@progress, @current_lecture.id)}
+                      class="relative aspect-video overflow-hidden rounded-2xl bg-black"
+                      oncontextmenu="return false"
+                    >
+                      <div
+                        data-role="player"
+                        class="absolute inset-0 grid place-items-center text-sm text-white/70"
+                      >
+                        Loading protected video…
+                      </div>
+                      <div
+                        :if={!@preview?}
+                        data-role="watermark"
+                        class="pointer-events-none absolute left-[6%] top-[8%] z-20 max-w-[80%] select-none rounded-full bg-black/30 px-3 py-1 text-xs font-medium text-white/60 backdrop-blur-sm transition-all duration-1000"
+                      >
+                        {@current_user.email}
+                      </div>
+                    </div>
+                  </div>
+                  <div class="bg-white p-8 lg:p-10">
+                    <p class="text-xs font-medium uppercase tracking-widest text-primary">
+                      Now playing
+                    </p>
+                    <h2 class="mt-3 text-2xl font-semibold tracking-tight text-dark">
+                      {@current_lecture.title}
+                    </h2>
+                    <p class="mt-3 max-w-2xl leading-relaxed text-body">
+                      {@current_lecture.description}
+                    </p>
+
+                    <div class="mt-8 flex flex-wrap items-center gap-3">
+                      <button
+                        :if={progress_status(@progress, @current_lecture.id) != :completed}
+                        id="mark-lecture-complete"
+                        type="button"
+                        phx-click="complete-lecture"
+                        phx-value-lecture_id={@current_lecture.id}
+                        class="rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-white transition hover:bg-dark"
+                      >
+                        Mark complete
+                      </button>
+                      <span
+                        :if={progress_status(@progress, @current_lecture.id) == :completed}
+                        class="inline-flex items-center gap-2 rounded-full bg-mint px-4 py-2 text-sm font-medium text-primary"
+                      >
+                        <.icon name="hero-check-circle" class="h-5 w-5" /> Completed
+                      </span>
+                    </div>
+                  </div>
+                <% else %>
+                  <div class="grid min-h-80 place-items-center bg-white p-8 text-center text-muted">
+                    This course does not have any content selected.
+                  </div>
+                <% end %>
               <% end %>
             </section>
 
@@ -273,6 +687,27 @@ defmodule WasomiWeb.CoursePlayerLive do
                         </span>
                       </span>
                     </button>
+
+                    <button
+                      :if={module_quiz = Map.get(@quizzes_by_module, module.id)}
+                      type="button"
+                      phx-click="select-quiz"
+                      phx-value-module_id={module.id}
+                      class={[
+                        "mt-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition",
+                        @current_quiz && @current_quiz.quiz.id == module_quiz.id &&
+                          "bg-mint font-medium text-primary",
+                        (!@current_quiz || @current_quiz.quiz.id != module_quiz.id) &&
+                          "text-body hover:bg-soft hover:text-dark"
+                      ]}
+                    >
+                      <span class="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-mint text-xs font-semibold text-primary">
+                        <.icon name="hero-academic-cap" class="h-3.5 w-3.5" />
+                      </span>
+                      <span class="min-w-0 flex-1">
+                        <span class="block font-medium truncate">Module {module.position} Quiz</span>
+                      </span>
+                    </button>
                   </div>
                 </section>
               </div>
@@ -280,6 +715,7 @@ defmodule WasomiWeb.CoursePlayerLive do
           </div>
 
           <section
+            :if={!@preview?}
             id="course-certificates"
             class="mt-8 rounded-3xl border border-black/5 bg-white p-6 lg:p-8"
           >
@@ -342,31 +778,47 @@ defmodule WasomiWeb.CoursePlayerLive do
     """
   end
 
-  defp refresh_progress(socket) do
-    user = socket.assigns.current_user
-    course = socket.assigns.course
-    course_progress = Learning.course_progress(user, course)
-    current_lecture = socket.assigns[:current_lecture] || Learning.next_lecture(user, course)
+  defp lecture_page_title(socket, lecture),
+    do: "#{lecture.title} · #{preview_page_title(socket.assigns.course, socket.assigns.preview?)}"
 
-    unlocked_lecture_ids =
-      course
-      |> course_lectures()
-      |> unlocked_lecture_ids(course_progress.progress)
+  defp refresh_progress(socket) do
+    course = socket.assigns.course
+    lectures = course_lectures(course)
+
+    progress =
+      if socket.assigns.preview? do
+        socket.assigns.preview_progress
+      else
+        Learning.progress_for_course(socket.assigns.current_user, course)
+      end
+
+    course_progress = Learning.summarize_progress(course, progress)
+    unlocked_lecture_ids = unlocked_lecture_ids(lectures, progress)
+    current_lecture = pick_current_lecture(socket, lectures, progress)
 
     socket
     |> assign(:course_progress, course_progress)
-    |> assign(:progress, course_progress.progress)
+    |> assign(:progress, progress)
     |> assign(:unlocked_lecture_ids, unlocked_lecture_ids)
     |> assign(:current_lecture, current_lecture)
     |> refresh_certificates()
   end
 
+  defp pick_current_lecture(socket, lectures, progress) do
+    socket.assigns[:current_lecture] ||
+      Enum.find(lectures, &(progress_status(progress, &1.id) != :completed)) ||
+      List.last(lectures)
+  end
+
   defp refresh_certificates(socket) do
-    assign(
-      socket,
-      :certificates,
-      Certificates.list_for_user_course(socket.assigns.current_user, socket.assigns.course)
-    )
+    certificates =
+      if socket.assigns.preview? do
+        []
+      else
+        Certificates.list_for_user_course(socket.assigns.current_user, socket.assigns.course)
+      end
+
+    assign(socket, :certificates, certificates)
   end
 
   defp redirect_to_checkout(socket) do
@@ -434,4 +886,12 @@ defmodule WasomiWeb.CoursePlayerLive do
 
   defp certificate_title(%{type: :module, module: module}), do: module.title
   defp certificate_title(%{type: :course, course: course}), do: course.title
+
+  defp result_passed?(%{passed: passed}), do: passed
+  defp result_passed?(%Wasomi.Assessments.QuizSubmission{passed: passed}), do: passed
+  defp result_passed?(_), do: false
+
+  defp result_score(%{score_percent: score}), do: score
+  defp result_score(%Wasomi.Assessments.QuizSubmission{score_percent: score}), do: score
+  defp result_score(_), do: 0
 end

@@ -14,18 +14,55 @@ defmodule WasomiWeb.CourseLive.FormComponent do
         <:subtitle>Use this form to manage course records in your database.</:subtitle>
       </.header>
 
+      <div :if={@course.id} class="mt-6 flex flex-wrap items-center gap-3">
+        <span class="text-sm font-medium text-muted">Status</span>
+        <.status_badge status={@course.status} />
+
+        <button
+          :if={@course.status == :draft}
+          type="button"
+          phx-click="submit_for_review"
+          phx-target={@myself}
+          class="ml-auto rounded-full border border-black/10 px-4 py-2 text-sm font-medium text-dark transition hover:border-primary hover:text-primary"
+        >
+          Submit for review
+        </button>
+        <button
+          :if={@course.status != :published}
+          type="button"
+          phx-click="publish_course"
+          phx-target={@myself}
+          class="rounded-full bg-dark px-4 py-2 text-sm font-medium text-white transition hover:bg-primary"
+        >
+          Publish course
+        </button>
+      </div>
+
+      <div
+        :if={@publish_issues}
+        class="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"
+      >
+        <p class="font-semibold">This course isn't ready to publish yet:</p>
+        <ul class="mt-2 list-inside list-disc space-y-1">
+          <li :for={issue <- @publish_issues}>{issue}</li>
+        </ul>
+      </div>
+
       <.simple_form
         for={@form}
         id="course-form"
         phx-target={@myself}
         phx-change="validate"
         phx-submit="save"
+        novalidate
       >
-        <.input field={@form[:slug]} type="text" label="Slug" />
+        <.input :if={@action == :edit} field={@form[:slug]} type="text" label="Slug" />
         <.input field={@form[:title]} type="text" label="Title" />
         <.input field={@form[:subtitle]} type="text" label="Subtitle" />
         <.input field={@form[:description]} type="textarea" label="Description" rows="5" />
-        <.input field={@form[:thumbnail_key]} type="text" label="Thumbnail key" />
+        <div class="hidden">
+          <.input field={@form[:thumbnail_key]} type="text" />
+        </div>
 
         <div class="space-y-3">
           <span class="block text-sm font-semibold leading-6 text-zinc-800">Upload thumbnail</span>
@@ -85,14 +122,6 @@ defmodule WasomiWeb.CourseLive.FormComponent do
         </div>
 
         <.input field={@form[:currency]} type="text" label="Currency" />
-        <.input
-          field={@form[:status]}
-          type="select"
-          label="Status"
-          prompt="Choose a value"
-          options={Ecto.Enum.values(Wasomi.Catalog.Course, :status)}
-        />
-        <.input field={@form[:position]} type="number" label="Position" />
         <:actions>
           <.button phx-disable-with="Saving...">Save Course</.button>
         </:actions>
@@ -107,6 +136,7 @@ defmodule WasomiWeb.CourseLive.FormComponent do
       socket
       |> assign(assigns)
       |> assign(:price_input, nil)
+      |> assign(:publish_issues, nil)
       |> assign_new(:form, fn ->
         to_form(Catalog.change_course(course))
       end)
@@ -151,6 +181,36 @@ defmodule WasomiWeb.CourseLive.FormComponent do
 
   def handle_event("cancel-upload", %{"ref" => ref}, socket) do
     {:noreply, cancel_upload(socket, :thumbnail, ref)}
+  end
+
+  def handle_event("submit_for_review", _params, socket) do
+    case Catalog.submit_course_for_review(socket.assigns.course) do
+      {:ok, course} ->
+        notify_parent({:saved, course})
+        {:noreply, assign(socket, course: course, publish_issues: nil)}
+
+      {:error, _changeset} ->
+        {:noreply, put_flash(socket, :error, "Could not submit this course for review.")}
+    end
+  end
+
+  def handle_event("publish_course", _params, socket) do
+    case Catalog.publish_course(socket.assigns.course) do
+      {:ok, course} ->
+        notify_parent({:saved, course})
+
+        {:noreply,
+         socket
+         |> put_flash(:info, "Course published — it's now visible in the public catalog.")
+         |> assign(course: course, publish_issues: nil)
+         |> push_patch(to: socket.assigns.patch)}
+
+      {:error, issues} when is_list(issues) ->
+        {:noreply, assign(socket, :publish_issues, issues)}
+
+      {:error, %Ecto.Changeset{}} ->
+        {:noreply, put_flash(socket, :error, "Could not publish this course.")}
+    end
   end
 
   defp put_uploaded_thumbnail(socket, params) do

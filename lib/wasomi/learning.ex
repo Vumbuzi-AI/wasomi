@@ -70,8 +70,22 @@ defmodule Wasomi.Learning do
   Produces course totals for the player and learner dashboard.
   """
   def course_progress(user_or_id, %Course{} = course) do
+    summarize_progress(course, progress_for_course(user_or_id, course))
+  end
+
+  @doc """
+  Pure version of `course_progress/2` for a progress map you already have,
+  rather than one just read from the database.
+
+  Used by `course_progress/2` itself, and by
+  `WasomiWeb.CoursePlayerLive`'s admin preview mode, which simulates
+  progress in-memory instead of persisting it — feeding the same simulated
+  map through this function guarantees preview totals are computed by
+  exactly the same rules as a real learner's, with no risk of the two
+  drifting apart.
+  """
+  def summarize_progress(%Course{} = course, progress) do
     lectures = course_lectures(course)
-    progress = progress_for_course(user_or_id, course)
     completed = Enum.count(lectures, &(progress_status(progress, &1.id) == :completed))
     total = length(lectures)
 
@@ -344,7 +358,12 @@ defmodule Wasomi.Learning do
 
   defp progress_status(progress, lecture_id) do
     case progress[lecture_id] do
-      %LectureProgress{status: status} -> status
+      # A plain %{status: ...} map matches a real %LectureProgress{} struct
+      # just as well as the struct pattern would — this stays generic
+      # because `summarize_progress/2` is fed either real LectureProgress
+      # structs (course_progress/2) or a plain simulated map
+      # (WasomiWeb.CoursePlayerLive's admin preview mode).
+      %{status: status} -> status
       nil -> :not_started
     end
   end

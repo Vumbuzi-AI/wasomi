@@ -4,7 +4,7 @@ defmodule Wasomi.Catalog.Course do
 
   schema "courses" do
     field :position, :integer, default: 1
-    field :status, Ecto.Enum, values: [:draft, :published], default: :draft
+    field :status, Ecto.Enum, values: [:draft, :in_review, :published], default: :draft
     field :description, :string
     field :title, :string
     field :currency, :string, default: "KES"
@@ -39,7 +39,6 @@ defmodule Wasomi.Catalog.Course do
       :title,
       :subtitle,
       :description,
-      :thumbnail_key,
       :price_minor,
       :currency,
       :status,
@@ -47,6 +46,7 @@ defmodule Wasomi.Catalog.Course do
     ])
     |> update_change(:slug, &normalize_slug/1)
     |> update_change(:currency, &String.upcase/1)
+    |> update_change(:title, &trim/1)
     |> validate_format(:slug, ~r/^[a-z0-9]+(?:-[a-z0-9]+)*$/,
       message: "must contain lowercase letters, numbers, and hyphens only"
     )
@@ -60,6 +60,9 @@ defmodule Wasomi.Catalog.Course do
     |> check_constraint(:position, name: :courses_position_must_be_positive)
     |> check_constraint(:status, name: :courses_status_must_be_valid)
   end
+
+  defp trim(value) when is_binary(value), do: String.trim(value)
+  defp trim(value), do: value
 
   defp normalize_slug(slug) when is_binary(slug) do
     slug

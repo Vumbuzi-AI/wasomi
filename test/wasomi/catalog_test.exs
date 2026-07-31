@@ -55,16 +55,29 @@ defmodule Wasomi.CatalogTest do
       assert course.price_minor == 42
     end
 
+    test "create_course/1 auto-assigns the next position when none is given" do
+      _c1 = course_fixture(position: 5, slug: "first-course")
+
+      assert {:ok, %Course{position: 6}} =
+               Catalog.create_course(%{
+                 title: "Second Course",
+                 description: "desc",
+                 subtitle: "sub",
+                 thumbnail_key: "key",
+                 price_minor: 100
+               })
+    end
+
     test "create_course/1 with invalid data returns error changeset" do
       assert {:error, %Ecto.Changeset{}} = Catalog.create_course(@invalid_attrs)
     end
 
     test "update_course/2 with valid data updates the course" do
-      course = course_fixture()
+      course = course_fixture(status: :draft)
 
       update_attrs = %{
         position: 43,
-        status: :published,
+        status: :in_review,
         description: "some updated description",
         title: "some updated title",
         currency: "usd",
@@ -76,7 +89,7 @@ defmodule Wasomi.CatalogTest do
 
       assert {:ok, %Course{} = course} = Catalog.update_course(course, update_attrs)
       assert course.position == 43
-      assert course.status == :published
+      assert course.status == :in_review
       assert course.description == "some updated description"
       assert course.title == "some updated title"
       assert course.currency == "USD"
@@ -84,6 +97,16 @@ defmodule Wasomi.CatalogTest do
       assert course.subtitle == "some updated subtitle"
       assert course.thumbnail_key == "some updated thumbnail_key"
       assert course.price_minor == 43
+    end
+
+    test "update_course/2 silently ignores an attempt to set status: :published directly" do
+      course = course_fixture(status: :draft)
+
+      assert {:ok, %Course{} = updated} =
+               Catalog.update_course(course, %{status: :published, title: "Still draft"})
+
+      assert updated.status == :draft
+      assert updated.title == "Still draft"
     end
 
     test "update_course/2 with invalid data returns error changeset" do
@@ -380,6 +403,98 @@ defmodule Wasomi.CatalogTest do
                first_lecture.id,
                later_lecture.id
              ]
+    end
+  end
+
+  describe "publish lifecycle" do
+    import Wasomi.CatalogFixtures
+
+    alias Wasomi.Catalog.PublishGuard
+
+    test "submit_course_for_review/1 moves a draft course to in_review" do
+      course = course_fixture(status: :draft)
+
+      assert {:ok, updated} = Catalog.submit_course_for_review(course)
+      assert updated.status == :in_review
+    end
+
+    test "PublishGuard.check/1 lists every missing requirement for a bare course" do
+      # price_minor is required (and NOT NULL) at both the changeset and DB
+      # level, so a real persisted course can never actually have a nil
+      # price — build the struct directly to unit-test that branch in
+      # isolation (same defense-in-depth reasoning as the video check).
+      course = %Wasomi.Catalog.Course{modules: [], price_minor: nil, thumbnail_key: ""}
+
+      assert {:error, issues} = PublishGuard.check(course)
+      assert "Add at least one module." in issues
+      assert "Set a course price." in issues
+      assert "Attach a course thumbnail." in issues
+      refute "Add at least one lecture." in issues
+    end
+
+    test "PublishGuard.check/1 treats a free (zero-price) course as having its price set" do
+      course = course_fixture(price_minor: 0, thumbnail_key: "cover.jpg")
+      course_module = course_module_fixture(course_id: course.id, position: 1)
+      lecture_fixture(module_id: course_module.id, position: 1, video_asset_id: "abc123")
+
+      assert PublishGuard.check(Catalog.get_course_with_outline!(course.id)) == :ok
+    end
+
+    test "PublishGuard.check/1 flags a module with no lectures" do
+      course = course_fixture()
+      course_module_fixture(course_id: course.id, position: 1)
+
+      assert {:error, issues} =
+               Catalog.get_course_with_outline!(course.id) |> PublishGuard.check()
+
+      assert "Add at least one lecture." in issues
+    end
+
+    test "PublishGuard.check/1 flags a lecture with no video attached" do
+      # `Wasomi.Catalog.Lecture`'s own changeset already requires
+      # `video_asset_id`, so a real persisted lecture can never actually
+      # reach the guard in this state today — build the struct directly to
+      # unit-test the guard's own logic in isolation (defense in depth: if
+      # that requirement is ever relaxed for a "video pending upload" draft
+      # lecture, this check is already correctly in place).
+      course = %Wasomi.Catalog.Course{
+        modules: [
+          %Wasomi.Catalog.CourseModule{
+            lectures: [%Wasomi.Catalog.Lecture{video_asset_id: nil}]
+          }
+        ]
+      }
+
+      assert {:error, issues} = PublishGuard.check(course)
+      assert "Every lecture needs a video attached." in issues
+    end
+
+    test "PublishGuard.check/1 passes a fully-prepared course" do
+      course = course_fixture(price_minor: 150_000, thumbnail_key: "cover.jpg")
+      course_module = course_module_fixture(course_id: course.id, position: 1)
+      lecture_fixture(module_id: course_module.id, position: 1, video_asset_id: "abc123")
+
+      assert PublishGuard.check(Catalog.get_course_with_outline!(course.id)) == :ok
+    end
+
+    test "publish_course/1 publishes a ready course and it appears in the public catalog" do
+      course =
+        course_fixture(status: :in_review, price_minor: 150_000, thumbnail_key: "cover.jpg")
+
+      course_module = course_module_fixture(course_id: course.id, position: 1)
+      lecture_fixture(module_id: course_module.id, position: 1, video_asset_id: "abc123")
+
+      assert {:ok, published} = Catalog.publish_course(course)
+      assert published.status == :published
+      assert Enum.any?(Catalog.list_published_courses(), &(&1.id == course.id))
+    end
+
+    test "publish_course/1 leaves the status unchanged and returns the checklist on failure" do
+      course = course_fixture(status: :draft, price_minor: 0)
+
+      assert {:error, issues} = Catalog.publish_course(course)
+      assert is_list(issues)
+      assert Catalog.get_course!(course.id).status == :draft
     end
   end
 end

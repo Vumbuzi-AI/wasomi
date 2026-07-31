@@ -34,6 +34,28 @@ defmodule Wasomi.Media do
     end
   end
 
+  @doc """
+  Signs a playback URL for an admin's "view as learner" preview session,
+  skipping the enrollment pay-gate entirely.
+
+  Only call this after independently verifying, from `conn.assigns.current_user`
+  (never from a client-supplied param), that the requester is really an
+  admin — see `WasomiWeb.MediaController.playback/2`, the only caller. The
+  `%User{role: :admin}` match below is a second, redundant guard against
+  ever wiring this up to an unverified caller by mistake.
+  """
+  def playback_url_for_preview(
+        %User{role: :admin} = user,
+        %Lecture{} = lecture,
+        ttl \\ 300,
+        adapter \\ configured_adapter()
+      ) do
+    with {:ok, token} <- adapter.playback_token(lecture, user, ttl),
+         {:ok, url} <- protected_stream_url(lecture, token) do
+      {:ok, %{url: url, expires_in: effective_ttl(lecture, ttl)}}
+    end
+  end
+
   def create_upload(user, lecture, opts \\ [], adapter \\ configured_adapter())
 
   def create_upload(

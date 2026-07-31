@@ -130,6 +130,18 @@ defmodule Wasomi.Enrollments do
 
   def can_access_course?(nil, _course), do: false
 
+  @doc """
+  A real (paid) access check — deliberately has no admin bypass.
+
+  Admin "view as learner" preview mode does *not* go through this function:
+  it's gated separately by the admin-only `/admin/courses/:slug/preview`
+  route (see `WasomiWeb.CoursePlayerLive`) and, for video playback, by
+  `Wasomi.Media.playback_url_for_preview/4`. Keeping this function pay-gate-only
+  means an admin who opens a plain learner course URL is held to the same
+  enrollment rule as anyone else — using the real preview route is the only
+  way to bypass it, and that route never persists progress or grants a real
+  enrollment.
+  """
   def can_access_course?(user_or_id, course_or_id) do
     not is_nil(active_enrollment(user_or_id, course_or_id))
   end

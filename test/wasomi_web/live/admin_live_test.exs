@@ -46,15 +46,12 @@ defmodule WasomiWeb.AdminLiveTest do
       {:ok, view, _html} = live(conn, ~p"/admin/courses/new")
 
       attrs = %{
-        slug: "new-admin-course",
         title: "A brand new course",
         subtitle: "Learn something",
         description: "A full description",
         thumbnail_key: "thumb.jpg",
         price_minor: "1500.00",
-        currency: "KES",
-        status: "published",
-        position: "3"
+        currency: "KES"
       }
 
       html =
@@ -64,7 +61,12 @@ defmodule WasomiWeb.AdminLiveTest do
 
       assert_patched(view, ~p"/admin/courses")
       assert html =~ "A brand new course"
-      assert %{price_minor: 150_000} = Wasomi.Catalog.get_course_by_slug!("new-admin-course")
+
+      # Status isn't a form field — the guarded publish flow (below) is the
+      # only path to :published, so a freshly created course stays :draft.
+      # Slug is auto-generated from title ("a-brand-new-course").
+      assert %{price_minor: 150_000, status: :draft} =
+               Wasomi.Catalog.get_course_by_slug!("a-brand-new-course")
     end
 
     test "uploads a course thumbnail through the modal form", %{conn: conn} do
@@ -81,14 +83,11 @@ defmodule WasomiWeb.AdminLiveTest do
         view
         |> form("#course-form",
           course: %{
-            slug: "uploaded-thumbnail-course",
             title: "Uploaded thumbnail course",
             subtitle: "Image upload",
             description: "A course with an uploaded thumbnail.",
             price_minor: "1500.00",
-            currency: "KES",
-            status: "published",
-            position: "4"
+            currency: "KES"
           }
         )
         |> render_submit()
@@ -298,6 +297,48 @@ defmodule WasomiWeb.AdminLiveTest do
       [module] = course.modules
       assert Enum.map(module.lectures, & &1.id) == [second.id, first.id]
       assert Enum.map(module.lectures, & &1.position) == [1, 2]
+    end
+  end
+
+  describe "publishing a course" do
+    setup %{conn: conn} do
+      %{conn: log_in_user(conn, admin_fixture())}
+    end
+
+    test "publishing fails with a checklist when the course isn't ready", %{conn: conn} do
+      course = course_fixture(status: :draft)
+      {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.id}/edit")
+
+      html = view |> element("button", "Publish course") |> render_click()
+
+      assert html =~ "ready to publish yet"
+      assert html =~ "Add at least one module."
+      assert Wasomi.Catalog.get_course!(course.id).status == :draft
+    end
+
+    test "publishing succeeds once every requirement is met", %{conn: conn} do
+      course =
+        course_fixture(status: :in_review, price_minor: 150_000, thumbnail_key: "cover.jpg")
+
+      module = course_module_fixture(course_id: course.id, position: 1)
+      lecture_fixture(module_id: module.id, position: 1, video_asset_id: "abc123")
+
+      {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.id}/edit")
+
+      view |> element("button", "Publish course") |> render_click()
+
+      assert_patched(view, ~p"/admin/courses")
+      assert Wasomi.Catalog.get_course!(course.id).status == :published
+    end
+
+    test "submit for review moves a draft course forward", %{conn: conn} do
+      course = course_fixture(status: :draft)
+      {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.id}/edit")
+
+      html = view |> element("button", "Submit for review") |> render_click()
+
+      assert html =~ "in_review"
+      assert Wasomi.Catalog.get_course!(course.id).status == :in_review
     end
   end
 

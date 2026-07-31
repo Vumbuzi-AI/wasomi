@@ -23,7 +23,8 @@ defmodule Wasomi.AssessmentsFixtures do
       |> Enum.into(%{
         title: "some quiz",
         description: "some description",
-        passing_score_percent: 70
+        passing_score_percent: 70,
+        active: false
       })
       |> then(&Assessments.create_quiz(module, &1))
 
@@ -55,6 +56,7 @@ defmodule Wasomi.AssessmentsFixtures do
       |> Map.delete(:quiz)
       |> Enum.into(%{
         prompt: "What is 2 + 2? (#{System.unique_integer([:positive])})",
+        explanation: "Two pairs make four.",
         status: :published,
         position: 1,
         question_options: question_options_attrs()

@@ -332,9 +332,17 @@ defmodule WasomiWeb.AdminLive.QuizShow do
           <.icon name="hero-arrow-left-mini" class="h-4 w-4" /> Back to course
         </.link>
 
-        <div>
-          <h1 class="text-2xl font-semibold text-dark">Manage quiz</h1>
-          <p class="mt-1 text-body">{@quiz.title}</p>
+        <div class="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h1 class="text-2xl font-semibold text-dark">Manage quiz</h1>
+            <p class="mt-1 text-body">{@quiz.title}</p>
+          </div>
+          <.link
+            navigate={~p"/admin/courses/#{@quiz.module.course_id}/quizzes/#{@quiz.id}/edit"}
+            class="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-dark"
+          >
+            <.icon name="hero-pencil-square" class="h-4 w-4" /> Edit & publish quiz
+          </.link>
         </div>
 
         <section class="rounded-3xl border border-black/5 bg-white p-6">

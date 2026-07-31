@@ -6,6 +6,8 @@ defmodule Wasomi.Assessments.Quiz do
     field :title, :string
     field :description, :string
     field :passing_score_percent, :integer, default: 70
+    field :active, :boolean, default: false
+    field :published_at, :utc_datetime
 
     belongs_to :module, Wasomi.Catalog.CourseModule, foreign_key: :module_id
 
@@ -17,7 +19,14 @@ defmodule Wasomi.Assessments.Quiz do
   @doc false
   def changeset(quiz, attrs) do
     quiz
-    |> cast(attrs, [:title, :description, :passing_score_percent, :module_id])
+    |> cast(attrs, [
+      :title,
+      :description,
+      :passing_score_percent,
+      :active,
+      :published_at,
+      :module_id
+    ])
     |> validate_required([:title, :passing_score_percent, :module_id])
     |> validate_length(:title, min: 3, max: 160)
     |> validate_number(:passing_score_percent,

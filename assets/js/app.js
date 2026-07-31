@@ -24,6 +24,28 @@ import topbar from "../vendor/topbar"
 
 const Hooks = {}
 
+const R2Uploader = (entries, onViewError) => {
+  entries.forEach(entry => {
+    const request = new XMLHttpRequest()
+    entry.xhr = request
+
+    request.upload.addEventListener("progress", event => {
+      if (event.lengthComputable) entry.progress(Math.round((event.loaded / event.total) * 100))
+    })
+    request.addEventListener("load", () => {
+      if (request.status >= 200 && request.status < 300) {
+        entry.progress(100)
+      } else {
+        onViewError(`R2 upload failed (${request.status})`)
+      }
+    })
+    request.addEventListener("error", () => onViewError("R2 upload failed because of a network error"))
+    request.open("PUT", entry.meta.url)
+    request.setRequestHeader("Content-Type", entry.meta.content_type || entry.file.type)
+    request.send(entry.file)
+  })
+}
+
 Hooks.SortableList = {
   mounted() {
     this.draggedItem = null
@@ -473,7 +495,8 @@ let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("
 let liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: Hooks
+  hooks: Hooks,
+  uploaders: {R2: R2Uploader}
 })
 
 // Show progress bar on live navigation and form submits

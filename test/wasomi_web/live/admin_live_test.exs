@@ -299,6 +299,73 @@ defmodule WasomiWeb.AdminLiveTest do
       assert Enum.map(module.lectures, & &1.id) == [second.id, first.id]
       assert Enum.map(module.lectures, & &1.position) == [1, 2]
     end
+
+    test "uploads a lecture resource file and handles invalid/no extension files gracefully", %{
+      conn: conn
+    } do
+      course = course_fixture()
+      module = course_module_fixture(course_id: course.id, title: "Module One")
+      {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.id}")
+
+      render_click(view, "new_lecture", %{"module-id" => to_string(module.id)})
+
+      # 1. Invalid extension: .exe
+      resources_exe =
+        file_input(view, "#lecture-form", :resources, [
+          %{name: "lesson.exe", content: "fake-exe-bytes", type: "application/x-msdownload"}
+        ])
+
+      assert {:error, [[_, %{reason: :not_accepted}]]} =
+               render_upload(resources_exe, "lesson.exe")
+
+      # 2. No extension at all
+      resources_no_ext =
+        file_input(view, "#lecture-form", :resources, [
+          %{name: "lesson", content: "fake-bytes", type: "application/octet-stream"}
+        ])
+
+      assert {:error, [[_, %{reason: :not_accepted}]]} = render_upload(resources_no_ext, "lesson")
+    end
+
+    test "cancelling a resource upload triggers delete_upload/2 path", %{conn: conn} do
+      previous_provider = Application.get_env(:wasomi, :storage_provider)
+      previous_test_pid = Application.get_env(:wasomi, :test_pid)
+
+      on_exit(fn ->
+        Application.put_env(:wasomi, :storage_provider, previous_provider)
+        Application.put_env(:wasomi, :test_pid, previous_test_pid)
+      end)
+
+      Application.put_env(:wasomi, :test_pid, self())
+      Application.put_env(:wasomi, :storage_provider, WasomiWeb.AdminLiveTest.StorageMock)
+
+      course = course_fixture()
+      module = course_module_fixture(course_id: course.id, title: "Module One")
+      {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.id}")
+
+      render_click(view, "new_lecture", %{"module-id" => to_string(module.id)})
+
+      # Upload a valid PDF file
+      resources_pdf =
+        file_input(view, "#lecture-form", :resources, [
+          %{name: "lesson.pdf", content: "fake-pdf-bytes", type: "application/pdf"}
+        ])
+
+      # We render the upload which triggers presigning
+      assert render_upload(resources_pdf, "lesson.pdf") =~ "100%"
+
+      # Extract the ref of the entry from the rendered html to trigger cancel-upload event
+      html = render(view)
+      [_, ref] = Regex.run(~r/id="resource-upload-([^"]+)"/, html)
+
+      # Trigger cancel-upload with that ref.
+      view
+      |> element("#resource-upload-#{ref} button[phx-click='cancel-upload']")
+      |> render_click()
+
+      # Assert that delete_upload_called message was sent to self
+      assert_received :delete_upload_called
+    end
   end
 
   describe "students and payments" do
@@ -316,5 +383,25 @@ defmodule WasomiWeb.AdminLiveTest do
       {:ok, _view, html} = live(conn, ~p"/admin/payments")
       assert html =~ "Total revenue"
     end
+  end
+end
+
+defmodule WasomiWeb.AdminLiveTest.StorageMock do
+  def presign_upload(_user, attrs) do
+    {:ok,
+     %{
+       url: "https://r2.example.test/presigned-url",
+       key: "lectures/draft-123/lesson.pdf",
+       public_url: "https://cdn.example.test/lectures/draft-123/lesson.pdf",
+       content_type: attrs["content_type"] || "application/pdf"
+     }}
+  end
+
+  def delete_upload(_user, _key) do
+    if test_pid = Application.get_env(:wasomi, :test_pid) do
+      send(test_pid, :delete_upload_called)
+    end
+
+    :ok
   end
 end

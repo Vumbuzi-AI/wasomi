@@ -2,6 +2,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
   use WasomiWeb, :live_component
 
   alias Wasomi.{Catalog, Storage}
+  alias WasomiWeb.AdminLive.Components.ResourceUploader
 
   @impl true
   def render(assigns) do
@@ -83,8 +84,6 @@ defmodule WasomiWeb.LectureLive.FormComponent do
 
         <section
           id="lecture-resources"
-          phx-hook="R2ResourceUpload"
-          data-target={@myself}
           class="space-y-4 rounded-2xl border border-black/5 bg-white p-4 sm:p-5"
         >
           <div class="flex flex-wrap items-start justify-between gap-3">
@@ -120,17 +119,13 @@ defmodule WasomiWeb.LectureLive.FormComponent do
             </div>
           </div>
           <div data-role="resource-panel" data-mode="upload">
-            <label class="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-primary bg-mint/40 px-4 py-3 text-sm font-medium text-primary transition hover:bg-mint">
-              <.icon name="hero-plus-circle" class="h-5 w-5" /> Select one or more files
-              <input
-                data-role="file"
-                type="file"
-                multiple
-                accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,.mp4,.mov,.webm"
-                class="sr-only"
-              />
-            </label>
-            <p class="mt-2 text-xs text-muted">Documents up to 50 MB and videos up to 1 GB.</p>
+            <.live_component
+              module={ResourceUploader}
+              id="lecture-resource-uploader"
+              current_user={@current_user}
+              upload_config={@uploads.resources}
+              target={@myself}
+            />
           </div>
 
           <div data-role="resource-panel" data-mode="link" class="hidden">
@@ -255,6 +250,12 @@ defmodule WasomiWeb.LectureLive.FormComponent do
         </section>
 
         <:actions>
+          <p
+            :if={save_disabled?(@form, @resource_rows, @question_rows, @uploads)}
+            class="text-sm text-amber-700"
+          >
+            Select a primary video, enter its duration, and finish all resource uploads before saving.
+          </p>
           <.button
             disabled={save_disabled?(@form, @resource_rows, @question_rows, @uploads)}
             phx-disable-with="Saving..."
@@ -265,6 +266,32 @@ defmodule WasomiWeb.LectureLive.FormComponent do
       </.simple_form>
     </div>
     """
+  end
+
+  defp consume_resource_uploads(socket) do
+    case uploaded_entries(socket, :resources) do
+      {_done, [_ | _]} ->
+        assign(socket, :resource_error, "Finish or remove all resource uploads before saving.")
+
+      {[], []} ->
+        socket
+
+      {_done, []} ->
+        rows =
+          consume_uploaded_entries(socket, :resources, fn meta, entry ->
+            {:ok,
+             %{
+               kind: :document,
+               name: entry.client_name,
+               storage_key: meta.key,
+               url: meta.public_url,
+               content_type: meta.content_type || entry.client_type,
+               byte_size: entry.client_size
+             }}
+          end)
+
+        assign(socket, :resource_rows, socket.assigns.resource_rows ++ rows)
+    end
   end
 
   @impl true
@@ -282,7 +309,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
       |> assign_new(:resource_error, fn -> nil end)
 
     socket =
-      if socket.assigns[:uploads] do
+      if Map.has_key?(socket.assigns, :uploads) do
         socket
       else
         allow_upload(socket, :video,
@@ -290,6 +317,13 @@ defmodule WasomiWeb.LectureLive.FormComponent do
           max_entries: 1,
           max_file_size: 1_000_000_000
         )
+      end
+
+    socket =
+      if Map.has_key?(socket.assigns.uploads, :resources) do
+        socket
+      else
+        ResourceUploader.configure_upload(socket, lecture.id)
       end
 
     {:ok, socket}
@@ -327,6 +361,22 @@ defmodule WasomiWeb.LectureLive.FormComponent do
        assign(socket, resource_rows: socket.assigns.resource_rows ++ [row], resource_error: nil)}
     else
       {:noreply, assign(socket, resource_error: "Enter a valid http or https link.")}
+    end
+  end
+
+  def handle_event("cancel-upload", %{"ref" => ref}, socket) do
+    meta = socket.assigns.uploads.resources.entry_refs_to_metas[ref] || %{}
+    socket = cancel_upload(socket, :resources, ref)
+
+    case meta[:key] do
+      key when is_binary(key) and key != "" ->
+        case Storage.delete_upload(socket.assigns.current_user, key) do
+          :ok -> {:noreply, socket}
+          {:error, reason} -> {:noreply, assign(socket, resource_error: upload_error(reason))}
+        end
+
+      _ ->
+        {:noreply, socket}
     end
   end
 
@@ -387,7 +437,20 @@ defmodule WasomiWeb.LectureLive.FormComponent do
   end
 
   def handle_event("remove-resource", %{"index" => index}, socket) do
-    {:noreply, assign(socket, resource_rows: remove_at(socket.assigns.resource_rows, index))}
+    case resource_at(socket.assigns.resource_rows, index) do
+      {:ok, %{storage_key: key}} when is_binary(key) and key != "" ->
+        case Storage.delete_upload(socket.assigns.current_user, key) do
+          :ok ->
+            {:noreply,
+             assign(socket, resource_rows: remove_at(socket.assigns.resource_rows, index))}
+
+          {:error, reason} ->
+            {:noreply, assign(socket, resource_error: upload_error(reason))}
+        end
+
+      _ ->
+        {:noreply, assign(socket, resource_rows: remove_at(socket.assigns.resource_rows, index))}
+    end
   end
 
   def handle_event("add-question", _params, socket) do
@@ -400,6 +463,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
   end
 
   def handle_event("save", %{"lecture" => lecture_params} = params, socket) do
+    socket = consume_resource_uploads(socket)
     lecture_params = put_uploaded_video(socket, lecture_params)
     questions = question_params(params, socket.assigns.question_rows)
 
@@ -485,6 +549,13 @@ defmodule WasomiWeb.LectureLive.FormComponent do
   defp question_attrs(question), do: Map.take(question, [:question, :answer])
 
   defp resource_status(resource), do: Map.get(resource, :status, :ready)
+
+  defp resource_at(rows, index) do
+    case parse_index(index) do
+      {:ok, index} when index < length(rows) -> {:ok, Enum.at(rows, index)}
+      _ -> :error
+    end
+  end
 
   defp validate_resources(resources) do
     if Enum.all?(resources, &resource_ready?/1) do

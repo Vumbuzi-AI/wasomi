@@ -154,4 +154,30 @@ defmodule WasomiWeb.AdminLive.QuizEditTest do
       live(conn, ~p"/admin/courses/#{other_course.id}/quizzes/#{quiz.id}/edit")
     end
   end
+
+  test "admins can dynamically add and remove options in the quiz editor page", %{conn: conn} do
+    quiz = quiz_fixture()
+    question = question_fixture(%{quiz: quiz, status: :draft})
+
+    {:ok, view, _html} = live(conn, edit_path(quiz))
+
+    # Starts with 4 options, so we cannot add more.
+    refute has_element?(view, "#question-form-#{question.id} button", "Add option")
+
+    # Click remove option on the last element (index 3)
+    view
+    |> element("#question-form-#{question.id} button[title='Remove option'][phx-value-index='3']")
+    |> render_click()
+
+    # Now has 3 options. "Add option" should be visible.
+    assert has_element?(view, "#question-form-#{question.id} button", "Add option")
+
+    # Click add option
+    view
+    |> element("#question-form-#{question.id} button", "Add option")
+    |> render_click()
+
+    # Back to 4 options, "Add option" is hidden again.
+    refute has_element?(view, "#question-form-#{question.id} button", "Add option")
+  end
 end

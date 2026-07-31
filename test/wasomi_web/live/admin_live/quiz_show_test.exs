@@ -188,7 +188,7 @@ defmodule WasomiWeb.AdminLive.QuizShowTest do
     |> render_click()
 
     assert has_element?(view, "#delete-question-modal")
-    assert render(view) =~ "Delete this draft question?"
+    assert render(view) =~ "Delete this question?"
 
     view
     |> element("#delete-question-modal button", "Cancel")
@@ -623,5 +623,28 @@ defmodule WasomiWeb.AdminLive.QuizShowTest do
     assert html =~ "Could not start generation"
     refute_enqueued(worker: GenerateQuizFromPDFWorker)
     assert Process.alive?(view.pid)
+  end
+
+  test "admins can dynamically add and remove options from the question form", %{conn: conn} do
+    quiz = quiz_fixture()
+    {:ok, view, _html} = live(conn, quiz_path(quiz))
+
+    view |> element("button", "Add question") |> render_click()
+    view |> element("button", "Multiple choice") |> render_click()
+
+    # Starts with 4 options, so we cannot add more. "Add option" is not shown.
+    refute has_element?(view, "button", "Add option")
+
+    # Click remove option on the last element (index 3)
+    view |> element("button[title='Remove option'][phx-value-index='3']") |> render_click()
+
+    # Now has 3 options. "Add option" should be visible.
+    assert has_element?(view, "button", "Add option")
+
+    # Click add option
+    view |> element("button", "Add option") |> render_click()
+
+    # Back to 4 options, "Add option" is hidden again.
+    refute has_element?(view, "button", "Add option")
   end
 end

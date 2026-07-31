@@ -113,6 +113,77 @@ defmodule WasomiWeb.AdminLive.QuizShow do
      |> assign(:question_form, nil)}
   end
 
+  def handle_event("validate_question", %{"question" => params}, socket) do
+    params = apply_correct_option(params)
+
+    changeset =
+      if socket.assigns.adding_question? do
+        %Question{quiz_id: socket.assigns.quiz.id}
+        |> Assessments.change_question(params)
+      else
+        question = find_question!(socket.assigns.quiz, socket.assigns.editing_question_id)
+        Assessments.change_question(question, params)
+      end
+      |> Map.put(:action, :validate)
+
+    {:noreply, assign(socket, :question_form, to_form(changeset))}
+  end
+
+  def handle_event("add_option", _params, socket) do
+    changeset = socket.assigns.question_form.source
+    options = get_active_options(changeset)
+
+    if length(options) < 4 do
+      new_position = length(options) + 1
+
+      new_option = %Wasomi.Assessments.QuestionOption{
+        label: "",
+        correct: false,
+        position: new_position
+      }
+
+      updated_options = options ++ [new_option]
+
+      updated_changeset = Ecto.Changeset.put_assoc(changeset, :question_options, updated_options)
+      {:noreply, assign(socket, :question_form, to_form(updated_changeset))}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("remove_option", %{"index" => index_str}, socket) do
+    index = String.to_integer(index_str)
+    changeset = socket.assigns.question_form.source
+    options = get_active_options(changeset)
+
+    if length(options) > 2 do
+      updated_options = List.delete_at(options, index)
+
+      updated_options =
+        updated_options
+        |> Enum.with_index(1)
+        |> Enum.map(fn {opt, pos} ->
+          case opt do
+            %Ecto.Changeset{} = cs -> Ecto.Changeset.put_change(cs, :position, pos)
+            struct -> %{struct | position: pos}
+          end
+        end)
+
+      updated_changeset = Ecto.Changeset.put_assoc(changeset, :question_options, updated_options)
+      {:noreply, assign(socket, :question_form, to_form(updated_changeset))}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  defp get_active_options(changeset) do
+    Ecto.Changeset.get_assoc(changeset, :question_options)
+    |> Enum.reject(fn
+      %Ecto.Changeset{action: action} -> action in [:replace, :delete]
+      _ -> false
+    end)
+  end
+
   def handle_event("save_question", %{"id" => id, "question" => params}, socket) do
     question = find_question!(socket.assigns.quiz, id)
     params = apply_correct_option(params)
@@ -385,33 +456,63 @@ defmodule WasomiWeb.AdminLive.QuizShow do
           </p>
 
           <form id="generate-questions-form" phx-submit="generate" phx-change="validate" class="mt-5">
-            <.live_file_input upload={@uploads.source_pdf} />
-
-            <div
-              :for={entry <- @uploads.source_pdf.entries}
-              class="mt-3 flex items-center gap-3 text-sm"
-            >
-              <span class="text-dark">{entry.client_name}</span>
-              <progress value={entry.progress} max="100" class="w-32"></progress>
-              <button
-                type="button"
-                phx-click="cancel-upload"
-                phx-value-ref={entry.ref}
-                class="text-muted hover:text-red-500"
-              >
-                <.icon name="hero-x-mark" class="h-4 w-4" />
-              </button>
-              <p :for={err <- upload_errors(@uploads.source_pdf, entry)} class="text-red-600">
-                {error_to_string(err)}
-              </p>
+            <div class={[@uploads.source_pdf.entries != [] && "hidden", "flex items-center"]}>
+              <label class="inline-flex cursor-pointer items-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-semibold text-white transition hover:bg-dark">
+                <.icon name="hero-document-arrow-up" class="h-5 w-5" /> Select PDF
+                <.live_file_input upload={@uploads.source_pdf} class="sr-only" />
+              </label>
             </div>
 
-            <button
-              type="submit"
-              class="mt-5 rounded-full bg-dark px-6 py-3 font-medium text-white transition hover:bg-primary"
-            >
-              Generate questions
-            </button>
+            <div :if={@uploads.source_pdf.entries != []} class="space-y-4">
+              <div
+                :for={entry <- @uploads.source_pdf.entries}
+                class="flex items-center gap-3 rounded-2xl border border-black/5 bg-soft/30 p-4 text-sm"
+              >
+                <span class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
+                  <.icon name="hero-document" class="h-5 w-5" />
+                </span>
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center justify-between gap-3">
+                    <p class="truncate font-medium text-dark">{entry.client_name}</p>
+                    <span class="shrink-0 text-xs tabular-nums text-muted">{entry.progress}%</span>
+                  </div>
+                  <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-soft">
+                    <div
+                      class="h-full rounded-full bg-primary transition-[width]"
+                      style={"width: #{entry.progress}%"}
+                      role="progressbar"
+                      aria-valuemin="0"
+                      aria-valuemax="100"
+                      aria-valuenow={entry.progress}
+                      value={entry.progress}
+                    >
+                    </div>
+                  </div>
+                  <p
+                    :for={err <- upload_errors(@uploads.source_pdf, entry)}
+                    class="mt-1 text-xs text-red-600"
+                  >
+                    {error_to_string(err)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  phx-click="cancel-upload"
+                  phx-value-ref={entry.ref}
+                  aria-label={"Remove #{entry.client_name}"}
+                  class="grid h-8 w-8 shrink-0 place-items-center rounded-full text-muted transition hover:bg-red-50 hover:text-red-500"
+                >
+                  <.icon name="hero-x-mark" class="h-4 w-4" />
+                </button>
+              </div>
+
+              <button
+                type="submit"
+                class="inline-flex items-center gap-2 rounded-full bg-dark px-6 py-3 text-sm font-semibold text-white transition hover:bg-primary"
+              >
+                <.icon name="hero-arrow-path" class="h-4 w-4" /> Generate questions
+              </button>
+            </div>
           </form>
         </section>
 
@@ -485,12 +586,12 @@ defmodule WasomiWeb.AdminLive.QuizShow do
         <section class="rounded-3xl border border-black/5 bg-white p-6">
           <div class="flex items-center justify-between gap-3">
             <div class="flex items-center gap-3">
-              <h2 class="text-lg font-semibold text-dark">Draft questions awaiting review</h2>
+              <h2 class="text-lg font-semibold text-dark">Questions in this quiz</h2>
               <span
-                :if={draft_questions(@quiz) != []}
-                class="inline-flex items-center justify-center rounded-full bg-mint px-2.5 py-1 text-xs font-bold text-primary"
+                :if={@quiz.questions != []}
+                class="inline-flex items-center justify-center rounded-full bg-soft px-2.5 py-1 text-xs font-bold text-dark"
               >
-                {length(draft_questions(@quiz))}
+                {length(@quiz.questions)}
               </span>
             </div>
             <div class="flex items-center gap-3">
@@ -499,14 +600,14 @@ defmodule WasomiWeb.AdminLive.QuizShow do
                 phx-click="confirm_publish_all_drafts"
                 class="rounded-full bg-mint px-3 py-1.5 text-sm font-semibold text-primary transition hover:bg-primary hover:text-white"
               >
-                Publish all
+                Publish all drafts
               </button>
               <button
                 :if={draft_questions(@quiz) != []}
                 phx-click="confirm_delete_all_drafts"
                 class="rounded-full border border-black/10 px-3 py-1.5 text-sm font-medium text-body transition hover:border-red-200 hover:bg-red-50 hover:text-red-500"
               >
-                Delete all
+                Delete all drafts
               </button>
               <button
                 :if={!@adding_question?}
@@ -517,8 +618,8 @@ defmodule WasomiWeb.AdminLive.QuizShow do
               </button>
             </div>
           </div>
-          <p :if={draft_questions(@quiz) == [] and !@adding_question?} class="mt-3 text-sm text-body">
-            No draft questions yet. Generate some from a PDF above, or add one manually.
+          <p :if={@quiz.questions == [] and !@adding_question?} class="mt-3 text-sm text-body">
+            No questions in this quiz yet. Generate some from a PDF above, or add one manually.
           </p>
 
           <div
@@ -552,6 +653,7 @@ defmodule WasomiWeb.AdminLive.QuizShow do
             :if={@adding_question? and @question_form}
             for={@question_form}
             id="new-question-form"
+            phx-change="validate_question"
             phx-submit="save_new_question"
             class="mt-4 space-y-3 rounded-2xl border border-black/5 p-5"
           >
@@ -559,10 +661,7 @@ defmodule WasomiWeb.AdminLive.QuizShow do
 
             <div class="space-y-2">
               <p class="text-sm font-medium text-dark">Options (select the correct one)</p>
-              <.question_options_fields
-                field={@question_form[:question_options]}
-                include_position?={true}
-              />
+              <.question_options_fields field={@question_form[:question_options]} />
             </div>
 
             <div class="flex items-center gap-4 pt-1">
@@ -583,14 +682,12 @@ defmodule WasomiWeb.AdminLive.QuizShow do
           </.form>
 
           <ul class="mt-4 space-y-4">
-            <li
-              :for={question <- draft_questions(@quiz)}
-              class="rounded-2xl border border-black/5 p-5"
-            >
+            <li :for={question <- @quiz.questions} class="rounded-2xl border border-black/5 p-5">
               <.form
                 :if={@editing_question_id == question.id}
                 for={@question_form}
                 id={"question-form-#{question.id}"}
+                phx-change="validate_question"
                 phx-submit="save_question"
                 phx-value-id={question.id}
                 class="space-y-3"
@@ -620,7 +717,16 @@ defmodule WasomiWeb.AdminLive.QuizShow do
               </.form>
 
               <div :if={@editing_question_id != question.id}>
-                <p class="font-semibold leading-relaxed text-dark">{question.prompt}</p>
+                <div class="flex items-start justify-between gap-4">
+                  <p class="font-semibold leading-relaxed text-dark">{question.prompt}</p>
+                  <span class={[
+                    "rounded-full px-2.5 py-0.5 text-xs font-semibold shrink-0 uppercase tracking-wider",
+                    question.status == :published && "bg-mint text-primary",
+                    question.status == :draft && "bg-soft text-body"
+                  ]}>
+                    {Phoenix.Naming.humanize(question.status)}
+                  </span>
+                </div>
 
                 <ul class="mt-4 space-y-2">
                   <li
@@ -660,6 +766,7 @@ defmodule WasomiWeb.AdminLive.QuizShow do
                       Edit
                     </button>
                     <button
+                      :if={question.status == :draft}
                       phx-click="publish_question"
                       phx-value-id={question.id}
                       class="rounded-full bg-mint px-3 py-1.5 text-sm font-semibold text-primary transition hover:bg-primary hover:text-white"
@@ -688,7 +795,7 @@ defmodule WasomiWeb.AdminLive.QuizShow do
         show
         on_cancel={JS.push("cancel_delete_question")}
       >
-        <h2 class="text-lg font-semibold text-dark">Delete this draft question?</h2>
+        <h2 class="text-lg font-semibold text-dark">Delete this question?</h2>
         <p class="mt-2 text-sm text-body">
           This can't be undone. The question and its options will be permanently removed.
         </p>
@@ -806,31 +913,56 @@ defmodule WasomiWeb.AdminLive.QuizShow do
   end
 
   attr :field, Phoenix.HTML.FormField, required: true
-  attr :include_position?, :boolean, default: false
 
   defp question_options_fields(assigns) do
     ~H"""
-    <.inputs_for :let={option_form} field={@field}>
-      <div class="flex items-center gap-2">
-        <input
-          :if={@include_position?}
-          type="hidden"
-          name={"#{option_form.name}[position]"}
-          value={option_form.index + 1}
-        />
-        <input
-          type="radio"
-          name="question[correct_option_id]"
-          value={option_form.index}
-          checked={option_form[:correct].value == true}
-          class="h-4 w-4 text-primary"
-        />
-        <div class="flex-1">
-          <.input field={option_form[:label]} type="text" />
+    <div class="space-y-2">
+      <.inputs_for :let={option_form} field={@field}>
+        <div class="flex items-center gap-2">
+          <input type="hidden" name={"#{option_form.name}[position]"} value={option_form.index + 1} />
+          <input
+            type="radio"
+            name="question[correct_option_id]"
+            value={option_form.index}
+            checked={option_form[:correct].value == true}
+            class="h-4 w-4 text-primary focus:ring-primary"
+          />
+          <div class="flex-1">
+            <.input
+              field={option_form[:label]}
+              type="text"
+              placeholder={"Option #{option_form.index + 1}"}
+            />
+          </div>
+          <button
+            :if={
+              length(@field.form.impl.to_form(@field.form.source, @field.form, @field.field, [])) > 2
+            }
+            type="button"
+            phx-click="remove_option"
+            phx-value-index={option_form.index}
+            tabindex="-1"
+            class="p-2 text-muted hover:text-red-500 rounded-lg hover:bg-soft transition shrink-0"
+            title="Remove option"
+          >
+            <.icon name="hero-trash" class="h-4 w-4" />
+          </button>
         </div>
+      </.inputs_for>
+      <div
+        :if={length(@field.form.impl.to_form(@field.form.source, @field.form, @field.field, [])) < 4}
+        class="pt-1"
+      >
+        <button
+          type="button"
+          phx-click="add_option"
+          class="inline-flex items-center gap-1.5 rounded-full border border-black/10 px-3 py-1.5 text-xs font-semibold text-dark transition hover:bg-soft hover:text-primary"
+        >
+          <.icon name="hero-plus-circle" class="h-4 w-4" /> Add option
+        </button>
       </div>
-    </.inputs_for>
-    <.field_error field={@field} />
+      <.field_error field={@field} />
+    </div>
     """
   end
 

@@ -18,6 +18,109 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
   end
 
   @impl true
+  def handle_event("validate_question", %{"id" => id, "question" => params}, socket) do
+    question = find_question!(socket.assigns.quiz, id)
+
+    changeset =
+      question
+      |> Assessments.change_question(apply_correct_option(params))
+      |> Map.put(:action, :validate)
+
+    forms = Map.put(socket.assigns.question_forms, question.id, to_form(changeset))
+    {:noreply, assign(socket, :question_forms, forms)}
+  end
+
+  def handle_event("validate_new_question", %{"question" => params}, socket) do
+    changeset =
+      %Question{quiz_id: socket.assigns.quiz.id}
+      |> Assessments.change_question(apply_correct_option(params))
+      |> Map.put(:action, :validate)
+
+    {:noreply, assign(socket, :new_question_form, to_form(changeset))}
+  end
+
+  def handle_event("add_option", %{"id" => "new"}, socket) do
+    changeset = socket.assigns.new_question_form.source
+    options = get_active_options(changeset)
+
+    if length(options) < 4 do
+      new_position = length(options) + 1
+
+      new_option = %Wasomi.Assessments.QuestionOption{
+        label: "",
+        correct: false,
+        position: new_position
+      }
+
+      updated_options = options ++ [new_option]
+
+      updated_changeset = Ecto.Changeset.put_assoc(changeset, :question_options, updated_options)
+      {:noreply, assign(socket, :new_question_form, to_form(updated_changeset))}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("add_option", %{"id" => id_str}, socket) do
+    id = String.to_integer(id_str)
+    form = Map.fetch!(socket.assigns.question_forms, id)
+    changeset = form.source
+    options = get_active_options(changeset)
+
+    if length(options) < 4 do
+      new_position = length(options) + 1
+
+      new_option = %Wasomi.Assessments.QuestionOption{
+        label: "",
+        correct: false,
+        position: new_position
+      }
+
+      updated_options = options ++ [new_option]
+
+      updated_changeset = Ecto.Changeset.put_assoc(changeset, :question_options, updated_options)
+      forms = Map.put(socket.assigns.question_forms, id, to_form(updated_changeset))
+      {:noreply, assign(socket, :question_forms, forms)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("remove_option", %{"id" => "new", "index" => index_str}, socket) do
+    index = String.to_integer(index_str)
+    changeset = socket.assigns.new_question_form.source
+    options = get_active_options(changeset)
+
+    if length(options) > 2 do
+      updated_options = List.delete_at(options, index)
+      updated_options = reindex_positions(updated_options)
+
+      updated_changeset = Ecto.Changeset.put_assoc(changeset, :question_options, updated_options)
+      {:noreply, assign(socket, :new_question_form, to_form(updated_changeset))}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("remove_option", %{"id" => id_str, "index" => index_str}, socket) do
+    id = String.to_integer(id_str)
+    index = String.to_integer(index_str)
+    form = Map.fetch!(socket.assigns.question_forms, id)
+    changeset = form.source
+    options = get_active_options(changeset)
+
+    if length(options) > 2 do
+      updated_options = List.delete_at(options, index)
+      updated_options = reindex_positions(updated_options)
+
+      updated_changeset = Ecto.Changeset.put_assoc(changeset, :question_options, updated_options)
+      forms = Map.put(socket.assigns.question_forms, id, to_form(updated_changeset))
+      {:noreply, assign(socket, :question_forms, forms)}
+    else
+      {:noreply, socket}
+    end
+  end
+
   def handle_event("save_question", %{"id" => id, "question" => params}, socket) do
     question = find_question!(socket.assigns.quiz, id)
 
@@ -107,6 +210,25 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
       {:error, {:incomplete_quiz, errors}} ->
         {:noreply, assign(socket, :publish_errors, errors)}
     end
+  end
+
+  defp reindex_positions(options) do
+    options
+    |> Enum.with_index(1)
+    |> Enum.map(fn {opt, pos} ->
+      case opt do
+        %Ecto.Changeset{} = cs -> Ecto.Changeset.put_change(cs, :position, pos)
+        struct -> %{struct | position: pos}
+      end
+    end)
+  end
+
+  defp get_active_options(changeset) do
+    Ecto.Changeset.get_assoc(changeset, :question_options)
+    |> Enum.reject(fn
+      %Ecto.Changeset{action: action} -> action in [:replace, :delete]
+      _ -> false
+    end)
   end
 
   @impl true
@@ -256,6 +378,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
     <.form
       for={@form}
       id={if @question, do: "question-form-#{@question.id}", else: "new-question-form"}
+      phx-change={if @question, do: "validate_question", else: "validate_new_question"}
       phx-submit={if @question, do: "save_question", else: "save_new_question"}
       phx-value-id={@question && @question.id}
       class="space-y-5"
@@ -302,8 +425,33 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
                   label={"Option #{option_form.index + 1}"}
                 />
               </div>
+              <button
+                :if={length(@form.impl.to_form(@form.source, @form, :question_options, [])) > 2}
+                type="button"
+                phx-click="remove_option"
+                phx-value-id={if @question, do: @question.id, else: "new"}
+                phx-value-index={option_form.index}
+                tabindex="-1"
+                class="mt-8 p-2 text-muted hover:text-red-500 rounded-lg hover:bg-soft transition shrink-0"
+                title="Remove option"
+              >
+                <.icon name="hero-trash" class="h-4 w-4" />
+              </button>
             </div>
           </.inputs_for>
+          <div
+            :if={length(@form.impl.to_form(@form.source, @form, :question_options, [])) < 4}
+            class="pt-1"
+          >
+            <button
+              type="button"
+              phx-click="add_option"
+              phx-value-id={if @question, do: @question.id, else: "new"}
+              class="inline-flex items-center gap-1.5 rounded-full border border-black/10 px-3 py-1.5 text-xs font-semibold text-dark transition hover:bg-soft hover:text-primary"
+            >
+              <.icon name="hero-plus-circle" class="h-4 w-4" /> Add option
+            </button>
+          </div>
           <.field_error field={@form[:question_options]} />
         </div>
       </fieldset>

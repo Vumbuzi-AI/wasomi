@@ -101,6 +101,78 @@ defmodule Wasomi.AssessmentsTest do
       assert %Ecto.Changeset{data: ^quiz} = Assessments.change_quiz(quiz)
     end
 
+    test "reorder_questions/2 safely persists a complete new order" do
+      quiz = quiz_fixture()
+      first = question_fixture(%{quiz: quiz, position: 1})
+      second = question_fixture(%{quiz: quiz, position: 2})
+      third = question_fixture(%{quiz: quiz, position: 3})
+
+      assert {:ok, _result} =
+               Assessments.reorder_questions(quiz, [third.id, first.id, second.id])
+
+      reordered = Assessments.get_quiz_with_questions!(quiz.id).questions
+      assert Enum.map(reordered, & &1.id) == [third.id, first.id, second.id]
+      assert Enum.map(reordered, & &1.position) == [1, 2, 3]
+    end
+
+    test "reorder_questions/2 rejects partial or unrelated id lists" do
+      quiz = quiz_fixture()
+      question = question_fixture(%{quiz: quiz})
+      unrelated = question_fixture()
+
+      assert Assessments.reorder_questions(quiz, []) == {:error, :invalid_order}
+
+      assert Assessments.reorder_questions(quiz, [question.id, unrelated.id]) ==
+               {:error, :invalid_order}
+    end
+
+    test "reorder_questions/2 rejects non-integer ids" do
+      quiz = quiz_fixture()
+      question = question_fixture(%{quiz: quiz})
+
+      assert Assessments.reorder_questions(quiz, ["abc"]) == {:error, :invalid_order}
+
+      assert Assessments.reorder_questions(quiz, [question.id, "not-a-number"]) ==
+               {:error, :invalid_order}
+    end
+
+    test "reorder_questions/2 rejects duplicate ids" do
+      quiz = quiz_fixture()
+      question = question_fixture(%{quiz: quiz})
+
+      assert Assessments.reorder_questions(quiz, [question.id, question.id]) ==
+               {:error, :invalid_order}
+    end
+
+    test "publish_quiz/1 validates completeness and activates all questions atomically" do
+      quiz = quiz_fixture()
+
+      assert Assessments.publish_quiz(quiz) ==
+               {:error, {:incomplete_quiz, ["Add at least one question before publishing."]}}
+
+      question = question_fixture(%{quiz: quiz, status: :draft})
+      assert Assessments.list_published_questions(quiz) == []
+
+      assert {:ok, published_quiz} = Assessments.publish_quiz(quiz)
+      assert published_quiz.active
+      assert published_quiz.published_at
+      assert Enum.all?(published_quiz.questions, &(&1.status == :published))
+
+      assert Enum.map(Assessments.list_published_questions(published_quiz), & &1.id) == [
+               question.id
+             ]
+    end
+
+    test "publish_quiz/1 does not mutate the quiz when completeness checks fail" do
+      quiz = quiz_fixture(%{active: false})
+
+      assert {:error, {:incomplete_quiz, _errors}} = Assessments.publish_quiz(quiz)
+
+      reloaded = Assessments.get_quiz!(quiz.id)
+      refute reloaded.active
+      refute reloaded.published_at
+    end
+
     test "count_draft_questions_by_module/1 counts drafts per module, scoped to the course" do
       course = course_fixture()
       module_with_drafts = course_module_fixture(%{course_id: course.id, position: 1})
@@ -275,7 +347,7 @@ defmodule Wasomi.AssessmentsTest do
 
   describe "submit_quiz/2" do
     setup do
-      quiz = quiz_fixture(%{passing_score_percent: 70})
+      quiz = quiz_fixture(%{passing_score_percent: 70, active: true})
 
       q1 =
         question_fixture(%{

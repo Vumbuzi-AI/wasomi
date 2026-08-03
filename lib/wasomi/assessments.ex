@@ -104,9 +104,13 @@ defmodule Wasomi.Assessments do
       from(option in Wasomi.Assessments.QuestionOption, order_by: [asc: option.position])
 
     Question
-    |> where([question], question.quiz_id == ^quiz_id and question.status == :published)
-    |> order_by([question], asc: question.position)
-    |> preload(question_options: ^options_query)
+    |> join(:inner, [question], quiz in Quiz, on: quiz.id == question.quiz_id)
+    |> where(
+      [question, quiz],
+      question.quiz_id == ^quiz_id and question.status == :published and quiz.active == true
+    )
+    |> order_by([question, _quiz], asc: question.position)
+    |> preload([question, _quiz], question_options: ^options_query)
     |> Repo.all()
   end
 
@@ -155,6 +159,80 @@ defmodule Wasomi.Assessments do
     question
     |> Ecto.Changeset.change(status: :published)
     |> Repo.update()
+  end
+
+  @doc """
+  Reorders every question in a quiz.
+
+  The submitted ids must be the quiz's complete question set. Temporary
+  positions avoid violating the unique `(quiz_id, position)` index while
+  positions are swapped.
+  """
+  def reorder_questions(%Quiz{id: quiz_id}, question_ids) when is_list(question_ids) do
+    with {:ok, question_ids} <- normalize_ids(question_ids) do
+      Repo.transaction(fn ->
+        questions =
+          Question
+          |> where([question], question.quiz_id == ^quiz_id)
+          |> order_by([question], asc: question.position)
+          |> lock("FOR UPDATE")
+          |> Repo.all()
+
+        if Enum.sort(Enum.map(questions, & &1.id)) == Enum.sort(question_ids) do
+          persist_question_order(questions, question_ids)
+        else
+          Repo.rollback(:invalid_order)
+        end
+      end)
+    end
+  end
+
+  @doc """
+  Publishes a complete quiz atomically.
+
+  A quiz must contain at least one question, every question must have valid
+  text and options, and every question must identify a correct option.
+  """
+  def publish_quiz(%Quiz{id: quiz_id}) do
+    Repo.transaction(fn ->
+      quiz =
+        Quiz
+        |> where([quiz], quiz.id == ^quiz_id)
+        |> lock("FOR UPDATE")
+        |> Repo.one!()
+        |> Repo.preload(questions: from(question in Question, preload: :question_options))
+
+      case quiz_completeness_errors(quiz) do
+        [] ->
+          now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+          Question
+          |> where([question], question.quiz_id == ^quiz.id)
+          |> Repo.update_all(set: [status: :published, updated_at: now])
+
+          quiz
+          |> Quiz.changeset(%{active: true, published_at: now})
+          |> Repo.update!()
+          |> Repo.preload([:module, questions: [:question_options]], force: true)
+
+        errors ->
+          Repo.rollback({:incomplete_quiz, errors})
+      end
+    end)
+  end
+
+  def quiz_completeness_errors(%Quiz{questions: questions}) when is_list(questions) do
+    case questions do
+      [] ->
+        ["Add at least one question before publishing."]
+
+      questions ->
+        questions
+        |> Enum.with_index(1)
+        |> Enum.flat_map(fn {question, index} ->
+          question_completeness_errors(question, index)
+        end)
+    end
   end
 
   ## Submissions
@@ -389,5 +467,66 @@ defmodule Wasomi.Assessments do
       nil -> false
       selected -> Enum.any?(options, &(to_string(&1.id) == selected and &1.correct))
     end
+  end
+
+  defp question_completeness_errors(question, index) do
+    options = question.question_options
+    prefix = "Question #{index}"
+
+    []
+    |> maybe_add_error(blank?(question.prompt), "#{prefix} needs question text.")
+    |> maybe_add_error(length(options) < 2, "#{prefix} needs at least two options.")
+    |> maybe_add_error(
+      Enum.any?(options, &blank?(&1.label)),
+      "#{prefix} has an option without text."
+    )
+    |> maybe_add_error(
+      !Enum.any?(options, & &1.correct),
+      "#{prefix} needs a correct answer."
+    )
+  end
+
+  defp maybe_add_error(errors, true, error), do: errors ++ [error]
+  defp maybe_add_error(errors, false, _error), do: errors
+
+  defp blank?(value), do: !is_binary(value) or String.trim(value) == ""
+
+  defp normalize_ids(ids) do
+    ids
+    |> Enum.reduce_while({:ok, []}, fn id, {:ok, parsed} ->
+      case Integer.parse(to_string(id)) do
+        {id, ""} when id > 0 -> {:cont, {:ok, [id | parsed]}}
+        _invalid -> {:halt, {:error, :invalid_order}}
+      end
+    end)
+    |> case do
+      {:ok, parsed} ->
+        parsed = Enum.reverse(parsed)
+        if Enum.uniq(parsed) == parsed, do: {:ok, parsed}, else: {:error, :invalid_order}
+
+      error ->
+        error
+    end
+  end
+
+  defp persist_question_order(questions, question_ids) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+    offset = length(questions) * 2 + 1
+
+    Enum.each(questions, fn question ->
+      Question
+      |> where([item], item.id == ^question.id)
+      |> Repo.update_all(set: [position: offset + question.position, updated_at: now])
+    end)
+
+    question_ids
+    |> Enum.with_index(1)
+    |> Enum.each(fn {id, position} ->
+      Question
+      |> where([item], item.id == ^id)
+      |> Repo.update_all(set: [position: position, updated_at: now])
+    end)
+
+    :reordered
   end
 end

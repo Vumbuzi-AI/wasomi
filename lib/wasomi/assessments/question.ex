@@ -6,6 +6,7 @@ defmodule Wasomi.Assessments.Question do
 
   schema "questions" do
     field :prompt, :string
+    field :explanation, :string
     field :status, Ecto.Enum, values: [:draft, :published], default: :draft
     field :position, :integer
 
@@ -31,9 +32,17 @@ defmodule Wasomi.Assessments.Question do
   """
   def changeset(question, attrs) do
     question
-    |> cast(attrs, [:prompt, :status, :position, :quiz_id, :quiz_generation_id])
+    |> cast(attrs, [
+      :prompt,
+      :explanation,
+      :status,
+      :position,
+      :quiz_id,
+      :quiz_generation_id
+    ])
     |> validate_required([:prompt, :status, :position, :quiz_id])
     |> validate_length(:prompt, min: 3, max: 2000)
+    |> validate_length(:explanation, max: 4000)
     |> cast_assoc(:question_options,
       with: &QuestionOption.changeset/2,
       required: true

@@ -170,17 +170,20 @@ defmodule Wasomi.Assessments do
   """
   def reorder_questions(%Quiz{id: quiz_id}, question_ids) when is_list(question_ids) do
     with {:ok, question_ids} <- normalize_ids(question_ids) do
-      questions =
-        Question
-        |> where([question], question.quiz_id == ^quiz_id)
-        |> order_by([question], asc: question.position)
-        |> Repo.all()
+      Repo.transaction(fn ->
+        questions =
+          Question
+          |> where([question], question.quiz_id == ^quiz_id)
+          |> order_by([question], asc: question.position)
+          |> lock("FOR UPDATE")
+          |> Repo.all()
 
-      if Enum.sort(Enum.map(questions, & &1.id)) == Enum.sort(question_ids) do
-        persist_question_order(questions, question_ids)
-      else
-        {:error, :invalid_order}
-      end
+        if Enum.sort(Enum.map(questions, & &1.id)) == Enum.sort(question_ids) do
+          persist_question_order(questions, question_ids)
+        else
+          Repo.rollback(:invalid_order)
+        end
+      end)
     end
   end
 
@@ -510,22 +513,20 @@ defmodule Wasomi.Assessments do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
     offset = length(questions) * 2 + 1
 
-    Repo.transaction(fn ->
-      Enum.each(questions, fn question ->
-        Question
-        |> where([item], item.id == ^question.id)
-        |> Repo.update_all(set: [position: offset + question.position, updated_at: now])
-      end)
-
-      question_ids
-      |> Enum.with_index(1)
-      |> Enum.each(fn {id, position} ->
-        Question
-        |> where([item], item.id == ^id)
-        |> Repo.update_all(set: [position: position, updated_at: now])
-      end)
-
-      :reordered
+    Enum.each(questions, fn question ->
+      Question
+      |> where([item], item.id == ^question.id)
+      |> Repo.update_all(set: [position: offset + question.position, updated_at: now])
     end)
+
+    question_ids
+    |> Enum.with_index(1)
+    |> Enum.each(fn {id, position} ->
+      Question
+      |> where([item], item.id == ^id)
+      |> Repo.update_all(set: [position: position, updated_at: now])
+    end)
+
+    :reordered
   end
 end

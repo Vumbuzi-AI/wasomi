@@ -1,7 +1,7 @@
 defmodule WasomiWeb.DashboardLive do
   use WasomiWeb, :live_view
 
-  alias Wasomi.{Certificates, Enrollments, Learning, Payments}
+  alias Wasomi.{Certificates, Enrollments, Learning, Notifications, Payments}
 
   @impl true
   def mount(_params, _session, socket) do
@@ -23,9 +23,24 @@ defmodule WasomiWeb.DashboardLive do
              :module_completed,
              :course_completed,
              :certificate_ready,
-             :payment_confirmed
+             :payment_confirmed,
+             :enrollment_granted
            ] do
     {:noreply, refresh_dashboard(socket)}
+  end
+
+  @impl true
+  def handle_event("dismiss_notification", %{"id" => id}, socket) do
+    id
+    |> Notifications.get_notification!()
+    |> Notifications.mark_read()
+
+    {:noreply,
+     assign(
+       socket,
+       :notifications,
+       Notifications.list_unread_for_user(socket.assigns.current_user)
+     )}
   end
 
   @impl true
@@ -58,6 +73,45 @@ defmodule WasomiWeb.DashboardLive do
 
       <section class="pb-16 lg:pb-24">
         <div class="mx-auto max-w-container space-y-12 px-5 lg:px-10">
+          <section
+            :if={@notifications != []}
+            id="dashboard-notifications"
+            class="rounded-3xl border border-black/5 bg-mint/30 p-6 sm:p-8"
+          >
+            <div class="flex items-start justify-between gap-4">
+              <div>
+                <p class="text-sm font-semibold uppercase tracking-wider text-primary">
+                  Notifications
+                </p>
+                <h2 class="mt-2 text-2xl font-semibold text-dark">What's new</h2>
+              </div>
+              <span class="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-white text-primary">
+                <.icon name="hero-bell" class="h-6 w-6" />
+              </span>
+            </div>
+
+            <div class="mt-6 space-y-3">
+              <div
+                :for={notification <- @notifications}
+                id={"notification-#{notification.id}"}
+                class="flex flex-wrap items-start justify-between gap-4 rounded-2xl bg-white p-4"
+              >
+                <div class="min-w-0">
+                  <p class="font-medium text-dark">{notification.title}</p>
+                  <p class="mt-1 text-sm text-body">{notification.body}</p>
+                </div>
+                <button
+                  type="button"
+                  phx-click="dismiss_notification"
+                  phx-value-id={notification.id}
+                  class="shrink-0 text-sm font-medium text-primary transition hover:text-dark"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </section>
+
           <div>
             <div class="flex flex-wrap items-end justify-between gap-4">
               <div>
@@ -204,6 +258,7 @@ defmodule WasomiWeb.DashboardLive do
     |> assign(:completed_count, completed_count)
     |> assign(:certificates, Certificates.list_for_user(user))
     |> assign(:receipts, Payments.list_receipts_for_user(user))
+    |> assign(:notifications, Notifications.list_unread_for_user(user))
   end
 
   # Surface up to four courses, prioritising those still in progress.

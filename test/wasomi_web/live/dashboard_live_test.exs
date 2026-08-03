@@ -99,4 +99,35 @@ defmodule WasomiWeb.DashboardLiveTest do
     assert html =~ "KES"
     refute html =~ "KBI-RECEIPT-PENDING"
   end
+
+  test "shows an admin-granted enrollment as an in-app notification until dismissed", %{
+    conn: conn,
+    user: user
+  } do
+    admin = Wasomi.AccountsFixtures.user_fixture()
+    {:ok, admin} = Wasomi.Accounts.update_user_role(admin, :admin)
+    course = course_fixture(status: :published, title: "Granted course")
+
+    {:ok, _enrollment} =
+      Wasomi.Enrollments.grant_access(user, admin, %{
+        "course_id" => course.id,
+        "reason" => "Manual enrollment for a partner scholarship"
+      })
+
+    {:ok, view, html} = live(conn, ~p"/dashboard")
+
+    assert html =~ "Course access granted"
+    assert html =~ "Granted course"
+    assert has_element?(view, "#dashboard-notifications")
+
+    [notification] = Wasomi.Notifications.list_unread_for_user(user)
+
+    html =
+      view
+      |> element("#notification-#{notification.id} button", "Dismiss")
+      |> render_click()
+
+    refute html =~ "Course access granted"
+    assert Wasomi.Notifications.list_unread_for_user(user) == []
+  end
 end

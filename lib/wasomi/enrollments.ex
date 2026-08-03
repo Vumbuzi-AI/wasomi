@@ -9,7 +9,8 @@ defmodule Wasomi.Enrollments do
   alias Wasomi.Accounts.User
   alias Wasomi.Catalog
   alias Wasomi.Catalog.{Course, Lecture}
-  alias Wasomi.Enrollments.Enrollment
+  alias Wasomi.Enrollments.{Enrollment, EnrollmentAudit, GrantAccessForm}
+  alias Wasomi.Notifications
 
   @doc """
   Returns the list of enrollments.
@@ -206,6 +207,91 @@ defmodule Wasomi.Enrollments do
       status: :active,
       activated_at: DateTime.utc_now() |> DateTime.truncate(:second)
     })
+  end
+
+  @doc """
+  Returns a changeset for the admin "Grant access" form.
+  """
+  def change_grant_access(attrs \\ %{}) do
+    GrantAccessForm.changeset(%GrantAccessForm{}, attrs)
+  end
+
+  @doc """
+  Admin-only path to immediate course access: activates (or creates and
+  activates) the enrollment, records a permanent `EnrollmentAudit` entry,
+  and delivers the welcome email plus in-app notification.
+
+  Delivery happens only after the transaction commits, and its result is not
+  part of the returned value — a mail hiccup must never roll back access
+  that has already been granted.
+  """
+  def grant_access(%User{} = learner, %User{} = admin, attrs) do
+    case change_grant_access(attrs) do
+      %Ecto.Changeset{valid?: true} = changeset ->
+        course_id = Ecto.Changeset.get_field(changeset, :course_id)
+        reason = Ecto.Changeset.get_field(changeset, :reason)
+
+        case Repo.get(Course, course_id) do
+          nil -> {:error, Ecto.Changeset.add_error(changeset, :course_id, "is invalid")}
+          course -> do_grant_access(learner, course, admin, reason, changeset)
+        end
+
+      changeset ->
+        {:error, changeset}
+    end
+  end
+
+  defp do_grant_access(learner, course, admin, reason, changeset) do
+    if can_access_course?(learner, course) do
+      {:error,
+       Ecto.Changeset.add_error(changeset, :course_id, "learner already has active access")}
+    else
+      case run_grant_access(learner, course, admin, reason) do
+        {:ok, enrollment} ->
+          Notifications.deliver_enrollment_granted(enrollment)
+          {:ok, enrollment}
+
+        {:error, failure} ->
+          {:error, failure}
+      end
+    end
+  end
+
+  defp run_grant_access(learner, course, admin, reason) do
+    Repo.transaction(fn ->
+      with {:ok, enrollment} <- create_pending_enrollment(learner, course),
+           {:ok, enrollment} <- activate_enrollment(enrollment),
+           {:ok, _audit} <- create_enrollment_audit(enrollment, admin, reason) do
+        enrollment
+      else
+        {:error, failure} -> Repo.rollback(failure)
+      end
+    end)
+  end
+
+  @doc """
+  Creates the permanent audit record for an admin-granted enrollment.
+  """
+  def create_enrollment_audit(%Enrollment{} = enrollment, %User{} = admin, reason) do
+    %EnrollmentAudit{}
+    |> EnrollmentAudit.changeset(%{
+      enrollment_id: enrollment.id,
+      admin_user_id: admin.id,
+      reason: reason
+    })
+    |> Repo.insert()
+  end
+
+  @doc """
+  Lists the audit trail for an enrollment, newest first, with the granting
+  admin preloaded.
+  """
+  def list_audits_for_enrollment(enrollment_id) do
+    EnrollmentAudit
+    |> where([a], a.enrollment_id == ^enrollment_id)
+    |> order_by(desc: :inserted_at)
+    |> preload(:admin_user)
+    |> Repo.all()
   end
 
   @doc """

@@ -7,7 +7,7 @@ defmodule WasomiWeb.DashboardLive do
   def mount(_params, _session, socket) do
     if connected?(socket) do
       Learning.subscribe(socket.assigns.current_user)
-      Payments.subscribe(socket.assigns.current_user)
+      Notifications.subscribe(socket.assigns.current_user)
     end
 
     {:ok,
@@ -31,16 +31,20 @@ defmodule WasomiWeb.DashboardLive do
 
   @impl true
   def handle_event("dismiss_notification", %{"id" => id}, socket) do
-    id
-    |> Notifications.get_notification!()
-    |> Notifications.mark_read()
+    case Notifications.get_notification(socket.assigns.current_user, id) do
+      nil ->
+        {:noreply, socket}
 
-    {:noreply,
-     assign(
-       socket,
-       :notifications,
-       Notifications.list_unread_for_user(socket.assigns.current_user)
-     )}
+      notification ->
+        Notifications.mark_read(notification)
+
+        {:noreply,
+         assign(
+           socket,
+           :notifications,
+           Notifications.list_unread_for_user(socket.assigns.current_user)
+         )}
+    end
   end
 
   @impl true

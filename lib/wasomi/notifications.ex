@@ -24,6 +24,15 @@ defmodule Wasomi.Notifications do
   end
 
   @doc """
+  Subscribes the calling process to a user's real-time notification topic.
+
+  `Wasomi.Payments` also broadcasts payment confirmations on this same
+  `"user:\#{id}"` topic — subscribing once here (e.g. from `DashboardLive`)
+  covers both payment and in-app-notification events.
+  """
+  def subscribe(%User{id: id}), do: Phoenix.PubSub.subscribe(Wasomi.PubSub, "user:#{id}")
+
+  @doc """
   Delivers the welcome email and creates the in-app notification for an
   admin-granted enrollment, then broadcasts so an open dashboard updates
   live. Both remain best-effort: the enrollment and its audit record have
@@ -61,7 +70,17 @@ defmodule Wasomi.Notifications do
     |> Repo.all()
   end
 
-  def get_notification!(id), do: Repo.get!(Notification, id)
+  @doc """
+  Gets a user's own notification, or `nil` if it doesn't exist or belongs to
+  someone else — callers must not be able to look up or mark read a
+  notification that isn't theirs. A tampered id fails soft (`nil`) rather
+  than crashing the caller's LiveView connection.
+  """
+  def get_notification(%User{id: user_id}, id) do
+    Notification
+    |> where([n], n.id == ^id and n.user_id == ^user_id)
+    |> Repo.one()
+  end
 
   @doc """
   Marks a notification as read.

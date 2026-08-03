@@ -251,6 +251,12 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                 >
                   <.icon name="hero-arrow-top-right-on-square" class="h-4 w-4" /> View public page
                 </.link>
+                <.link
+                  navigate={~p"/admin/courses/#{@course.slug}/preview"}
+                  class="inline-flex items-center gap-2 rounded-full border border-dark px-5 py-2.5 text-sm font-medium text-dark transition hover:bg-dark hover:text-white"
+                >
+                  <.icon name="hero-eye" class="h-4 w-4" /> Preview course
+                </.link>
               </div>
             </div>
 

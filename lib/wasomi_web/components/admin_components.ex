@@ -180,6 +180,7 @@ defmodule WasomiWeb.AdminComponents do
   defp status_classes(status) when status in [:draft, :pending],
     do: "bg-amber-50 text-amber-700"
 
+  defp status_classes(:in_review), do: "bg-blue-50 text-blue-700"
   defp status_classes(:failed), do: "bg-red-50 text-red-600"
   defp status_classes(_status), do: "bg-soft text-body"
 

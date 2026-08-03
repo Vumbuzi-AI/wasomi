@@ -524,6 +524,8 @@ defmodule Wasomi.Assessments do
         |> where([item], item.id == ^id)
         |> Repo.update_all(set: [position: position, updated_at: now])
       end)
+
+      :reordered
     end)
   end
 end

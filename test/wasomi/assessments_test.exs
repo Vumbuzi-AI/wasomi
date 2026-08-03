@@ -131,6 +131,7 @@ defmodule Wasomi.AssessmentsTest do
       question = question_fixture(%{quiz: quiz})
 
       assert Assessments.reorder_questions(quiz, ["abc"]) == {:error, :invalid_order}
+
       assert Assessments.reorder_questions(quiz, [question.id, "not-a-number"]) ==
                {:error, :invalid_order}
     end
@@ -160,6 +161,16 @@ defmodule Wasomi.AssessmentsTest do
       assert Enum.map(Assessments.list_published_questions(published_quiz), & &1.id) == [
                question.id
              ]
+    end
+
+    test "publish_quiz/1 does not mutate the quiz when completeness checks fail" do
+      quiz = quiz_fixture()
+
+      assert {:error, {:incomplete_quiz, _errors}} = Assessments.publish_quiz(quiz)
+
+      reloaded = Assessments.get_quiz!(quiz.id)
+      refute reloaded.active
+      refute reloaded.published_at
     end
 
     test "count_draft_questions_by_module/1 counts drafts per module, scoped to the course" do

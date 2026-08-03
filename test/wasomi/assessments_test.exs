@@ -164,7 +164,7 @@ defmodule Wasomi.AssessmentsTest do
     end
 
     test "publish_quiz/1 does not mutate the quiz when completeness checks fail" do
-      quiz = quiz_fixture()
+      quiz = quiz_fixture(%{active: false})
 
       assert {:error, {:incomplete_quiz, _errors}} = Assessments.publish_quiz(quiz)
 

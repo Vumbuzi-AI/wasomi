@@ -24,7 +24,7 @@ defmodule Wasomi.AssessmentsFixtures do
         title: "some quiz",
         description: "some description",
         passing_score_percent: 70,
-        active: false
+        active: true
       })
       |> then(&Assessments.create_quiz(module, &1))
 

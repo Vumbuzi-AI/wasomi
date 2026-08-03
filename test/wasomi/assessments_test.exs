@@ -126,6 +126,23 @@ defmodule Wasomi.AssessmentsTest do
                {:error, :invalid_order}
     end
 
+    test "reorder_questions/2 rejects non-integer ids" do
+      quiz = quiz_fixture()
+      question = question_fixture(%{quiz: quiz})
+
+      assert Assessments.reorder_questions(quiz, ["abc"]) == {:error, :invalid_order}
+      assert Assessments.reorder_questions(quiz, [question.id, "not-a-number"]) ==
+               {:error, :invalid_order}
+    end
+
+    test "reorder_questions/2 rejects duplicate ids" do
+      quiz = quiz_fixture()
+      question = question_fixture(%{quiz: quiz})
+
+      assert Assessments.reorder_questions(quiz, [question.id, question.id]) ==
+               {:error, :invalid_order}
+    end
+
     test "publish_quiz/1 validates completeness and activates all questions atomically" do
       quiz = quiz_fixture()
 

@@ -92,7 +92,9 @@ defmodule WasomiWeb.AdminLive.CourseShow do
     case quiz do
       %Assessments.Quiz{id: quiz_id} ->
         course_id = socket.assigns.course.id
-        {:noreply, push_navigate(socket, to: ~p"/admin/courses/#{course_id}/quizzes/#{quiz_id}")}
+
+        {:noreply,
+         push_navigate(socket, to: ~p"/admin/courses/#{course_id}/quizzes/#{quiz_id}/edit")}
 
       _ ->
         {:noreply, put_flash(socket, :error, "Could not create a quiz for this module.")}
@@ -478,7 +480,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                     </span>
                     <span class="flex shrink-0 items-center gap-1.5">
                       <.link
-                        navigate={~p"/admin/courses/#{@course.id}/quizzes/#{quiz.id}"}
+                        navigate={~p"/admin/courses/#{@course.id}/quizzes/#{quiz.id}/edit"}
                         class="grid h-8 w-8 place-items-center rounded-full text-muted transition hover:bg-mint hover:text-primary"
                         title="Manage quiz"
                       >

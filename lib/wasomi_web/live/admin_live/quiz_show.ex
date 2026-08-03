@@ -176,14 +176,6 @@ defmodule WasomiWeb.AdminLive.QuizShow do
     end
   end
 
-  defp get_active_options(changeset) do
-    Ecto.Changeset.get_assoc(changeset, :question_options)
-    |> Enum.reject(fn
-      %Ecto.Changeset{action: action} -> action in [:replace, :delete]
-      _ -> false
-    end)
-  end
-
   def handle_event("save_question", %{"id" => id, "question" => params}, socket) do
     question = find_question!(socket.assigns.quiz, id)
     params = apply_correct_option(params)
@@ -343,6 +335,14 @@ defmodule WasomiWeb.AdminLive.QuizShow do
 
   defp blank_options(_multiple_choice) do
     Enum.map(1..4, &%{label: "", correct: false, position: &1})
+  end
+
+  defp get_active_options(changeset) do
+    Ecto.Changeset.get_assoc(changeset, :question_options)
+    |> Enum.reject(fn
+      %Ecto.Changeset{action: action} -> action in [:replace, :delete]
+      _ -> false
+    end)
   end
 
   defp find_question!(quiz, id) do

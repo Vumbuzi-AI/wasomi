@@ -88,7 +88,25 @@ defmodule Wasomi.Catalog.Course do
         changeset
       end
     end)
+    |> validate_change(:certificate_signature_key, fn field, value ->
+      if valid_signature_url?(value) do
+        []
+      else
+        [{field, "must be a valid http(s) URL"}]
+      end
+    end)
   end
+
+  defp valid_signature_url?(nil), do: true
+
+  defp valid_signature_url?(value) when is_binary(value) do
+    case URI.parse(value) do
+      %URI{scheme: scheme} when scheme in ["http", "https"] -> true
+      _ -> false
+    end
+  end
+
+  defp valid_signature_url?(_value), do: false
 
   defp trim(value) when is_binary(value), do: String.trim(value)
   defp trim(value), do: value

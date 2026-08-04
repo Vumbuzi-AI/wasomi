@@ -33,12 +33,11 @@ defmodule Wasomi.Certificates.Renderer.ChromicPdf do
   def render(assigns) do
     html = Template.render_html(assigns)
 
-    with {:ok, base64_pdf} <-
-           ChromicPDF.print_to_pdf({:html, html},
-             print_to_pdf: @print_options,
-             evaluate: @evaluate
-           ) do
-      {:ok, Base.decode64!(base64_pdf)}
+    case ChromicPDF.print_to_pdf({:html, html}, print_to_pdf: @print_options, evaluate: @evaluate) do
+      {:ok, base64_pdf} -> {:ok, Base.decode64!(base64_pdf)}
+      other -> {:error, other}
     end
+  rescue
+    error -> {:error, error}
   end
 end

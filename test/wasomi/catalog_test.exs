@@ -552,5 +552,29 @@ defmodule Wasomi.CatalogTest do
       assert updated.certificate_signatory_title == "Country Manager"
       assert updated.certificate_signature_key == "https://example.com/signature.png"
     end
+
+    test "change_course_certificate/2 rejects a non-http(s) signature URL" do
+      course = course_fixture()
+
+      changeset =
+        Catalog.change_course_certificate(course, %{
+          "certificate_signature_key" => "javascript:alert(1)"
+        })
+
+      refute changeset.valid?
+      assert %{certificate_signature_key: ["must be a valid http(s) URL"]} = errors_on(changeset)
+    end
+
+    test "change_course_certificate/2 treats a blank signature URL as absent, not invalid" do
+      course = course_fixture()
+
+      changeset =
+        Catalog.change_course_certificate(course, %{
+          "certificate_enabled" => "false",
+          "certificate_signature_key" => ""
+        })
+
+      assert changeset.valid?
+    end
   end
 end

@@ -114,9 +114,11 @@ defmodule Wasomi.Catalog.Course do
   # The only legitimate source for this field is the public_url our own R2
   # upload flow returns — restricting the host closes off using this
   # devtools-editable field to make the server-side PDF renderer (headless
-  # Chrome) fetch arbitrary hosts (SSRF). Falls back to allowing any http(s)
-  # host when R2 isn't configured (e.g. local dev), matching the previous
-  # scheme-only check rather than rejecting every signature URL.
+  # Chrome) fetch arbitrary hosts (SSRF). Fails closed when R2 isn't
+  # configured, rather than allowing any host: a legitimate signature_key can
+  # never be populated without R2 configured anyway (the upload flow itself
+  # requires it), so this costs no real capability — only an unconfigured
+  # environment "permissively" allowing every host would be a real gap.
   defp trusted_signature_host?(host) do
     case Application.get_env(:wasomi, :r2_public_url) do
       base when is_binary(base) and base != "" ->
@@ -126,7 +128,7 @@ defmodule Wasomi.Catalog.Course do
         end
 
       _ ->
-        true
+        false
     end
   end
 

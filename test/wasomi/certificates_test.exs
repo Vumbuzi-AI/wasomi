@@ -123,7 +123,7 @@ defmodule Wasomi.CertificatesTest do
     # instead of being deterministic.
     previous = Application.get_env(:wasomi, :r2_public_url)
     on_exit(fn -> Application.put_env(:wasomi, :r2_public_url, previous) end)
-    Application.delete_env(:wasomi, :r2_public_url)
+    Application.put_env(:wasomi, :r2_public_url, "https://example.com")
 
     {:ok, _course} =
       Wasomi.Catalog.update_course_certificate(context.course, %{

@@ -540,7 +540,7 @@ defmodule Wasomi.CatalogTest do
       # machine instead of being deterministic.
       previous = Application.get_env(:wasomi, :r2_public_url)
       on_exit(fn -> Application.put_env(:wasomi, :r2_public_url, previous) end)
-      Application.delete_env(:wasomi, :r2_public_url)
+      Application.put_env(:wasomi, :r2_public_url, "https://example.com")
 
       course = course_fixture()
 
@@ -581,6 +581,22 @@ defmodule Wasomi.CatalogTest do
         })
 
       refute Keyword.has_key?(trusted_changeset.errors, :certificate_signature_key)
+    end
+
+    test "change_course_certificate/2 rejects every signature URL — even a plausible one — when R2 isn't configured" do
+      previous = Application.get_env(:wasomi, :r2_public_url)
+      on_exit(fn -> Application.put_env(:wasomi, :r2_public_url, previous) end)
+      Application.delete_env(:wasomi, :r2_public_url)
+
+      course = course_fixture()
+
+      changeset =
+        Catalog.change_course_certificate(course, %{
+          "certificate_signature_key" => "https://cdn.example.test/certificates/1/sig.png"
+        })
+
+      refute changeset.valid?
+      assert %{certificate_signature_key: ["must be a valid http(s) URL"]} = errors_on(changeset)
     end
 
     test "change_course_certificate/2 rejects a non-http(s) signature URL" do

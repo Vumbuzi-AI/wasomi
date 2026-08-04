@@ -243,6 +243,7 @@ defmodule Wasomi.Payments do
   end
 
   def verify_transaction(_payment_id, %User{}), do: {:error, :forbidden}
+  def verify_transaction(_payment_id, _caller), do: {:error, :forbidden}
 
   defp do_verify_transaction(%Payment{status: :successful} = payment) do
     {:ok,

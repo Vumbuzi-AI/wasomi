@@ -199,6 +199,11 @@ defmodule Wasomi.PaymentsTest do
       assert {:error, :forbidden} = Payments.verify_transaction(payment.id, user)
     end
 
+    test "rejects a nil or non-User caller without raising" do
+      assert {:error, :forbidden} = Payments.verify_transaction(1, nil)
+      assert {:error, :forbidden} = Payments.verify_transaction(1, "not-a-user")
+    end
+
     test "returns an error tuple instead of raising for a nonexistent payment id", %{
       admin: admin
     } do

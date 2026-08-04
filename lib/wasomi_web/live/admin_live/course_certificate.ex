@@ -16,6 +16,7 @@ defmodule WasomiWeb.AdminLive.CourseCertificate do
      |> assign(:page_title, "Certificate settings")
      |> assign(:course, course)
      |> assign(:form, to_form(Catalog.change_course_certificate(course)))
+     |> assign(:generating_pdf?, false)
      |> allow_upload(:signature,
        accept: ~w(.png),
        max_entries: 1,
@@ -41,12 +42,68 @@ defmodule WasomiWeb.AdminLive.CourseCertificate do
   end
 
   def handle_event("save", %{"course" => params}, socket) do
-    params =
-      case consume_signature_upload(socket) do
-        nil -> params
-        url -> Map.put(params, "certificate_signature_key", url)
-      end
+    case consume_signature_upload(socket) do
+      {:ok, url} ->
+        save_certificate(socket, Map.put(params, "certificate_signature_key", url))
 
+      :no_upload ->
+        save_certificate(socket, params)
+
+      {:error, :missing_public_url} ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "The signature image uploaded, but no public storage URL is configured " <>
+             "(R2_PUBLIC_URL). Nothing was saved — ask an engineer to set it, then re-upload."
+         )}
+    end
+  end
+
+  def handle_event("cancel-upload", %{"ref" => ref}, socket) do
+    {:noreply, socket |> cancel_upload(:signature, ref) |> assign_preview()}
+  end
+
+  def handle_event("test_pdf", _params, socket) do
+    if socket.assigns.generating_pdf? do
+      {:noreply, socket}
+    else
+      assigns = sample_assigns(socket)
+
+      {:noreply,
+       socket
+       |> assign(:generating_pdf?, true)
+       |> start_async(:test_pdf, fn -> renderer().render(assigns) end)}
+    end
+  end
+
+  def handle_progress(:signature, entry, socket) do
+    if entry.done?, do: {:noreply, assign_preview(socket)}, else: {:noreply, socket}
+  end
+
+  @impl true
+  def handle_async(:test_pdf, {:ok, {:ok, pdf}}, socket) do
+    {:noreply,
+     socket
+     |> assign(:generating_pdf?, false)
+     |> push_event("download-pdf", %{data: Base.encode64(pdf), filename: "sample-certificate.pdf"})}
+  end
+
+  def handle_async(:test_pdf, {:ok, {:error, _reason}}, socket) do
+    {:noreply,
+     socket
+     |> assign(:generating_pdf?, false)
+     |> put_flash(:error, "Could not generate a sample PDF right now.")}
+  end
+
+  def handle_async(:test_pdf, {:exit, _reason}, socket) do
+    {:noreply,
+     socket
+     |> assign(:generating_pdf?, false)
+     |> put_flash(:error, "Could not generate a sample PDF right now.")}
+  end
+
+  defp save_certificate(socket, params) do
     case Catalog.update_course_certificate(socket.assigns.course, params) do
       {:ok, course} ->
         {:noreply,
@@ -59,28 +116,6 @@ defmodule WasomiWeb.AdminLive.CourseCertificate do
       {:error, %Ecto.Changeset{} = changeset} ->
         {:noreply, assign(socket, :form, to_form(changeset))}
     end
-  end
-
-  def handle_event("cancel-upload", %{"ref" => ref}, socket) do
-    {:noreply, socket |> cancel_upload(:signature, ref) |> assign_preview()}
-  end
-
-  def handle_event("test_pdf", _params, socket) do
-    case renderer().render(sample_assigns(socket)) do
-      {:ok, pdf} ->
-        {:noreply,
-         push_event(socket, "download-pdf", %{
-           data: Base.encode64(pdf),
-           filename: "sample-certificate.pdf"
-         })}
-
-      {:error, _reason} ->
-        {:noreply, put_flash(socket, :error, "Could not generate a sample PDF right now.")}
-    end
-  end
-
-  def handle_progress(:signature, entry, socket) do
-    if entry.done?, do: {:noreply, assign_preview(socket)}, else: {:noreply, socket}
   end
 
   @impl true
@@ -177,9 +212,11 @@ defmodule WasomiWeb.AdminLive.CourseCertificate do
             <button
               type="button"
               phx-click="test_pdf"
-              class="mt-4 inline-flex items-center gap-2 rounded-full border border-dark px-5 py-2.5 text-sm font-medium text-dark transition hover:bg-dark hover:text-white"
+              disabled={@generating_pdf?}
+              class="mt-4 inline-flex items-center gap-2 rounded-full border border-dark px-5 py-2.5 text-sm font-medium text-dark transition hover:bg-dark hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <.icon name="hero-arrow-down-tray" class="h-4 w-4" /> Test PDF
+              <.icon name="hero-arrow-down-tray" class="h-4 w-4" />
+              {if @generating_pdf?, do: "Generating…", else: "Test PDF"}
             </button>
           </section>
 
@@ -250,8 +287,12 @@ defmodule WasomiWeb.AdminLive.CourseCertificate do
     case consume_uploaded_entries(socket, :signature, fn meta, _entry ->
            {:ok, meta.public_url}
          end) do
-      [url | _] -> url
-      [] -> nil
+      [url] when is_binary(url) -> {:ok, url}
+      # The file uploaded to R2 fine, but Storage.R2 couldn't compute a
+      # public_url (R2_PUBLIC_URL not configured) — surface this instead of
+      # silently saving without a signature.
+      [nil] -> {:error, :missing_public_url}
+      [] -> :no_upload
     end
   end
 

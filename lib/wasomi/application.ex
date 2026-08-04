@@ -55,7 +55,7 @@ defmodule Wasomi.Application do
           nil
 
         executable ->
-          {ChromicPDF, chrome_executable: executable, no_sandbox: true}
+          {ChromicPDF, chrome_executable: executable, no_sandbox: no_sandbox?()}
       end
     end
   end
@@ -66,4 +66,10 @@ defmodule Wasomi.Application do
       _ -> Enum.find_value(@chrome_candidates, &System.find_executable/1)
     end
   end
+
+  # Sandboxed by default — Chrome's sandbox is a real defense-in-depth layer
+  # against a renderer exploit escaping to the host process. Only disable it
+  # where the deployment target requires it (commonly: running as root in a
+  # container without the extra privileges the sandbox needs).
+  defp no_sandbox?, do: System.get_env("CHROME_NO_SANDBOX") in ["1", "true"]
 end

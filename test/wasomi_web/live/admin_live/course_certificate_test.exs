@@ -88,8 +88,18 @@ defmodule WasomiWeb.AdminLive.CourseCertificateTest do
 
   test "uploading a signature shows a preview and persists on save", %{conn: conn} do
     previous_provider = Application.get_env(:wasomi, :storage_provider)
-    on_exit(fn -> Application.put_env(:wasomi, :storage_provider, previous_provider) end)
+    previous_public_url = Application.get_env(:wasomi, :r2_public_url)
+
+    on_exit(fn ->
+      Application.put_env(:wasomi, :storage_provider, previous_provider)
+      Application.put_env(:wasomi, :r2_public_url, previous_public_url)
+    end)
+
     Application.put_env(:wasomi, :storage_provider, __MODULE__.SignatureStorageMock)
+    # Matches the mock's public_url below — a locally configured
+    # R2_PUBLIC_URL (via .env) would otherwise make the signature host-trust
+    # check depend on the developer's machine instead of being deterministic.
+    Application.put_env(:wasomi, :r2_public_url, "https://cdn.example.test")
 
     course = course_fixture()
     {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.id}/certificate")
@@ -117,6 +127,31 @@ defmodule WasomiWeb.AdminLive.CourseCertificateTest do
 
     assert updated.certificate_signature_key ==
              "https://cdn.example.test/certificates/signature.png"
+  end
+
+  test "an upload with no public URL configured flashes an error instead of silently dropping it",
+       %{conn: conn} do
+    previous_provider = Application.get_env(:wasomi, :storage_provider)
+    on_exit(fn -> Application.put_env(:wasomi, :storage_provider, previous_provider) end)
+    Application.put_env(:wasomi, :storage_provider, __MODULE__.NoPublicUrlStorageMock)
+
+    course = course_fixture()
+    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.id}/certificate")
+
+    signature =
+      file_input(view, "#certificate-form", :signature, [
+        %{name: "signature.png", content: "fake-png-bytes", type: "image/png"}
+      ])
+
+    render_upload(signature, "signature.png")
+
+    html =
+      view
+      |> form("#certificate-form", %{"course" => %{"certificate_enabled" => "false"}})
+      |> render_submit()
+
+    assert html =~ "R2_PUBLIC_URL"
+    refute Catalog.get_course!(course.id).certificate_signature_key
   end
 
   test "Test PDF renders a sample certificate and pushes it to the browser for download", %{
@@ -148,6 +183,18 @@ defmodule WasomiWeb.AdminLive.CourseCertificateTest do
          url: "https://r2.example.test/presigned-url",
          key: "certificates/signature.png",
          public_url: "https://cdn.example.test/certificates/signature.png",
+         content_type: "image/png"
+       }}
+    end
+  end
+
+  defmodule NoPublicUrlStorageMock do
+    def presign_upload(_user, _attrs) do
+      {:ok,
+       %{
+         url: "https://r2.example.test/presigned-url",
+         key: "certificates/signature.png",
+         public_url: nil,
          content_type: "image/png"
        }}
     end

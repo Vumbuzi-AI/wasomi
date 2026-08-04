@@ -101,12 +101,34 @@ defmodule Wasomi.Catalog.Course do
 
   defp valid_signature_url?(value) when is_binary(value) do
     case URI.parse(value) do
-      %URI{scheme: scheme} when scheme in ["http", "https"] -> true
-      _ -> false
+      %URI{scheme: scheme, host: host} when scheme in ["http", "https"] and is_binary(host) ->
+        trusted_signature_host?(host)
+
+      _ ->
+        false
     end
   end
 
   defp valid_signature_url?(_value), do: false
+
+  # The only legitimate source for this field is the public_url our own R2
+  # upload flow returns — restricting the host closes off using this
+  # devtools-editable field to make the server-side PDF renderer (headless
+  # Chrome) fetch arbitrary hosts (SSRF). Falls back to allowing any http(s)
+  # host when R2 isn't configured (e.g. local dev), matching the previous
+  # scheme-only check rather than rejecting every signature URL.
+  defp trusted_signature_host?(host) do
+    case Application.get_env(:wasomi, :r2_public_url) do
+      base when is_binary(base) and base != "" ->
+        case URI.parse(base) do
+          %URI{host: trusted_host} when is_binary(trusted_host) -> host == trusted_host
+          _ -> false
+        end
+
+      _ ->
+        true
+    end
+  end
 
   defp trim(value) when is_binary(value), do: String.trim(value)
   defp trim(value), do: value

@@ -118,6 +118,13 @@ defmodule Wasomi.CertificatesTest do
 
   test "issue_new/3 passes the course's certificate branding into the renderer assigns",
        context do
+    # A locally configured R2_PUBLIC_URL (via .env) would otherwise make this
+    # test's signature host-trust check depend on the developer's machine
+    # instead of being deterministic.
+    previous = Application.get_env(:wasomi, :r2_public_url)
+    on_exit(fn -> Application.put_env(:wasomi, :r2_public_url, previous) end)
+    Application.delete_env(:wasomi, :r2_public_url)
+
     {:ok, _course} =
       Wasomi.Catalog.update_course_certificate(context.course, %{
         "certificate_enabled" => "true",
@@ -154,6 +161,32 @@ defmodule Wasomi.CertificatesTest do
 
     assert {:error, :certificates_disabled} =
              Certificates.issue(context.user.id, :course, context.course.id)
+
+    assert Repo.aggregate(Certificate, :count) == 0
+  end
+
+  test "IssueCertificate worker succeeds as a no-op instead of retrying when certificates are disabled",
+       context do
+    {:ok, _course} =
+      Wasomi.Catalog.update_course_certificate(context.course, %{
+        "certificate_enabled" => "false"
+      })
+
+    {:ok, _, _events} = Learning.mark_complete(context.user, context.lecture)
+
+    # :ok (not {:error, _}) is the whole point here — Oban retries any
+    # {:error, _} return up to max_attempts, which would be pointless for a
+    # deterministic "admin turned this off" condition.
+    assert :ok =
+             Oban.Testing.perform_job(
+               IssueCertificate,
+               %{
+                 user_id: context.user.id,
+                 type: "course",
+                 scope_id: context.course.id
+               },
+               []
+             )
 
     assert Repo.aggregate(Certificate, :count) == 0
   end

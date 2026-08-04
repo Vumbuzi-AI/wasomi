@@ -535,6 +535,13 @@ defmodule Wasomi.CatalogTest do
     end
 
     test "update_course_certificate/2 persists a full certificate configuration" do
+      # A locally configured R2_PUBLIC_URL (via .env) would otherwise make
+      # this test's signature host-trust check depend on the developer's
+      # machine instead of being deterministic.
+      previous = Application.get_env(:wasomi, :r2_public_url)
+      on_exit(fn -> Application.put_env(:wasomi, :r2_public_url, previous) end)
+      Application.delete_env(:wasomi, :r2_public_url)
+
       course = course_fixture()
 
       assert {:ok, updated} =
@@ -551,6 +558,29 @@ defmodule Wasomi.CatalogTest do
       assert updated.certificate_signatory_name == "Jane Doe"
       assert updated.certificate_signatory_title == "Country Manager"
       assert updated.certificate_signature_key == "https://example.com/signature.png"
+    end
+
+    test "change_course_certificate/2 rejects a signature URL pointing at an untrusted host when R2 is configured" do
+      previous = Application.get_env(:wasomi, :r2_public_url)
+      on_exit(fn -> Application.put_env(:wasomi, :r2_public_url, previous) end)
+      Application.put_env(:wasomi, :r2_public_url, "https://cdn.example.test")
+
+      course = course_fixture()
+
+      changeset =
+        Catalog.change_course_certificate(course, %{
+          "certificate_signature_key" => "http://169.254.169.254/latest/meta-data/"
+        })
+
+      refute changeset.valid?
+      assert %{certificate_signature_key: ["must be a valid http(s) URL"]} = errors_on(changeset)
+
+      trusted_changeset =
+        Catalog.change_course_certificate(course, %{
+          "certificate_signature_key" => "https://cdn.example.test/certificates/1/sig.png"
+        })
+
+      refute Keyword.has_key?(trusted_changeset.errors, :certificate_signature_key)
     end
 
     test "change_course_certificate/2 rejects a non-http(s) signature URL" do

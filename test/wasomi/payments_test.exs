@@ -11,6 +11,12 @@ defmodule Wasomi.PaymentsTest do
 
   setup :verify_on_exit!
 
+  defp admin_fixture do
+    user = user_fixture()
+    {:ok, admin} = Wasomi.Accounts.update_user_role(user, :admin)
+    admin
+  end
+
   test "initialization persists a pending enrollment and payment before calling Paystack" do
     user = user_fixture()
     course = course_fixture(price_minor: 125_000, currency: "KES")
@@ -178,6 +184,152 @@ defmodule Wasomi.PaymentsTest do
              })
 
     assert Enrollments.can_access_course?(user, course)
+  end
+
+  describe "verify_transaction/2" do
+    setup do
+      %{admin: admin_fixture()}
+    end
+
+    test "rejects a non-admin caller without querying the provider", %{admin: _admin} do
+      user = user_fixture()
+      course = course_fixture(price_minor: 80_000, currency: "KES")
+      {:ok, %{payment: payment}} = Payments.create_pending_checkout(user, course)
+
+      assert {:error, :forbidden} = Payments.verify_transaction(payment.id, user)
+    end
+
+    test "rejects a nil or non-User caller without raising" do
+      assert {:error, :forbidden} = Payments.verify_transaction(1, nil)
+      assert {:error, :forbidden} = Payments.verify_transaction(1, "not-a-user")
+    end
+
+    test "returns an error tuple instead of raising for a nonexistent payment id", %{
+      admin: admin
+    } do
+      assert {:error, :payment_not_found} = Payments.verify_transaction(-1, admin)
+    end
+
+    test "provider success atomically completes payment and activates enrollment", %{
+      admin: admin
+    } do
+      user = user_fixture()
+      course = course_fixture(price_minor: 80_000, currency: "KES")
+      {:ok, %{payment: payment}} = Payments.create_pending_checkout(user, course)
+      Payments.subscribe(user)
+
+      expect(Wasomi.Payments.ProviderMock, :verify, fn reference ->
+        assert reference == payment.provider_reference
+        {:ok, success_payload(payment)}
+      end)
+
+      assert {:ok, %{payment: successful, enrollment: active, verification: verification}} =
+               Payments.verify_transaction(payment.id, admin)
+
+      assert successful.status == :successful
+      assert active.status == :active
+      assert verification["status"] == "success"
+      assert Enrollments.can_access_course?(user, course)
+      assert_receive {:payment_confirmed, %{id: id}}
+      assert id == active.id
+    end
+
+    test "provider decline marks the payment failed and returns the provider's reason", %{
+      admin: admin
+    } do
+      user = user_fixture()
+      course = course_fixture(price_minor: 80_000, currency: "KES")
+
+      {:ok, %{payment: payment, enrollment: enrollment}} =
+        Payments.create_pending_checkout(user, course)
+
+      expect(Wasomi.Payments.ProviderMock, :verify, fn _reference ->
+        {:ok,
+         success_payload(payment)
+         |> Map.put("status", "failed")
+         |> Map.put("gateway_response", "Insufficient Funds")}
+      end)
+
+      assert {:error, {:provider_declined, verification}} =
+               Payments.verify_transaction(payment.id, admin)
+
+      assert verification["gateway_response"] == "Insufficient Funds"
+      assert Payments.get_payment!(payment.id).status == :failed
+      assert Repo.reload(enrollment).status == :pending
+      refute Enrollments.can_access_course?(user, course)
+    end
+
+    test "amount mismatch is rejected without granting access", %{admin: admin} do
+      user = user_fixture()
+      course = course_fixture(price_minor: 80_000, currency: "KES")
+      {:ok, %{payment: payment}} = Payments.create_pending_checkout(user, course)
+
+      expect(Wasomi.Payments.ProviderMock, :verify, fn _reference ->
+        {:ok, Map.put(success_payload(payment), "amount", payment.amount_minor + 1)}
+      end)
+
+      assert {:error, :amount_mismatch} = Payments.verify_transaction(payment.id, admin)
+      refute Enrollments.can_access_course?(user, course)
+    end
+
+    test "re-verifying an already failed payment does not call the provider again", %{
+      admin: admin
+    } do
+      user = user_fixture()
+      course = course_fixture(price_minor: 80_000, currency: "KES")
+
+      {:ok, %{payment: payment}} = Payments.create_pending_checkout(user, course)
+      {:ok, failed} = Payments.update_payment(payment, %{status: :failed})
+
+      assert {:error, {:already_failed, ^failed}} = Payments.verify_transaction(payment.id, admin)
+    end
+
+    test "re-verifying an already successful payment does not call the provider again", %{
+      admin: admin
+    } do
+      user = user_fixture()
+      course = course_fixture(price_minor: 80_000, currency: "KES")
+      {:ok, %{payment: payment}} = Payments.create_pending_checkout(user, course)
+
+      expect(Wasomi.Payments.ProviderMock, :verify, 1, fn _reference ->
+        {:ok, success_payload(payment)}
+      end)
+
+      assert {:ok, %{payment: first_payment}} = Payments.verify_transaction(payment.id, admin)
+      assert {:ok, %{payment: second_payment}} = Payments.verify_transaction(payment.id, admin)
+      assert first_payment.id == second_payment.id
+      assert second_payment.status == :successful
+    end
+
+    test "a concurrent success wins over a stale decline seen by our own check", %{admin: admin} do
+      user = user_fixture()
+      course = course_fixture(price_minor: 80_000, currency: "KES")
+      {:ok, %{payment: payment}} = Payments.create_pending_checkout(user, course)
+
+      expect(Wasomi.Payments.ProviderMock, :verify, fn _reference ->
+        # Simulate another process (e.g. the webhook) confirming success
+        # while our own verification call to the provider is in flight.
+        {:ok, _} =
+          Payments.update_payment(payment, %{
+            status: :successful,
+            paid_at: DateTime.utc_now() |> DateTime.truncate(:second),
+            raw_payload: %{
+              "verification" => %{
+                "status" => "success",
+                "gateway_response" => "Confirmed elsewhere"
+              }
+            }
+          })
+
+        {:ok,
+         success_payload(payment)
+         |> Map.put("status", "failed")
+         |> Map.put("gateway_response", "Stale decline seen by our own check")}
+      end)
+
+      assert {:ok, %{verification: verification}} = Payments.verify_transaction(payment.id, admin)
+      assert verification["gateway_response"] == "Confirmed elsewhere"
+    end
   end
 
   defp success_payload(payment) do

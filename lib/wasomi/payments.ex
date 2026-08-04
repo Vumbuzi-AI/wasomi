@@ -221,6 +221,69 @@ defmodule Wasomi.Payments do
     end
   end
 
+  @doc """
+  Admin-triggered live re-verification of a single pending payment against the
+  configured provider (Paystack, including its M-Pesa mobile-money channel).
+
+  Requires the acting user to be an admin, mirroring the defense-in-depth
+  check `Enrollments.grant_access/3` already performs rather than relying
+  solely on the caller's route-level guard.
+
+  Reuses the same validation and completion path as the webhook flow, so a
+  provider "success" atomically marks the payment successful and activates
+  the enrollment, broadcasting `{:payment_confirmed, enrollment}` to the
+  learner. Returns the raw provider verification payload alongside the
+  result so the caller can surface the provider's own status/reason.
+  """
+  def verify_transaction(payment_id, %User{role: :admin}) do
+    case Repo.get(Payment, payment_id) do
+      nil -> {:error, :payment_not_found}
+      payment -> do_verify_transaction(payment)
+    end
+  end
+
+  def verify_transaction(_payment_id, %User{}), do: {:error, :forbidden}
+  def verify_transaction(_payment_id, _caller), do: {:error, :forbidden}
+
+  defp do_verify_transaction(%Payment{status: :successful} = payment) do
+    {:ok,
+     %{
+       payment: payment,
+       enrollment: Repo.get!(Wasomi.Enrollments.Enrollment, payment.enrollment_id),
+       verification: nil
+     }}
+  end
+
+  defp do_verify_transaction(%Payment{status: :failed} = payment) do
+    {:error, {:already_failed, payment}}
+  end
+
+  defp do_verify_transaction(%Payment{} = payment) do
+    with {:ok, verification} <- provider().verify(payment.provider_reference),
+         :ok <- validate_verification(payment, verification) do
+      case complete_verified_payment(payment, verification) do
+        {:ok, result} -> {:ok, Map.put(result, :verification, verification)}
+        {:error, reason} -> {:error, reason}
+      end
+    else
+      {:error, {:payment_failed, verification}} ->
+        case mark_failed(payment.provider_reference, verification) do
+          {:ok, %{payment: confirmed_payment} = result} ->
+            confirmed_verification = confirmed_payment.raw_payload["verification"] || verification
+            {:ok, Map.put(result, :verification, confirmed_verification)}
+
+          {:error, {:payment_failed, _payment}} ->
+            {:error, {:provider_declined, verification}}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   def record_webhook_event(reference, event) do
     case get_payment_by_reference(reference) do
       nil ->

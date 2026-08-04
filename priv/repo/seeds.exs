@@ -20,14 +20,14 @@ alias Wasomi.Repo
 
 admin_attrs = %{
   name: "Wasomi Admin",
-  email: "admin@wasomi.test",
+  email: "admin@example.com",
   phone: "254700000001",
   password: "password12345"
 }
 
 student_attrs = %{
   name: "One Student",
-  email: "student@wasomi.test",
+  email: "student@example.com",
   phone: "254700000002",
   password: "student12345"
 }

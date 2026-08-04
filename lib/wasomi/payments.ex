@@ -232,9 +232,10 @@ defmodule Wasomi.Payments do
   result so the caller can surface the provider's own status/reason.
   """
   def verify_transaction(payment_id) do
-    payment_id
-    |> get_payment!()
-    |> do_verify_transaction()
+    case Repo.get(Payment, payment_id) do
+      nil -> {:error, :payment_not_found}
+      payment -> do_verify_transaction(payment)
+    end
   end
 
   defp do_verify_transaction(%Payment{status: :successful} = payment) do
@@ -261,7 +262,8 @@ defmodule Wasomi.Payments do
       {:error, {:payment_failed, verification}} ->
         case mark_failed(payment.provider_reference, verification) do
           {:ok, %{payment: confirmed_payment} = result} ->
-            {:ok, Map.put(result, :verification, confirmed_payment.raw_payload["verification"])}
+            confirmed_verification = confirmed_payment.raw_payload["verification"] || verification
+            {:ok, Map.put(result, :verification, confirmed_verification)}
 
           {:error, {:payment_failed, _payment}} ->
             {:error, {:provider_declined, verification}}

@@ -130,6 +130,10 @@ defmodule WasomiWeb.AdminLive.Payments do
     put_flash(socket, :error, "This payment was already marked failed.")
   end
 
+  defp put_reconciliation_flash({:error, :payment_not_found}, socket) do
+    put_flash(socket, :error, "This payment no longer exists.")
+  end
+
   defp put_reconciliation_flash({:error, :reference_mismatch}, socket) do
     put_flash(
       socket,

@@ -103,4 +103,14 @@ defmodule WasomiWeb.AdminLive.PaymentsTest do
     assert html =~ "Invalid payment id"
     assert Process.alive?(view.pid)
   end
+
+  test "reconciling a numeric id for a payment that no longer exists does not crash the view",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, ~p"/admin/payments")
+
+    html = render_click(view, "reconcile", %{"id" => "999999999"})
+
+    assert html =~ "no longer exists"
+    assert Process.alive?(view.pid)
+  end
 end

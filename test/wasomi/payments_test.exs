@@ -181,6 +181,10 @@ defmodule Wasomi.PaymentsTest do
   end
 
   describe "verify_transaction/1" do
+    test "returns an error tuple instead of raising for a nonexistent payment id" do
+      assert {:error, :payment_not_found} = Payments.verify_transaction(-1)
+    end
+
     test "provider success atomically completes payment and activates enrollment" do
       user = user_fixture()
       course = course_fixture(price_minor: 80_000, currency: "KES")

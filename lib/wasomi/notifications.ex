@@ -43,7 +43,14 @@ defmodule Wasomi.Notifications do
   def deliver_enrollment_granted(%Enrollment{} = enrollment) do
     enrollment = Repo.preload(enrollment, [:user, :course])
 
-    UserNotifier.deliver_course_access_granted(enrollment.user, enrollment.course)
+    try do
+      UserNotifier.deliver_course_access_granted(enrollment.user, enrollment.course)
+    rescue
+      error ->
+        Logger.error(
+          "Failed to email enrollment #{enrollment.id}: #{Exception.format(:error, error, __STACKTRACE__)}"
+        )
+    end
 
     case create_notification(%{
            user_id: enrollment.user_id,
@@ -61,7 +68,10 @@ defmodule Wasomi.Notifications do
         {:ok, notification}
 
       {:error, changeset} ->
-        Logger.error("Failed to create notification for enrollment #{enrollment.id}: #{inspect(changeset)}")
+        Logger.error(
+          "Failed to create notification for enrollment #{enrollment.id}: #{inspect(changeset)}"
+        )
+
         {:error, changeset}
     end
   end

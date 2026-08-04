@@ -58,6 +58,9 @@ defmodule WasomiWeb.AdminLive.StudentShow do
 
       {:error, %Ecto.Changeset{} = changeset} ->
         {:noreply, assign(socket, :grant_access_form, to_form(changeset, action: :validate))}
+
+      {:error, :forbidden} ->
+        {:noreply, put_flash(socket, :error, "You are not authorized to grant course access.")}
     end
   end
 

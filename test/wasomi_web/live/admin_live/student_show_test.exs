@@ -8,6 +8,7 @@ defmodule WasomiWeb.AdminLive.StudentShowTest do
   import Wasomi.EnrollmentsFixtures
 
   alias Wasomi.Enrollments
+  alias WasomiWeb.AdminLive.StudentShow
 
   defp admin_fixture(attrs \\ %{}) do
     user = user_fixture(attrs)
@@ -110,6 +111,39 @@ defmodule WasomiWeb.AdminLive.StudentShowTest do
       {:ok, view, _html} = live(conn, ~p"/admin/students/#{learner.id}")
 
       assert has_element?(view, "button[disabled]", "Grant access")
+    end
+
+    test "shows a flash instead of crashing when the caller isn't an admin" do
+      no_longer_admin = user_fixture()
+      learner = user_fixture()
+      course = course_fixture()
+
+      socket = %Phoenix.LiveView.Socket{
+        assigns: %{
+          __changed__: %{},
+          flash: %{},
+          user: learner,
+          current_user: no_longer_admin,
+          grantable_courses: [course],
+          modal: :grant_access,
+          grant_access_form: nil
+        }
+      }
+
+      assert {:noreply, socket} =
+               StudentShow.handle_event(
+                 "grant_access",
+                 %{
+                   "grant_access_form" => %{
+                     "course_id" => course.id,
+                     "reason" => "Manual enrollment for a partner scholarship"
+                   }
+                 },
+                 socket
+               )
+
+      assert socket.assigns.flash["error"] == "You are not authorized to grant course access."
+      refute Enrollments.can_access_course?(learner, course)
     end
   end
 end

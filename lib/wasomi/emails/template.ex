@@ -121,11 +121,21 @@ defmodule Wasomi.Emails.Template do
     unwrapped = String.replace(trimmed, "[TOKEN]", "")
 
     cond do
-      String.starts_with?(unwrapped, "//") -> false
-      String.starts_with?(unwrapped, "/") -> true
-      URI.parse(unwrapped).scheme in ["http", "https"] -> true
-      String.contains?(trimmed, "[TOKEN]") and URI.parse(unwrapped).scheme == nil -> true
-      true -> false
+      String.starts_with?(unwrapped, "//") ->
+        false
+
+      String.starts_with?(unwrapped, "/") ->
+        true
+
+      URI.parse(unwrapped).scheme in ["http", "https"] ->
+        true
+
+      String.starts_with?(trimmed, "[TOKEN]") and String.ends_with?(trimmed, "[TOKEN]") and
+          URI.parse(unwrapped).scheme == nil ->
+        true
+
+      true ->
+        false
     end
   rescue
     _ -> false

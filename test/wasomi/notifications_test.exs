@@ -1,6 +1,7 @@
 defmodule Wasomi.NotificationsTest do
   use Wasomi.DataCase
 
+  import ExUnit.CaptureLog
   import Wasomi.AccountsFixtures
   import Wasomi.CatalogFixtures
 
@@ -76,9 +77,32 @@ defmodule Wasomi.NotificationsTest do
       learner = user_fixture()
       course = course_fixture()
       # Enrollment with invalid user_id to simulate notification insertion error
-      enrollment = %Wasomi.Enrollments.Enrollment{id: 99999, user_id: nil, user: learner, course: course}
+      enrollment = %Wasomi.Enrollments.Enrollment{
+        id: 99999,
+        user_id: nil,
+        user: learner,
+        course: course
+      }
 
-      assert {:error, %Ecto.Changeset{}} = Notifications.deliver_enrollment_granted(enrollment)
+      capture_log(fn ->
+        assert {:error, %Ecto.Changeset{}} = Notifications.deliver_enrollment_granted(enrollment)
+      end)
+    end
+
+    test "still creates the in-app notification when the email delivery raises" do
+      learner = user_fixture()
+      course = course_fixture()
+      {:ok, enrollment} = Enrollments.create_pending_enrollment(learner, course)
+
+      # An email recipient Swoosh cannot format raises inside UserNotifier.deliver/3.
+      broken_enrollment = %{enrollment | user: %{learner | email: 123}}
+
+      capture_log(fn ->
+        assert {:ok, notification} = Notifications.deliver_enrollment_granted(broken_enrollment)
+        assert notification.user_id == learner.id
+      end)
+
+      assert_no_email_sent()
     end
   end
 end

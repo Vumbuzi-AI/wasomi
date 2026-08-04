@@ -13,6 +13,12 @@ defmodule Wasomi.Catalog.Course do
     field :thumbnail_key, :string
     field :price_minor, :integer
 
+    field :certificate_enabled, :boolean, default: true
+    field :certificate_issuer_name, :string
+    field :certificate_signatory_name, :string
+    field :certificate_signatory_title, :string
+    field :certificate_signature_key, :string
+
     has_many :modules, Wasomi.Catalog.CourseModule,
       foreign_key: :course_id,
       preload_order: [asc: :position]
@@ -59,6 +65,71 @@ defmodule Wasomi.Catalog.Course do
     |> check_constraint(:price_minor, name: :courses_price_must_be_non_negative)
     |> check_constraint(:position, name: :courses_position_must_be_positive)
     |> check_constraint(:status, name: :courses_status_must_be_valid)
+  end
+
+  @doc false
+  def certificate_changeset(course, attrs) do
+    course
+    |> cast(attrs, [
+      :certificate_enabled,
+      :certificate_issuer_name,
+      :certificate_signatory_name,
+      :certificate_signatory_title,
+      :certificate_signature_key
+    ])
+    |> then(fn changeset ->
+      if get_field(changeset, :certificate_enabled) do
+        validate_required(changeset, [
+          :certificate_issuer_name,
+          :certificate_signatory_name,
+          :certificate_signatory_title
+        ])
+      else
+        changeset
+      end
+    end)
+    |> validate_change(:certificate_signature_key, fn field, value ->
+      if valid_signature_url?(value) do
+        []
+      else
+        [{field, "must be a valid http(s) URL"}]
+      end
+    end)
+  end
+
+  defp valid_signature_url?(nil), do: true
+
+  defp valid_signature_url?(value) when is_binary(value) do
+    case URI.parse(value) do
+      %URI{scheme: scheme, host: host} when scheme in ["http", "https"] and is_binary(host) ->
+        trusted_signature_host?(host)
+
+      _ ->
+        false
+    end
+  end
+
+  defp valid_signature_url?(_value), do: false
+
+  # The only legitimate source for this field is the public_url our own R2
+  # upload flow returns — restricting the host closes off using this
+  # devtools-editable field to make the server-side PDF renderer (headless
+  # Chrome) fetch arbitrary hosts (SSRF). Fails closed when R2 isn't
+  # configured, rather than allowing any host: a legitimate signature_key can
+  # never be populated without R2 configured anyway (the upload flow itself
+  # requires it), so this costs no real capability — only an unconfigured
+  # environment "permissively" allowing every host would be a real gap.
+  defp trusted_signature_host?(host) do
+    case Application.get_env(:wasomi, :r2_public_url) do
+      base when is_binary(base) and base != "" ->
+        case URI.parse(base) do
+          %URI{host: trusted_host} when is_binary(trusted_host) -> host == trusted_host
+          _ -> false
+        end
+
+      _ ->
+        false
+    end
   end
 
   defp trim(value) when is_binary(value), do: String.trim(value)

@@ -103,6 +103,7 @@ defmodule WasomiWeb.Router do
       live "/courses/new", AdminLive.Courses, :new
       live "/courses/:id/edit", AdminLive.Courses, :edit
       live "/courses/:id", AdminLive.CourseShow, :show
+      live "/courses/:id/certificate", AdminLive.CourseCertificate, :edit
 
       live "/students", AdminLive.Students, :index
       live "/students/:id", AdminLive.StudentShow, :show

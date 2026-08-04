@@ -307,6 +307,22 @@ defmodule Wasomi.Catalog do
   end
 
   @doc """
+  Updates a course's certificate configuration (issuer, signatory, signature).
+  """
+  def update_course_certificate(%Course{} = course, attrs) do
+    course
+    |> Course.certificate_changeset(attrs)
+    |> Repo.update()
+  end
+
+  @doc """
+  Returns an `%Ecto.Changeset{}` for tracking course certificate configuration changes.
+  """
+  def change_course_certificate(%Course{} = course, attrs \\ %{}) do
+    Course.certificate_changeset(course, attrs)
+  end
+
+  @doc """
   Moves a course from `:draft` into `:in_review` — a free transition with no
   checklist, since it only signals "ready for a publish attempt," not that
   the course actually is ready.

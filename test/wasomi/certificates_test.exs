@@ -116,6 +116,81 @@ defmodule Wasomi.CertificatesTest do
              Certificates.download_url(user_fixture(), certificate)
   end
 
+  test "issue_new/3 passes the course's certificate branding into the renderer assigns",
+       context do
+    # A locally configured R2_PUBLIC_URL (via .env) would otherwise make this
+    # test's signature host-trust check depend on the developer's machine
+    # instead of being deterministic.
+    previous = Application.get_env(:wasomi, :r2_public_url)
+    on_exit(fn -> Application.put_env(:wasomi, :r2_public_url, previous) end)
+    Application.put_env(:wasomi, :r2_public_url, "https://example.com")
+
+    {:ok, _course} =
+      Wasomi.Catalog.update_course_certificate(context.course, %{
+        "certificate_enabled" => "true",
+        "certificate_issuer_name" => "GS1 Kenya",
+        "certificate_signatory_name" => "Jane Doe",
+        "certificate_signatory_title" => "Country Manager",
+        "certificate_signature_key" => "https://example.com/sig.png"
+      })
+
+    expect(Wasomi.CertificateRendererMock, :render, fn assigns ->
+      assert assigns.issuer_name == "GS1 Kenya"
+      assert assigns.signatory_name == "Jane Doe"
+      assert assigns.signatory_title == "Country Manager"
+      assert assigns.signature_url == "https://example.com/sig.png"
+      {:ok, "%PDF-test"}
+    end)
+
+    expect(Wasomi.CertificateStorageMock, :upload, fn _key, _pdf -> :ok end)
+
+    {:ok, _, _events} = Learning.mark_complete(context.user, context.lecture)
+
+    assert {:ok, _certificate, :created} =
+             Certificates.issue(context.user.id, :course, context.course.id)
+  end
+
+  test "issue/3 refuses to issue a new certificate when the course has certificates disabled",
+       context do
+    {:ok, _course} =
+      Wasomi.Catalog.update_course_certificate(context.course, %{
+        "certificate_enabled" => "false"
+      })
+
+    {:ok, _, _events} = Learning.mark_complete(context.user, context.lecture)
+
+    assert {:error, :certificates_disabled} =
+             Certificates.issue(context.user.id, :course, context.course.id)
+
+    assert Repo.aggregate(Certificate, :count) == 0
+  end
+
+  test "IssueCertificate worker succeeds as a no-op instead of retrying when certificates are disabled",
+       context do
+    {:ok, _course} =
+      Wasomi.Catalog.update_course_certificate(context.course, %{
+        "certificate_enabled" => "false"
+      })
+
+    {:ok, _, _events} = Learning.mark_complete(context.user, context.lecture)
+
+    # :ok (not {:error, _}) is the whole point here — Oban retries any
+    # {:error, _} return up to max_attempts, which would be pointless for a
+    # deterministic "admin turned this off" condition.
+    assert :ok =
+             Oban.Testing.perform_job(
+               IssueCertificate,
+               %{
+                 user_id: context.user.id,
+                 type: "course",
+                 scope_id: context.course.id
+               },
+               []
+             )
+
+    assert Repo.aggregate(Certificate, :count) == 0
+  end
+
   defp expect_render_and_upload(count) do
     expect(Wasomi.CertificateRendererMock, :render, count, fn assigns ->
       assert assigns.learner_name

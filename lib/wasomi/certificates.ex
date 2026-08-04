@@ -101,7 +101,11 @@ defmodule Wasomi.Certificates do
           {:ok, preload_certificate(certificate), :existing}
 
         nil ->
-          issue_new(user, type, scope)
+          if course_for(type, scope).certificate_enabled do
+            issue_new(user, type, scope)
+          else
+            {:error, :certificates_disabled}
+          end
       end
     else
       nil -> {:error, :user_not_found}
@@ -152,7 +156,11 @@ defmodule Wasomi.Certificates do
       title: scope.title,
       type_label: if(type == :module, do: "Module Achievement", else: "Course Achievement"),
       issued_on: Calendar.strftime(issued_at, "%B %-d, %Y"),
-      serial_number: serial_number
+      serial_number: serial_number,
+      issuer_name: course.certificate_issuer_name || "Wasomi Business Institute",
+      signatory_name: course.certificate_signatory_name,
+      signatory_title: course.certificate_signatory_title,
+      signature_url: course.certificate_signature_key
     }
 
     with {:ok, pdf} <- renderer().render(assigns),

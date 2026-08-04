@@ -36,6 +36,16 @@ defmodule Wasomi.Certificates.Workers.IssueCertificate do
       end
 
       :ok
+    else
+      # Not transient — retrying can never issue a certificate for a course
+      # the admin has turned off, so treat it as a deliberate no-op instead
+      # of burning all 8 retry attempts and surfacing as a job failure.
+      # Note this job's `unique` config (period: :infinity, states: :all)
+      # still blocks a fresh insert for this scope even after completing
+      # here — if the admin re-enables certificates later, nothing
+      # re-triggers issuance for a learner who completed while disabled.
+      {:error, :certificates_disabled} -> :ok
+      {:error, reason} -> {:error, reason}
     end
   end
 

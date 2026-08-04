@@ -508,4 +508,119 @@ defmodule Wasomi.CatalogTest do
       assert published.status == :published
     end
   end
+
+  describe "certificate configuration" do
+    import Wasomi.CatalogFixtures
+
+    test "change_course_certificate/2 does not require issuer/signatory fields when disabled" do
+      course = course_fixture()
+
+      changeset = Catalog.change_course_certificate(course, %{"certificate_enabled" => "false"})
+
+      assert changeset.valid?
+    end
+
+    test "change_course_certificate/2 requires issuer/signatory fields when enabled" do
+      course = course_fixture()
+
+      changeset = Catalog.change_course_certificate(course, %{"certificate_enabled" => "true"})
+
+      refute changeset.valid?
+
+      assert %{
+               certificate_issuer_name: ["can't be blank"],
+               certificate_signatory_name: ["can't be blank"],
+               certificate_signatory_title: ["can't be blank"]
+             } = errors_on(changeset)
+    end
+
+    test "update_course_certificate/2 persists a full certificate configuration" do
+      # A locally configured R2_PUBLIC_URL (via .env) would otherwise make
+      # this test's signature host-trust check depend on the developer's
+      # machine instead of being deterministic.
+      previous = Application.get_env(:wasomi, :r2_public_url)
+      on_exit(fn -> Application.put_env(:wasomi, :r2_public_url, previous) end)
+      Application.put_env(:wasomi, :r2_public_url, "https://example.com")
+
+      course = course_fixture()
+
+      assert {:ok, updated} =
+               Catalog.update_course_certificate(course, %{
+                 "certificate_enabled" => "true",
+                 "certificate_issuer_name" => "GS1 Kenya",
+                 "certificate_signatory_name" => "Jane Doe",
+                 "certificate_signatory_title" => "Country Manager",
+                 "certificate_signature_key" => "https://example.com/signature.png"
+               })
+
+      assert updated.certificate_enabled
+      assert updated.certificate_issuer_name == "GS1 Kenya"
+      assert updated.certificate_signatory_name == "Jane Doe"
+      assert updated.certificate_signatory_title == "Country Manager"
+      assert updated.certificate_signature_key == "https://example.com/signature.png"
+    end
+
+    test "change_course_certificate/2 rejects a signature URL pointing at an untrusted host when R2 is configured" do
+      previous = Application.get_env(:wasomi, :r2_public_url)
+      on_exit(fn -> Application.put_env(:wasomi, :r2_public_url, previous) end)
+      Application.put_env(:wasomi, :r2_public_url, "https://cdn.example.test")
+
+      course = course_fixture()
+
+      changeset =
+        Catalog.change_course_certificate(course, %{
+          "certificate_signature_key" => "http://169.254.169.254/latest/meta-data/"
+        })
+
+      refute changeset.valid?
+      assert %{certificate_signature_key: ["must be a valid http(s) URL"]} = errors_on(changeset)
+
+      trusted_changeset =
+        Catalog.change_course_certificate(course, %{
+          "certificate_signature_key" => "https://cdn.example.test/certificates/1/sig.png"
+        })
+
+      refute Keyword.has_key?(trusted_changeset.errors, :certificate_signature_key)
+    end
+
+    test "change_course_certificate/2 rejects every signature URL — even a plausible one — when R2 isn't configured" do
+      previous = Application.get_env(:wasomi, :r2_public_url)
+      on_exit(fn -> Application.put_env(:wasomi, :r2_public_url, previous) end)
+      Application.delete_env(:wasomi, :r2_public_url)
+
+      course = course_fixture()
+
+      changeset =
+        Catalog.change_course_certificate(course, %{
+          "certificate_signature_key" => "https://cdn.example.test/certificates/1/sig.png"
+        })
+
+      refute changeset.valid?
+      assert %{certificate_signature_key: ["must be a valid http(s) URL"]} = errors_on(changeset)
+    end
+
+    test "change_course_certificate/2 rejects a non-http(s) signature URL" do
+      course = course_fixture()
+
+      changeset =
+        Catalog.change_course_certificate(course, %{
+          "certificate_signature_key" => "javascript:alert(1)"
+        })
+
+      refute changeset.valid?
+      assert %{certificate_signature_key: ["must be a valid http(s) URL"]} = errors_on(changeset)
+    end
+
+    test "change_course_certificate/2 treats a blank signature URL as absent, not invalid" do
+      course = course_fixture()
+
+      changeset =
+        Catalog.change_course_certificate(course, %{
+          "certificate_enabled" => "false",
+          "certificate_signature_key" => ""
+        })
+
+      assert changeset.valid?
+    end
+  end
 end

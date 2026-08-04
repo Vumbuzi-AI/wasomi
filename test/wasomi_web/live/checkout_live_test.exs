@@ -1,6 +1,7 @@
 defmodule WasomiWeb.CheckoutLiveTest do
   use WasomiWeb.ConnCase
 
+  import ExUnit.CaptureLog
   import Phoenix.LiveViewTest
   import Mox
   import Wasomi.CatalogFixtures
@@ -39,6 +40,29 @@ defmodule WasomiWeb.CheckoutLiveTest do
     |> render_submit()
 
     assert_redirect(view, "https://checkout.paystack.test/hosted")
+  end
+
+  test "does not log raw provider error payloads that could contain sensitive data", %{
+    conn: conn
+  } do
+    course = course_fixture(status: :published, price_minor: 80_000)
+
+    expect(Wasomi.Payments.ProviderMock, :initiate, fn _payment ->
+      {:error, %{"phone" => "254712345678", "note" => "do not leak this"}}
+    end)
+
+    {:ok, view, _html} = live(conn, ~p"/courses/#{course.slug}/checkout")
+
+    log =
+      capture_log(fn ->
+        view
+        |> form("#checkout-form", %{"phone" => "0712345678"})
+        |> render_submit()
+      end)
+
+    assert log =~ "Paystack checkout could not be started"
+    refute log =~ "254712345678"
+    refute log =~ "do not leak this"
   end
 
   test "rejects an invalid M-Pesa number before contacting Paystack", %{conn: conn} do

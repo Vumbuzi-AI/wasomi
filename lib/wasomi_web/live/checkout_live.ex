@@ -150,5 +150,16 @@ defmodule WasomiWeb.CheckoutLive do
     inspect(Ecto.Changeset.traverse_errors(changeset, fn {msg, _opts} -> msg end))
   end
 
-  defp describe_checkout_error(reason), do: inspect(reason)
+  defp describe_checkout_error(reason) when is_binary(reason) or is_atom(reason) do
+    inspect(reason)
+  end
+
+  defp describe_checkout_error({tag, detail})
+       when is_atom(tag) and (is_binary(detail) or is_integer(detail) or is_atom(detail)) do
+    inspect({tag, detail})
+  end
+
+  # Anything else (maps, keyword lists, arbitrary structs) could carry
+  # caller-supplied data, so log neither its shape nor its contents.
+  defp describe_checkout_error(_reason), do: "unrecognized error"
 end

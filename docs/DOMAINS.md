@@ -35,15 +35,17 @@ Catalog connects to enrollments for access control, payments for checkout amount
 
 Context: `Wasomi.Enrollments`
 
-Schema:
+Schemas:
 
 - `Wasomi.Enrollments.Enrollment` backed by `enrollments`
+- `Wasomi.Enrollments.EnrollmentAudit` backed by `enrollment_audits` — permanent record of an admin-granted enrollment (which admin, which enrollment, and why)
+- `Wasomi.Enrollments.GrantAccessForm` — non-persisted embedded schema backing the admin "Grant access" form (course selection + required reason)
 
 Responsibility: course access state. Enrollments are either `:pending` checkout attempts or `:active` learner access records.
 
-Key functions include `create_pending_enrollment/2`, `activate_enrollment/1`, `list_active_for_user/1`, `active_enrollment/2`, `can_access_course?/2`, `can_access_lecture?/2`, and admin count/list functions.
+Key functions include `create_pending_enrollment/2`, `activate_enrollment/1`, `list_active_for_user/1`, `active_enrollment/2`, `can_access_course?/2`, `can_access_lecture?/2`, admin count/list functions, and `grant_access/3` (admin-only immediate activation with a required reason, writing an `EnrollmentAudit` and calling `Wasomi.Notifications.deliver_enrollment_granted/1`).
 
-Payments activate enrollments after verified successful payment. Learning and media use enrollments to authorize lecture access.
+Payments activate enrollments after verified successful payment. Learning and media use enrollments to authorize lecture access. `AdminLive.StudentShow` uses `grant_access/3` to manually enroll a learner without going through checkout.
 
 ## Payments
 
@@ -101,7 +103,11 @@ Only admins can create uploads or check upload status. Learner playback requires
 
 Context: `Wasomi.Notifications`
 
-Responsibility: transactional notification entry point. Current synchronous delivery sends welcome email through `Wasomi.Accounts.UserNotifier`; workers exist for certificate-issued notifications.
+Schema:
+
+- `Wasomi.Notifications.Notification` backed by `notifications` — in-app notifications with a `kind`, `title`, `body`, and `read_at`
+
+Responsibility: transactional notification entry point. Current synchronous delivery sends email through `Wasomi.Accounts.UserNotifier` and, for admin-granted enrollments, also creates an in-app `Notification` and broadcasts on the learner's `"user:#{id}"` PubSub topic so an open `DashboardLive` refreshes live. Workers exist for certificate-issued notifications.
 
 ## Paystack
 

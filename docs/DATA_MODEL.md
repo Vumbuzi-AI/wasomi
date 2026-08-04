@@ -9,11 +9,14 @@ erDiagram
   users ||--o{ payments : pays
   users ||--o{ lecture_progress : tracks
   users ||--o{ certificates : earns
+  users ||--o{ enrollment_audits : grants
+  users ||--o{ notifications : receives
   courses ||--o{ modules : contains
   modules ||--o{ lectures : contains
   courses ||--o{ enrollments : grants
   courses ||--o{ payments : sells
   enrollments ||--o{ payments : checkout
+  enrollments ||--o{ enrollment_audits : logs
   lectures ||--o{ lecture_progress : progress
   courses ||--o{ certificates : awards
   modules ||--o{ certificates : awards
@@ -68,6 +71,16 @@ erDiagram
 - Learner certificates with `type`, `serial_number`, `file_key`, `issued_at`, `user_id`, `course_id`, and optional `module_id`.
 - `module` certificates require `module_id`; `course` certificates require `module_id` to be null.
 - Partial unique indexes prevent duplicate module/course certificates for a user.
+
+`enrollment_audits`
+
+- Permanent trail of admin-granted enrollments: `reason` (required, non-blank), `enrollment_id`, `admin_user_id`.
+- Deleting the enrollment deletes its audit rows; an admin who has granted access cannot be deleted (`on_delete: :nothing`).
+
+`notifications`
+
+- In-app notifications with `kind`, `title`, `body`, `read_at`, and `user_id`.
+- `kind` is currently only `enrollment_granted`; `read_at` is null until the learner dismisses it.
 
 `oban_jobs`
 

@@ -1,7 +1,7 @@
 defmodule WasomiWeb.AdminLive.StudentShow do
   use WasomiWeb, :live_view
 
-  alias Wasomi.{Accounts, Enrollments, Payments}
+  alias Wasomi.{Accounts, Catalog, Enrollments, Payments}
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -18,9 +18,63 @@ defmodule WasomiWeb.AdminLive.StudentShow do
      socket
      |> assign(:page_title, user.name || user.email)
      |> assign(:user, user)
-     |> assign(:enrollments, Enrollments.list_active_for_user(user))
      |> assign(:payments, payments)
-     |> assign(:spent_minor, spent_minor)}
+     |> assign(:spent_minor, spent_minor)
+     |> assign(:modal, nil)
+     |> assign(:grant_access_form, to_form(Enrollments.change_grant_access()))
+     |> refresh_enrollments()}
+  end
+
+  @impl true
+  def handle_event("open_grant_access", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:modal, :grant_access)
+     |> assign(:grant_access_form, to_form(Enrollments.change_grant_access()))}
+  end
+
+  def handle_event("close_modal", _params, socket) do
+    {:noreply, assign(socket, :modal, nil)}
+  end
+
+  def handle_event("validate_grant_access", %{"grant_access_form" => params}, socket) do
+    form =
+      params
+      |> Enrollments.change_grant_access()
+      |> Map.put(:action, :validate)
+      |> to_form()
+
+    {:noreply, assign(socket, :grant_access_form, form)}
+  end
+
+  def handle_event("grant_access", %{"grant_access_form" => params}, socket) do
+    case Enrollments.grant_access(socket.assigns.user, socket.assigns.current_user, params) do
+      {:ok, _enrollment} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Access granted. The learner has been notified by email and in-app.")
+         |> assign(:modal, nil)
+         |> refresh_enrollments()}
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        {:noreply, assign(socket, :grant_access_form, to_form(changeset, action: :validate))}
+
+      {:error, :forbidden} ->
+        {:noreply, put_flash(socket, :error, "You are not authorized to grant course access.")}
+    end
+  end
+
+  defp refresh_enrollments(socket) do
+    user = socket.assigns.user
+    enrollments = Enrollments.list_active_for_user(user)
+    enrolled_course_ids = MapSet.new(enrollments, & &1.course_id)
+
+    grantable_courses =
+      Enum.reject(Catalog.list_courses(), &MapSet.member?(enrolled_course_ids, &1.id))
+
+    socket
+    |> assign(:enrollments, enrollments)
+    |> assign(:grantable_courses, grantable_courses)
   end
 
   @impl true
@@ -35,19 +89,38 @@ defmodule WasomiWeb.AdminLive.StudentShow do
           <.icon name="hero-arrow-left-mini" class="h-4 w-4" /> Back to students
         </.link>
 
-        <div class="flex flex-wrap items-center gap-4">
-          <span class="grid h-16 w-16 shrink-0 place-items-center rounded-full bg-mint text-2xl font-semibold uppercase text-primary">
-            {String.first(@user.name || @user.email)}
-          </span>
-          <div>
-            <h1 class="text-3xl font-semibold text-dark">{@user.name || "Learner"}</h1>
-            <p class="text-body">{@user.email}</p>
-            <div class="mt-2 flex flex-wrap items-center gap-3 text-sm text-muted">
-              <span :if={@user.phone}>{@user.phone}</span>
-              <.status_badge status={@user.role} />
-              <span>Joined {format_date(@user.inserted_at)}</span>
+        <div class="flex flex-wrap items-center justify-between gap-4">
+          <div class="flex flex-wrap items-center gap-4">
+            <span class="grid h-16 w-16 shrink-0 place-items-center rounded-full bg-mint text-2xl font-semibold uppercase text-primary">
+              {String.first(@user.name || @user.email)}
+            </span>
+            <div>
+              <h1 class="text-3xl font-semibold text-dark">{@user.name || "Learner"}</h1>
+              <p class="text-body">{@user.email}</p>
+              <div class="mt-2 flex flex-wrap items-center gap-3 text-sm text-muted">
+                <span :if={@user.phone}>{@user.phone}</span>
+                <.status_badge status={@user.role} />
+                <span>Joined {format_date(@user.inserted_at)}</span>
+              </div>
             </div>
           </div>
+
+          <button
+            type="button"
+            phx-click="open_grant_access"
+            disabled={@grantable_courses == []}
+            title={
+              if @grantable_courses == [],
+                do: "This learner already has active access to every course.",
+                else: "Grant course access"
+            }
+            class="group inline-flex shrink-0 items-center gap-2 rounded-full bg-dark py-1.5 pl-6 pr-1.5 font-medium text-white transition hover:bg-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-dark"
+          >
+            Grant access
+            <span class="grid h-9 w-9 place-items-center rounded-full bg-primary text-white transition group-hover:bg-dark">
+              <.icon name="hero-key" class="h-4 w-4" />
+            </span>
+          </button>
         </div>
 
         <div class="grid gap-5 sm:grid-cols-3">
@@ -117,6 +190,57 @@ defmodule WasomiWeb.AdminLive.StudentShow do
           </section>
         </div>
       </div>
+
+      <.modal
+        :if={@modal == :grant_access}
+        id="grant-access-modal"
+        show
+        on_cancel={JS.push("close_modal")}
+      >
+        <.header>
+          Grant course access
+          <:subtitle>
+            Immediately activate access for {@user.name || @user.email}. They'll be notified by
+            email and in-app.
+          </:subtitle>
+        </.header>
+
+        <.simple_form
+          for={@grant_access_form}
+          id="grant-access-form"
+          phx-change="validate_grant_access"
+          phx-submit="grant_access"
+        >
+          <div>
+            <p class="text-sm font-medium text-dark">Learner</p>
+            <p class="mt-1 rounded-xl bg-soft px-3 py-2.5 text-sm text-body">
+              {@user.name || "Learner"} · {@user.email}
+            </p>
+          </div>
+
+          <.input
+            field={@grant_access_form[:course_id]}
+            type="select"
+            label="Course"
+            prompt="Select a course"
+            options={Enum.map(@grantable_courses, &{&1.title, &1.id})}
+            required
+          />
+
+          <.input
+            field={@grant_access_form[:reason]}
+            type="textarea"
+            label="Reason for granting access"
+            placeholder="e.g. Manual enrollment for a partner scholarship"
+            rows="3"
+            required
+          />
+
+          <:actions>
+            <.button phx-disable-with="Granting access...">Grant access</.button>
+          </:actions>
+        </.simple_form>
+      </.modal>
     </.admin_layout>
     """
   end

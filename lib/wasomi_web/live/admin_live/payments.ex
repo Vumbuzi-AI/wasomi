@@ -14,7 +14,7 @@ defmodule WasomiWeb.AdminLive.Payments do
       {payment_id, ""} ->
         socket =
           payment_id
-          |> Payments.verify_transaction()
+          |> Payments.verify_transaction(socket.assigns.current_user)
           |> put_reconciliation_flash(socket)
           |> refresh_payments()
 
@@ -132,6 +132,10 @@ defmodule WasomiWeb.AdminLive.Payments do
 
   defp put_reconciliation_flash({:error, :payment_not_found}, socket) do
     put_flash(socket, :error, "This payment no longer exists.")
+  end
+
+  defp put_reconciliation_flash({:error, :forbidden}, socket) do
+    put_flash(socket, :error, "You are not authorized to reconcile payments.")
   end
 
   defp put_reconciliation_flash({:error, :reference_mismatch}, socket) do

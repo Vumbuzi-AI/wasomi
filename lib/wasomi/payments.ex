@@ -225,18 +225,24 @@ defmodule Wasomi.Payments do
   Admin-triggered live re-verification of a single pending payment against the
   configured provider (Paystack, including its M-Pesa mobile-money channel).
 
+  Requires the acting user to be an admin, mirroring the defense-in-depth
+  check `Enrollments.grant_access/3` already performs rather than relying
+  solely on the caller's route-level guard.
+
   Reuses the same validation and completion path as the webhook flow, so a
   provider "success" atomically marks the payment successful and activates
   the enrollment, broadcasting `{:payment_confirmed, enrollment}` to the
   learner. Returns the raw provider verification payload alongside the
   result so the caller can surface the provider's own status/reason.
   """
-  def verify_transaction(payment_id) do
+  def verify_transaction(payment_id, %User{role: :admin}) do
     case Repo.get(Payment, payment_id) do
       nil -> {:error, :payment_not_found}
       payment -> do_verify_transaction(payment)
     end
   end
+
+  def verify_transaction(_payment_id, %User{}), do: {:error, :forbidden}
 
   defp do_verify_transaction(%Payment{status: :successful} = payment) do
     {:ok,

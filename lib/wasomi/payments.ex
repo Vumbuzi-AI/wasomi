@@ -221,6 +221,55 @@ defmodule Wasomi.Payments do
     end
   end
 
+  @doc """
+  Admin-triggered live re-verification of a single pending payment against the
+  configured provider (Paystack, including its M-Pesa mobile-money channel).
+
+  Reuses the same validation and completion path as the webhook flow, so a
+  provider "success" atomically marks the payment successful and activates
+  the enrollment, broadcasting `{:payment_confirmed, enrollment}` to the
+  learner. Returns the raw provider verification payload alongside the
+  result so the caller can surface the provider's own status/reason.
+  """
+  def verify_transaction(payment_id) do
+    payment_id
+    |> get_payment!()
+    |> do_verify_transaction()
+  end
+
+  defp do_verify_transaction(%Payment{status: :successful} = payment) do
+    {:ok,
+     %{
+       payment: payment,
+       enrollment: Repo.get!(Wasomi.Enrollments.Enrollment, payment.enrollment_id),
+       verification: nil
+     }}
+  end
+
+  defp do_verify_transaction(%Payment{status: :failed} = payment) do
+    {:error, {:already_failed, payment}}
+  end
+
+  defp do_verify_transaction(%Payment{} = payment) do
+    with {:ok, verification} <- provider().verify(payment.provider_reference),
+         :ok <- validate_verification(payment, verification) do
+      case complete_verified_payment(payment, verification) do
+        {:ok, result} -> {:ok, Map.put(result, :verification, verification)}
+        {:error, reason} -> {:error, reason}
+      end
+    else
+      {:error, {:payment_failed, verification}} ->
+        case mark_failed(payment.provider_reference, verification) do
+          {:ok, result} -> {:ok, Map.put(result, :verification, verification)}
+          {:error, {:payment_failed, _payment}} -> {:error, {:provider_declined, verification}}
+          {:error, reason} -> {:error, reason}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   def record_webhook_event(reference, event) do
     case get_payment_by_reference(reference) do
       nil ->

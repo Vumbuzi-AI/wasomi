@@ -180,6 +180,91 @@ defmodule Wasomi.PaymentsTest do
     assert Enrollments.can_access_course?(user, course)
   end
 
+  describe "verify_transaction/1" do
+    test "provider success atomically completes payment and activates enrollment" do
+      user = user_fixture()
+      course = course_fixture(price_minor: 80_000, currency: "KES")
+      {:ok, %{payment: payment}} = Payments.create_pending_checkout(user, course)
+      Payments.subscribe(user)
+
+      expect(Wasomi.Payments.ProviderMock, :verify, fn reference ->
+        assert reference == payment.provider_reference
+        {:ok, success_payload(payment)}
+      end)
+
+      assert {:ok, %{payment: successful, enrollment: active, verification: verification}} =
+               Payments.verify_transaction(payment.id)
+
+      assert successful.status == :successful
+      assert active.status == :active
+      assert verification["status"] == "success"
+      assert Enrollments.can_access_course?(user, course)
+      assert_receive {:payment_confirmed, %{id: id}}
+      assert id == active.id
+    end
+
+    test "provider decline marks the payment failed and returns the provider's reason" do
+      user = user_fixture()
+      course = course_fixture(price_minor: 80_000, currency: "KES")
+
+      {:ok, %{payment: payment, enrollment: enrollment}} =
+        Payments.create_pending_checkout(user, course)
+
+      expect(Wasomi.Payments.ProviderMock, :verify, fn _reference ->
+        {:ok,
+         success_payload(payment)
+         |> Map.put("status", "failed")
+         |> Map.put("gateway_response", "Insufficient Funds")}
+      end)
+
+      assert {:error, {:provider_declined, verification}} =
+               Payments.verify_transaction(payment.id)
+
+      assert verification["gateway_response"] == "Insufficient Funds"
+      assert Payments.get_payment!(payment.id).status == :failed
+      assert Repo.reload(enrollment).status == :pending
+      refute Enrollments.can_access_course?(user, course)
+    end
+
+    test "amount mismatch is rejected without granting access" do
+      user = user_fixture()
+      course = course_fixture(price_minor: 80_000, currency: "KES")
+      {:ok, %{payment: payment}} = Payments.create_pending_checkout(user, course)
+
+      expect(Wasomi.Payments.ProviderMock, :verify, fn _reference ->
+        {:ok, Map.put(success_payload(payment), "amount", payment.amount_minor + 1)}
+      end)
+
+      assert {:error, :amount_mismatch} = Payments.verify_transaction(payment.id)
+      refute Enrollments.can_access_course?(user, course)
+    end
+
+    test "re-verifying an already failed payment does not call the provider again" do
+      user = user_fixture()
+      course = course_fixture(price_minor: 80_000, currency: "KES")
+
+      {:ok, %{payment: payment}} = Payments.create_pending_checkout(user, course)
+      {:ok, failed} = Payments.update_payment(payment, %{status: :failed})
+
+      assert {:error, {:already_failed, ^failed}} = Payments.verify_transaction(payment.id)
+    end
+
+    test "re-verifying an already successful payment does not call the provider again" do
+      user = user_fixture()
+      course = course_fixture(price_minor: 80_000, currency: "KES")
+      {:ok, %{payment: payment}} = Payments.create_pending_checkout(user, course)
+
+      expect(Wasomi.Payments.ProviderMock, :verify, 1, fn _reference ->
+        {:ok, success_payload(payment)}
+      end)
+
+      assert {:ok, %{payment: first_payment}} = Payments.verify_transaction(payment.id)
+      assert {:ok, %{payment: second_payment}} = Payments.verify_transaction(payment.id)
+      assert first_payment.id == second_payment.id
+      assert second_payment.status == :successful
+    end
+  end
+
   defp success_payload(payment) do
     %{
       "id" => 123,

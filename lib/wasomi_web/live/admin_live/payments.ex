@@ -5,14 +5,18 @@ defmodule WasomiWeb.AdminLive.Payments do
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok,
-     socket
-     |> assign(:page_title, "Payments")
-     |> assign(:payments, Payments.list_recent_payments(100))
-     |> assign(:total_revenue_minor, Payments.total_revenue_minor())
-     |> assign(:successful, Payments.count_payments(:successful))
-     |> assign(:pending, Payments.count_payments(:pending))
-     |> assign(:failed, Payments.count_payments(:failed))}
+    {:ok, refresh_payments(socket) |> assign(:page_title, "Payments")}
+  end
+
+  @impl true
+  def handle_event("reconcile", %{"id" => id}, socket) do
+    socket =
+      id
+      |> Payments.verify_transaction()
+      |> put_reconciliation_flash(socket)
+      |> refresh_payments()
+
+    {:noreply, socket}
   end
 
   @impl true
@@ -46,6 +50,7 @@ defmodule WasomiWeb.AdminLive.Payments do
                 <th class="px-6 py-4 font-semibold">Amount</th>
                 <th class="px-6 py-4 font-semibold">Status</th>
                 <th class="px-6 py-4 font-semibold">Date</th>
+                <th class="px-6 py-4 font-semibold"><span class="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody class="divide-y divide-black/5">
@@ -66,6 +71,18 @@ defmodule WasomiWeb.AdminLive.Payments do
                 <td class="px-6 py-4 font-semibold text-dark">{Payments.format_amount(payment)}</td>
                 <td class="px-6 py-4"><.status_badge status={payment.status} /></td>
                 <td class="px-6 py-4 text-body">{format_date(payment.inserted_at)}</td>
+                <td class="px-6 py-4 text-right">
+                  <button
+                    :if={payment.status == :pending}
+                    type="button"
+                    phx-click="reconcile"
+                    phx-value-id={payment.id}
+                    phx-disable-with="Verifying..."
+                    class="rounded-full bg-dark px-4 py-1.5 text-xs font-semibold text-white transition hover:bg-primary disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Reconcile
+                  </button>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -81,6 +98,66 @@ defmodule WasomiWeb.AdminLive.Payments do
     </.admin_layout>
     """
   end
+
+  defp refresh_payments(socket) do
+    socket
+    |> assign(:payments, Payments.list_recent_payments(100))
+    |> assign(:total_revenue_minor, Payments.total_revenue_minor())
+    |> assign(:successful, Payments.count_payments(:successful))
+    |> assign(:pending, Payments.count_payments(:pending))
+    |> assign(:failed, Payments.count_payments(:failed))
+  end
+
+  defp put_reconciliation_flash({:ok, %{verification: verification}}, socket) do
+    put_flash(socket, :info, "Payment verified as successful. " <> provider_message(verification))
+  end
+
+  defp put_reconciliation_flash({:error, {:provider_declined, verification}}, socket) do
+    put_flash(
+      socket,
+      :error,
+      "Provider reports this payment was not successful. " <> provider_message(verification)
+    )
+  end
+
+  defp put_reconciliation_flash({:error, {:already_failed, _payment}}, socket) do
+    put_flash(socket, :error, "This payment was already marked failed.")
+  end
+
+  defp put_reconciliation_flash({:error, :reference_mismatch}, socket) do
+    put_flash(
+      socket,
+      :error,
+      "Verification failed: the provider reference does not match this payment."
+    )
+  end
+
+  defp put_reconciliation_flash({:error, :amount_mismatch}, socket) do
+    put_flash(socket, :error, "Verification failed: the amount does not match this payment.")
+  end
+
+  defp put_reconciliation_flash({:error, :currency_mismatch}, socket) do
+    put_flash(socket, :error, "Verification failed: the currency does not match this payment.")
+  end
+
+  defp put_reconciliation_flash({:error, reason}, socket) do
+    put_flash(
+      socket,
+      :error,
+      "Could not verify this payment with the provider: #{inspect(reason)}."
+    )
+  end
+
+  defp provider_message(%{"gateway_response" => response})
+       when is_binary(response) and response != "" do
+    "Provider response: #{response}."
+  end
+
+  defp provider_message(%{"status" => status}) when is_binary(status) and status != "" do
+    "Provider status: #{status}."
+  end
+
+  defp provider_message(_verification), do: ""
 
   defp format_date(%DateTime{} = datetime), do: Calendar.strftime(datetime, "%b %-d, %Y")
   defp format_date(_), do: "—"

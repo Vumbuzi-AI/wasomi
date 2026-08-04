@@ -72,10 +72,22 @@ defmodule Wasomi.Certificates.Template do
           .inner-border {
             position: relative;
             height: 100%;
+            display: flex;
+            flex-direction: column;
             border: 0.16vw solid #ce3d0d;
             padding: 2.81vw 3.75vw;
             text-align: center;
             overflow: hidden;
+          }
+          /* The main copy block is vertically centered in the space above the
+             footer, instead of sitting pinned to the top with dead air below
+             it — the certificate always fills the full 16:9 frame. */
+          .content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
           }
           .watermark {
             position: absolute;
@@ -101,79 +113,75 @@ defmodule Wasomi.Certificates.Template do
           }
           .serial strong { font-weight: 700; color: #ce3d0d; }
           .eyebrow {
-            margin-top: 0.94vw;
             color: #ce3d0d;
-            font-size: 0.94vw;
+            font-size: 1.15vw;
             font-weight: 700;
             letter-spacing: 0.22em;
             text-transform: uppercase;
           }
           .logo {
-            margin-top: 0.78vw;
-            font-size: 1.41vw;
+            margin-top: 0.94vw;
+            font-size: 1.72vw;
             font-weight: 800;
             letter-spacing: 0.31vw;
             text-transform: uppercase;
             color: #002b6b;
           }
           h1 {
-            margin: 1.41vw 0 0;
-            font-size: 2.66vw;
+            margin: 1.8vw 0 0;
+            font-size: 3.75vw;
             font-weight: 700;
             letter-spacing: 0.08vw;
             text-transform: uppercase;
             color: #1a1a1a;
           }
-          .copy { margin-top: 1.41vw; font-size: 1.09vw; font-weight: 300; color: #555555; }
+          .copy { margin-top: 1.6vw; font-size: 1.33vw; font-weight: 300; color: #555555; }
           .name {
             display: inline-block;
-            margin: 0.63vw 0;
-            padding: 0 3.75vw 0.47vw;
-            border-bottom: 0.16vw solid #ce3d0d;
-            font-size: 2.5vw;
+            margin: 1vw 0;
+            padding: 0 4vw 0.63vw;
+            border-bottom: 0.2vw solid #ce3d0d;
+            font-size: 3.4vw;
             font-weight: 600;
             color: #002b6b;
           }
           .reason {
-            max-width: 43.75vw;
-            margin: 1.25vw auto 0;
-            font-size: 1.09vw;
+            max-width: 50vw;
+            margin: 1.8vw auto 0;
+            font-size: 1.33vw;
             font-weight: 300;
             line-height: 1.6;
             color: #444444;
           }
           .reason strong { font-weight: 600; color: #1a1a1a; }
           .footer {
-            position: absolute;
-            bottom: 2.19vw;
-            left: 3.75vw;
-            right: 3.75vw;
             display: flex;
             justify-content: space-between;
+            margin-top: 2.19vw;
           }
-          .footer-item { width: 14.06vw; text-align: center; }
-          .footer-item .line { border-top: 0.08vw solid #888888; margin-bottom: 0.47vw; }
+          .footer-item { width: 16vw; text-align: center; }
+          .footer-item .line { border-top: 0.08vw solid #888888; margin-bottom: 0.55vw; }
           .footer-item .label {
-            font-size: 0.78vw;
+            font-size: 0.94vw;
             font-weight: 400;
             color: #666666;
             text-transform: uppercase;
             letter-spacing: 0.08vw;
           }
           .footer-item .value {
-            font-size: 1.02vw;
+            font-size: 1.25vw;
             font-weight: 600;
             color: #1a1a1a;
             margin-bottom: 0.16vw;
           }
           .signature-name {
             font-family: "Dancing Script", cursive;
-            font-size: 2.19vw;
+            font-size: 2.6vw;
             font-weight: 600;
             color: #1a1a1a;
             margin-bottom: -0.16vw;
           }
-          .signature-image { height: 3.13vw; object-fit: contain; margin-bottom: 0.31vw; }
+          .signature-image { height: 3.6vw; object-fit: contain; margin-bottom: 0.31vw; }
         </style>
       </head>
       <body>
@@ -184,14 +192,16 @@ defmodule Wasomi.Certificates.Template do
 
               <div class="serial">Serial no: <strong>{@serial_number}</strong></div>
 
-              <div class="eyebrow">{@type_label}</div>
-              <div class="logo">{@issuer_name}</div>
+              <div class="content">
+                <div class="eyebrow">{@type_label}</div>
+                <div class="logo">{@issuer_name}</div>
 
-              <h1>Certificate of Completion</h1>
-              <div class="copy">This certifies that</div>
-              <div class="name">{@learner_name}</div>
-              <div class="reason">
-                has successfully completed <strong>{@title}</strong>
+                <h1>Certificate of Completion</h1>
+                <div class="copy">This certifies that</div>
+                <div class="name">{@learner_name}</div>
+                <div class="reason">
+                  has successfully completed <strong>{@title}</strong>
+                </div>
               </div>
 
               <div class="footer">

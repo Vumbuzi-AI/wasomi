@@ -257,6 +257,12 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                 >
                   <.icon name="hero-eye" class="h-4 w-4" /> Preview course
                 </.link>
+                <.link
+                  navigate={~p"/admin/courses/#{@course.id}/certificate"}
+                  class="inline-flex items-center gap-2 rounded-full border border-dark px-5 py-2.5 text-sm font-medium text-dark transition hover:bg-dark hover:text-white"
+                >
+                  <.icon name="hero-academic-cap" class="h-4 w-4" /> Certificate
+                </.link>
               </div>
             </div>
 

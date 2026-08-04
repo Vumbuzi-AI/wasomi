@@ -13,6 +13,12 @@ defmodule Wasomi.Catalog.Course do
     field :thumbnail_key, :string
     field :price_minor, :integer
 
+    field :certificate_enabled, :boolean, default: true
+    field :certificate_issuer_name, :string
+    field :certificate_signatory_name, :string
+    field :certificate_signatory_title, :string
+    field :certificate_signature_key, :string
+
     has_many :modules, Wasomi.Catalog.CourseModule,
       foreign_key: :course_id,
       preload_order: [asc: :position]
@@ -59,6 +65,29 @@ defmodule Wasomi.Catalog.Course do
     |> check_constraint(:price_minor, name: :courses_price_must_be_non_negative)
     |> check_constraint(:position, name: :courses_position_must_be_positive)
     |> check_constraint(:status, name: :courses_status_must_be_valid)
+  end
+
+  @doc false
+  def certificate_changeset(course, attrs) do
+    course
+    |> cast(attrs, [
+      :certificate_enabled,
+      :certificate_issuer_name,
+      :certificate_signatory_name,
+      :certificate_signatory_title,
+      :certificate_signature_key
+    ])
+    |> then(fn changeset ->
+      if get_field(changeset, :certificate_enabled) do
+        validate_required(changeset, [
+          :certificate_issuer_name,
+          :certificate_signatory_name,
+          :certificate_signatory_title
+        ])
+      else
+        changeset
+      end
+    end)
   end
 
   defp trim(value) when is_binary(value), do: String.trim(value)

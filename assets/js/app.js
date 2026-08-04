@@ -491,6 +491,24 @@ Hooks.MuxUpload = {
   }
 }
 
+Hooks.PdfDownload = {
+  mounted() {
+    this.handleEvent("download-pdf", ({data, filename}) => {
+      const bytes = Uint8Array.from(atob(data), char => char.charCodeAt(0))
+      const blob = new Blob([bytes], {type: "application/pdf"})
+      const url = URL.createObjectURL(blob)
+
+      const link = document.createElement("a")
+      link.href = url
+      link.download = filename || "certificate.pdf"
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+    })
+  }
+}
+
 let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 let liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,

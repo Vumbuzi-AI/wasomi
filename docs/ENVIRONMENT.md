@@ -55,8 +55,9 @@ Development uses local Swoosh mail storage and watches esbuild/Tailwind assets.
 | `R2_ENDPOINT` | yes | R2/S3-compatible endpoint and ExAws S3 host. |
 | `R2_PUBLIC_URL` | yes | Public base URL used to access uploaded lecture resources. |
 | `R2_UPLOAD_EXPIRY` | optional | Presigned upload URL lifetime in seconds; defaults to `900`. |
+| `CHROME_EXECUTABLE` | optional | Path to a Chrome/Chromium binary for `ChromicPDF` (certificate PDF rendering). ChromicPDF auto-detects common install paths/names; set this when the binary lives somewhere nonstandard (e.g. local dev machines). Implies `--no-sandbox`. |
 
-`config/config.exs` also sets defaults for `payment_provider`, `media_provider`, `certificate_storage`, Paystack API URL, callback URL, Mux API URL, and Mux CORS origin.
+`config/config.exs` also sets defaults for `payment_provider`, `media_provider`, `certificate_renderer`, `certificate_storage`, Paystack API URL, callback URL, Mux API URL, and Mux CORS origin.
 
 ## Assets
 

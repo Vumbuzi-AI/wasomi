@@ -12,11 +12,13 @@ defmodule Wasomi.Storage.R2 do
     "text/plain" => :document,
     "video/mp4" => :video,
     "video/quicktime" => :video,
-    "video/webm" => :video
+    "video/webm" => :video,
+    "image/png" => :image
   }
 
   @max_document_bytes 50_000_000
   @max_video_bytes 1_000_000_000
+  @max_image_bytes 2_000_000
 
   @impl true
   def presign_upload(_user, attrs) do
@@ -114,6 +116,7 @@ defmodule Wasomi.Storage.R2 do
       ".mp4" -> "video/mp4"
       ".mov" -> "video/quicktime"
       ".webm" -> "video/webm"
+      ".png" -> "image/png"
       _ -> "application/octet-stream"
     end
   end
@@ -133,8 +136,10 @@ defmodule Wasomi.Storage.R2 do
 
   defp validate_size(:document, size) when size <= @max_document_bytes, do: :ok
   defp validate_size(:video, size) when size <= @max_video_bytes, do: :ok
+  defp validate_size(:image, size) when size <= @max_image_bytes, do: :ok
   defp validate_size(:document, _), do: {:error, :document_too_large}
   defp validate_size(:video, _), do: {:error, :video_too_large}
+  defp validate_size(:image, _), do: {:error, :image_too_large}
 
   defp safe_filename(filename) do
     filename

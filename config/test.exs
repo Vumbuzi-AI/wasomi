@@ -40,6 +40,11 @@ config :wasomi,
 
 config :wasomi, Oban, testing: :manual, queues: false, plugins: false
 
+# ChromicPDF needs a headless Chrome/Chromium binary; the real
+# certificate_renderer is never configured in test, so skip the supervision
+# tree entry to keep CI from requiring a browser.
+config :wasomi, :start_chromic_pdf, false
+
 # Disable swoosh api client as it is only required for production adapters
 config :swoosh, :api_client, false
 

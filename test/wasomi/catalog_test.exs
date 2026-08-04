@@ -508,4 +508,49 @@ defmodule Wasomi.CatalogTest do
       assert published.status == :published
     end
   end
+
+  describe "certificate configuration" do
+    import Wasomi.CatalogFixtures
+
+    test "change_course_certificate/2 does not require issuer/signatory fields when disabled" do
+      course = course_fixture()
+
+      changeset = Catalog.change_course_certificate(course, %{"certificate_enabled" => "false"})
+
+      assert changeset.valid?
+    end
+
+    test "change_course_certificate/2 requires issuer/signatory fields when enabled" do
+      course = course_fixture()
+
+      changeset = Catalog.change_course_certificate(course, %{"certificate_enabled" => "true"})
+
+      refute changeset.valid?
+
+      assert %{
+               certificate_issuer_name: ["can't be blank"],
+               certificate_signatory_name: ["can't be blank"],
+               certificate_signatory_title: ["can't be blank"]
+             } = errors_on(changeset)
+    end
+
+    test "update_course_certificate/2 persists a full certificate configuration" do
+      course = course_fixture()
+
+      assert {:ok, updated} =
+               Catalog.update_course_certificate(course, %{
+                 "certificate_enabled" => "true",
+                 "certificate_issuer_name" => "GS1 Kenya",
+                 "certificate_signatory_name" => "Jane Doe",
+                 "certificate_signatory_title" => "Country Manager",
+                 "certificate_signature_key" => "https://example.com/signature.png"
+               })
+
+      assert updated.certificate_enabled
+      assert updated.certificate_issuer_name == "GS1 Kenya"
+      assert updated.certificate_signatory_name == "Jane Doe"
+      assert updated.certificate_signatory_title == "Country Manager"
+      assert updated.certificate_signature_key == "https://example.com/signature.png"
+    end
+  end
 end

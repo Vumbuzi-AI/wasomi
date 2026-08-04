@@ -10,13 +10,19 @@ defmodule WasomiWeb.AdminLive.Payments do
 
   @impl true
   def handle_event("reconcile", %{"id" => id}, socket) do
-    socket =
-      id
-      |> Payments.verify_transaction()
-      |> put_reconciliation_flash(socket)
-      |> refresh_payments()
+    case Integer.parse(id) do
+      {payment_id, ""} ->
+        socket =
+          payment_id
+          |> Payments.verify_transaction()
+          |> put_reconciliation_flash(socket)
+          |> refresh_payments()
 
-    {:noreply, socket}
+        {:noreply, socket}
+
+      _ ->
+        {:noreply, put_flash(socket, :error, "Invalid payment id.")}
+    end
   end
 
   @impl true

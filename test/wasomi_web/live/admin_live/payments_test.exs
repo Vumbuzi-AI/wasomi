@@ -94,4 +94,13 @@ defmodule WasomiWeb.AdminLive.PaymentsTest do
     assert html =~ "Insufficient Funds"
     assert Payments.get_payment!(payment.id).status == :failed
   end
+
+  test "reconciling with a malformed payment id does not crash the view", %{conn: conn} do
+    {:ok, view, _html} = live(conn, ~p"/admin/payments")
+
+    html = render_click(view, "reconcile", %{"id" => "not-a-number"})
+
+    assert html =~ "Invalid payment id"
+    assert Process.alive?(view.pid)
+  end
 end

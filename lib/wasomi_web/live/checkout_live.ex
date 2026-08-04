@@ -42,7 +42,9 @@ defmodule WasomiWeb.CheckoutLive do
           {:noreply, redirect(socket, external: url)}
 
         {:error, reason} ->
-          Logger.error("Paystack checkout could not be started: #{inspect(reason)}")
+          Logger.error(
+            "Paystack checkout could not be started: #{describe_checkout_error(reason)}"
+          )
 
           {:noreply,
            socket
@@ -141,4 +143,12 @@ defmodule WasomiWeb.CheckoutLive do
     </.student_layout>
     """
   end
+
+  # Logs only field-level error messages, never the changeset's raw params
+  # (which would include the learner's phone number).
+  defp describe_checkout_error(%Ecto.Changeset{} = changeset) do
+    inspect(Ecto.Changeset.traverse_errors(changeset, fn {msg, _opts} -> msg end))
+  end
+
+  defp describe_checkout_error(reason), do: inspect(reason)
 end

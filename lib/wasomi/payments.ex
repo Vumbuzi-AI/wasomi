@@ -260,9 +260,14 @@ defmodule Wasomi.Payments do
     else
       {:error, {:payment_failed, verification}} ->
         case mark_failed(payment.provider_reference, verification) do
-          {:ok, result} -> {:ok, Map.put(result, :verification, verification)}
-          {:error, {:payment_failed, _payment}} -> {:error, {:provider_declined, verification}}
-          {:error, reason} -> {:error, reason}
+          {:ok, %{payment: confirmed_payment} = result} ->
+            {:ok, Map.put(result, :verification, confirmed_payment.raw_payload["verification"])}
+
+          {:error, {:payment_failed, _payment}} ->
+            {:error, {:provider_declined, verification}}
+
+          {:error, reason} ->
+            {:error, reason}
         end
 
       {:error, reason} ->

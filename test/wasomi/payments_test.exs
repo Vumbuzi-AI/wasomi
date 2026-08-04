@@ -263,6 +263,36 @@ defmodule Wasomi.PaymentsTest do
       assert first_payment.id == second_payment.id
       assert second_payment.status == :successful
     end
+
+    test "a concurrent success wins over a stale decline seen by our own check" do
+      user = user_fixture()
+      course = course_fixture(price_minor: 80_000, currency: "KES")
+      {:ok, %{payment: payment}} = Payments.create_pending_checkout(user, course)
+
+      expect(Wasomi.Payments.ProviderMock, :verify, fn _reference ->
+        # Simulate another process (e.g. the webhook) confirming success
+        # while our own verification call to the provider is in flight.
+        {:ok, _} =
+          Payments.update_payment(payment, %{
+            status: :successful,
+            paid_at: DateTime.utc_now() |> DateTime.truncate(:second),
+            raw_payload: %{
+              "verification" => %{
+                "status" => "success",
+                "gateway_response" => "Confirmed elsewhere"
+              }
+            }
+          })
+
+        {:ok,
+         success_payload(payment)
+         |> Map.put("status", "failed")
+         |> Map.put("gateway_response", "Stale decline seen by our own check")}
+      end)
+
+      assert {:ok, %{verification: verification}} = Payments.verify_transaction(payment.id)
+      assert verification["gateway_response"] == "Confirmed elsewhere"
+    end
   end
 
   defp success_payload(payment) do

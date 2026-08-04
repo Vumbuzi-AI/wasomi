@@ -10,7 +10,7 @@ defmodule WasomiWeb.AdminLive.Payments do
 
   @impl true
   def handle_event("reconcile", %{"id" => id}, socket) do
-    case Integer.parse(id) do
+    case id |> String.trim() |> Integer.parse() do
       {payment_id, ""} ->
         socket =
           payment_id

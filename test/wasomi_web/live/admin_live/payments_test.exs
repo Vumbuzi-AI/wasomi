@@ -104,6 +104,20 @@ defmodule WasomiWeb.AdminLive.PaymentsTest do
     assert Process.alive?(view.pid)
   end
 
+  test "reconciling tolerates surrounding whitespace in the payment id", %{conn: conn} do
+    payment = payment_fixture(status: :pending)
+
+    expect(Wasomi.Payments.ProviderMock, :verify, fn _reference ->
+      {:ok, success_payload(payment)}
+    end)
+
+    {:ok, view, _html} = live(conn, ~p"/admin/payments")
+
+    html = render_click(view, "reconcile", %{"id" => " #{payment.id} \n"})
+
+    assert html =~ "Payment verified as successful"
+  end
+
   test "reconciling a numeric id for a payment that no longer exists does not crash the view",
        %{conn: conn} do
     {:ok, view, _html} = live(conn, ~p"/admin/payments")

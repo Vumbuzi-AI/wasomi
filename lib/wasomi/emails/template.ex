@@ -61,10 +61,18 @@ defmodule Wasomi.Emails.Template do
     intro = assigns[:intro]
     body = List.wrap(assigns[:body])
     cta = assigns[:cta]
+    url = if is_map(cta), do: Map.get(cta, :url)
+
+    cta_lines =
+      if cta && safe_url?(url) do
+        ["", "#{Map.get(cta, :label)}: #{url}"]
+      else
+        []
+      end
 
     [assigns[:title], "", intro]
     |> Kernel.++(body)
-    |> Kernel.++(if cta, do: ["", "#{cta.label}: #{cta.url}"], else: [])
+    |> Kernel.++(cta_lines)
     |> Kernel.++(["", "- The Wasomi team"])
     |> Enum.reject(&is_nil/1)
     |> Enum.join("\n\n")
@@ -93,13 +101,37 @@ defmodule Wasomi.Emails.Template do
 
   defp cta_button(nil), do: ""
 
-  defp cta_button(%{label: label, url: url}) do
-    """
-    <a href="#{esc(url)}" style="display:inline-block;margin-top:8px;padding:14px 28px;border-radius:999px;background-color:#{@dark};color:#ffffff;font-size:15px;font-weight:400;text-decoration:none;">
-      #{esc(label)}
-    </a>
-    """
+  defp cta_button(%{} = cta) do
+    label = Map.get(cta, :label)
+    url = Map.get(cta, :url)
+
+    if safe_url?(url) do
+      """
+      <a href="#{esc(url)}" style="display:inline-block;margin-top:8px;padding:14px 28px;border-radius:999px;background-color:#{@dark};color:#ffffff;font-size:15px;font-weight:400;text-decoration:none;">
+        #{esc(label)}
+      </a>
+      """
+    else
+      ""
+    end
   end
+
+  defp safe_url?(url) when is_binary(url) do
+    trimmed = String.trim(url)
+    unwrapped = String.replace(trimmed, "[TOKEN]", "")
+
+    cond do
+      String.starts_with?(unwrapped, "//") -> false
+      String.starts_with?(unwrapped, "/") -> true
+      URI.parse(unwrapped).scheme in ["http", "https"] -> true
+      String.contains?(trimmed, "[TOKEN]") and URI.parse(unwrapped).scheme == nil -> true
+      true -> false
+    end
+  rescue
+    _ -> false
+  end
+
+  defp safe_url?(_), do: false
 
   defp esc(nil), do: ""
 

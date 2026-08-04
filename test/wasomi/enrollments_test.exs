@@ -201,5 +201,19 @@ defmodule Wasomi.EnrollmentsTest do
 
       assert %{course_id: ["learner already has active access"]} = errors_on(changeset)
     end
+
+    test "refuses to grant access when the performing user is not an admin" do
+      learner = user_fixture()
+      non_admin = user_fixture(role: :learner)
+      course = course_fixture()
+
+      assert {:error, :forbidden} =
+               Enrollments.grant_access(learner, non_admin, %{
+                 "course_id" => course.id,
+                 "reason" => "Manual enrollment for a partner scholarship"
+               })
+
+      refute Enrollments.can_access_course?(learner, course)
+    end
   end
 end

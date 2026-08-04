@@ -32,6 +32,8 @@ defmodule Wasomi.Notifications do
   """
   def subscribe(%User{id: id}), do: Phoenix.PubSub.subscribe(Wasomi.PubSub, "user:#{id}")
 
+  require Logger
+
   @doc """
   Delivers the welcome email and creates the in-app notification for an
   admin-granted enrollment, then broadcasts so an open dashboard updates
@@ -43,21 +45,25 @@ defmodule Wasomi.Notifications do
 
     UserNotifier.deliver_course_access_granted(enrollment.user, enrollment.course)
 
-    {:ok, notification} =
-      create_notification(%{
-        user_id: enrollment.user_id,
-        kind: :enrollment_granted,
-        title: "Course access granted",
-        body: "You now have access to \"#{enrollment.course.title}\". Start learning any time."
-      })
+    case create_notification(%{
+           user_id: enrollment.user_id,
+           kind: :enrollment_granted,
+           title: "Course access granted",
+           body: "You now have access to \"#{enrollment.course.title}\". Start learning any time."
+         }) do
+      {:ok, notification} ->
+        Phoenix.PubSub.broadcast(
+          Wasomi.PubSub,
+          "user:#{enrollment.user_id}",
+          {:enrollment_granted, enrollment}
+        )
 
-    Phoenix.PubSub.broadcast(
-      Wasomi.PubSub,
-      "user:#{enrollment.user_id}",
-      {:enrollment_granted, enrollment}
-    )
+        {:ok, notification}
 
-    {:ok, notification}
+      {:error, changeset} ->
+        Logger.error("Failed to create notification for enrollment #{enrollment.id}: #{inspect(changeset)}")
+        {:error, changeset}
+    end
   end
 
   @doc """
@@ -76,10 +82,18 @@ defmodule Wasomi.Notifications do
   notification that isn't theirs. A tampered id fails soft (`nil`) rather
   than crashing the caller's LiveView connection.
   """
+  def get_notification(_user, nil), do: nil
+
   def get_notification(%User{id: user_id}, id) do
-    Notification
-    |> where([n], n.id == ^id and n.user_id == ^user_id)
-    |> Repo.one()
+    case Ecto.Type.cast(:integer, id) do
+      {:ok, int_id} when not is_nil(int_id) ->
+        Notification
+        |> where([n], n.id == ^int_id and n.user_id == ^user_id)
+        |> Repo.one()
+
+      _ ->
+        nil
+    end
   end
 
   @doc """

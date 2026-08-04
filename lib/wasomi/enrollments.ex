@@ -225,7 +225,7 @@ defmodule Wasomi.Enrollments do
   part of the returned value — a mail hiccup must never roll back access
   that has already been granted.
   """
-  def grant_access(%User{} = learner, %User{} = admin, attrs) do
+  def grant_access(%User{} = learner, %User{role: :admin} = admin, attrs) do
     case change_grant_access(attrs) do
       %Ecto.Changeset{valid?: true} = changeset ->
         course_id = Ecto.Changeset.get_field(changeset, :course_id)
@@ -239,6 +239,10 @@ defmodule Wasomi.Enrollments do
       changeset ->
         {:error, changeset}
     end
+  end
+
+  def grant_access(%User{}, %User{}, _attrs) do
+    {:error, :forbidden}
   end
 
   defp do_grant_access(learner, course, admin, reason, changeset) do

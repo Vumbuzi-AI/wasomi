@@ -1,6 +1,8 @@
 defmodule WasomiWeb.CheckoutLive do
   use WasomiWeb, :live_view
 
+  require Logger
+
   alias Wasomi.{Accounts.User, Catalog, Enrollments, Payments}
 
   @impl true
@@ -39,7 +41,9 @@ defmodule WasomiWeb.CheckoutLive do
         {:ok, %{authorization_url: url}} ->
           {:noreply, redirect(socket, external: url)}
 
-        {:error, _reason} ->
+        {:error, reason} ->
+          Logger.error("Paystack checkout could not be started: #{inspect(reason)}")
+
           {:noreply,
            socket
            |> assign(:submitting, false)

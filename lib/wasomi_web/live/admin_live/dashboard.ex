@@ -61,16 +61,13 @@ defmodule WasomiWeb.AdminLive.Dashboard do
      socket
      |> assign(:filter_form, filter_form)
      |> assign(:has_filters?, opts != [])
+     |> assign(:export_query, raw_query_params(params))
      |> assign_analytics(opts)}
   end
 
   @impl true
   def handle_event("filter", %{"filter" => params}, socket) do
-    query =
-      [course_id: params["course_id"], from: params["from"], to: params["to"]]
-      |> Enum.reject(fn {_key, value} -> value in [nil, ""] end)
-
-    {:noreply, push_patch(socket, to: ~p"/admin?#{query}")}
+    {:noreply, push_patch(socket, to: ~p"/admin?#{raw_query_params(params)}")}
   end
 
   @impl true
@@ -111,15 +108,36 @@ defmodule WasomiWeb.AdminLive.Dashboard do
         </div>
 
         <section class="rounded-3xl border border-black/5 bg-white p-6">
-          <div class="flex items-center justify-between">
+          <div class="flex flex-wrap items-center justify-between gap-3">
             <h2 class="text-xl font-semibold text-dark">Analytics</h2>
-            <.link
-              :if={@has_filters?}
-              patch={~p"/admin"}
-              class="text-sm font-medium text-primary hover:text-dark"
-            >
-              Clear filters
-            </.link>
+            <div class="flex items-center gap-4">
+              <.link
+                :if={@has_filters?}
+                patch={~p"/admin"}
+                class="text-sm font-medium text-primary hover:text-dark"
+              >
+                Clear filters
+              </.link>
+              <span class="text-sm font-medium text-muted">Export CSV:</span>
+              <.link
+                href={~p"/admin/exports/enrollments?#{@export_query}"}
+                class="text-sm font-medium text-primary hover:text-dark"
+              >
+                Enrollments
+              </.link>
+              <.link
+                href={~p"/admin/exports/payments?#{@export_query}"}
+                class="text-sm font-medium text-primary hover:text-dark"
+              >
+                Payments
+              </.link>
+              <.link
+                href={~p"/admin/exports/quiz_results?#{@export_query}"}
+                class="text-sm font-medium text-primary hover:text-dark"
+              >
+                Quiz results
+              </.link>
+            </div>
           </div>
 
           <.form
@@ -300,6 +318,11 @@ defmodule WasomiWeb.AdminLive.Dashboard do
     else
       :erlang.float_to_binary(rounded, decimals: 1)
     end
+  end
+
+  defp raw_query_params(params) do
+    [course_id: params["course_id"], from: params["from"], to: params["to"]]
+    |> Enum.reject(fn {_key, value} -> value in [nil, ""] end)
   end
 
   defp parse_id(nil), do: nil

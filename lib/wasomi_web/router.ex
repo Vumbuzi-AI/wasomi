@@ -95,6 +95,8 @@ defmodule WasomiWeb.Router do
   scope "/admin", WasomiWeb do
     pipe_through [:browser, :require_authenticated_user, :require_admin]
 
+    get "/exports/:type", Admin.ExportController, :show
+
     live_session :require_admin,
       on_mount: [{WasomiWeb.UserAuth, :ensure_admin}] do
       live "/", AdminLive.Dashboard, :index

@@ -62,8 +62,9 @@ Routes:
 - `/admin/students/:id` - `AdminLive.StudentShow`
 - `/admin/payments` - `AdminLive.Payments`
 - `/admin/lectures/:id/video` - `AdminLectureVideoLive`
+- `/admin/exports/:type` - `Admin.ExportController` (controller, not a LiveView) — streams a CSV for `type` in `enrollments`/`payments`/`quiz_results`, optionally scoped by `course_id`/`from`/`to` query params matching the dashboard's filter form.
 
-Purpose: operational overview, course content management, learner/payment inspection, and lecture video upload management.
+Purpose: operational overview, course content management, learner/payment inspection, lecture video upload management, and CSV data export.
 
 ## Webhooks and Developer Tools
 

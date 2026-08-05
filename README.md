@@ -48,7 +48,7 @@ Open http://localhost:4590.
 | Role    | Email                 | Password        | Notes                                                                        |
 | ------- | --------------------- | --------------- | ---------------------------------------------------------------------------- |
 | Admin   | `admin@example.com`   | `password12345` | Redirects to `/admin` after login.                                           |
-| Learner | `student@example.com` | `student12345`  | Has an active enrollment and successful payment for the first seeded course. |
+| Learner | `student@example.com` | `student12345`  | Has an active enrollment and successful payment for every seeded course, staggered across the last six months. |
 
 Seeds also create six published courses with modules and playable demo HLS lectures.
 

@@ -5,7 +5,9 @@ defmodule WasomiWeb.AdminComponents do
   `admin_layout/1` renders the persistent sidebar used across the internal
   admin routes (overview, courses, students, payments). The smaller helpers
   (`stat_card/1`, `page_header/1`, `status_badge/1`) keep the individual admin
-  LiveViews consistent with the Wasomi design system.
+  LiveViews consistent with the Wasomi design system. `bar_chart/1` and
+  `column_chart/1` render dependency-free inline SVG charts for the
+  analytics dashboard.
   """
   use Phoenix.Component
 
@@ -173,6 +175,228 @@ defmodule WasomiWeb.AdminComponents do
     </span>
     """
   end
+
+  @doc """
+  Horizontal bar chart on a fixed `:max` scale (0-100 by default) — used
+  for percentages like completion rate, quiz score, or drop-off.
+
+  `:data` is a list of `%{label:, value:, value_label:}` maps. `:value`
+  drives the bar length; `:value_label` is the pre-formatted string shown
+  next to it, so this component stays free of formatting logic. An
+  optional `:tooltip` string shows on hover instead of `:value_label` —
+  use it when the inline label is abbreviated and hovering should reveal
+  the precise figure.
+  """
+  attr :title, :string, required: true
+  attr :data, :list, required: true
+  attr :max, :integer, default: 100
+  attr :empty_message, :string, default: "No data yet."
+
+  def bar_chart(assigns) do
+    row_height = 36
+    track_width = 300
+    top_padding = 22
+
+    bars =
+      assigns.data
+      |> Enum.with_index()
+      |> Enum.map(fn {item, index} ->
+        ratio = if assigns.max > 0, do: item.value / assigns.max, else: 0
+        bar_width = min(max(ratio, 0), 1) * track_width
+        tooltip = Map.get(item, :tooltip, item.value_label)
+        tooltip_width = estimate_tooltip_width(tooltip)
+
+        %{
+          label: item.label,
+          value_label: item.value_label,
+          tooltip: tooltip,
+          y: top_padding + index * row_height,
+          bar_width: bar_width,
+          tooltip_x: clamp(bar_width / 2 - tooltip_width / 2, 0, track_width - tooltip_width),
+          tooltip_width: tooltip_width
+        }
+      end)
+
+    assigns =
+      assigns
+      |> assign(:bars, bars)
+      |> assign(:track_width, track_width)
+      |> assign(:svg_height, top_padding + length(bars) * row_height)
+
+    ~H"""
+    <div>
+      <p class="text-sm font-medium text-muted">{@title}</p>
+      <svg
+        :if={@data != []}
+        viewBox={"0 0 #{@track_width} #{@svg_height}"}
+        class="mt-3 w-full"
+        role="img"
+        aria-label={@title}
+      >
+        <g :for={bar <- @bars} transform={"translate(0, #{bar.y})"} class="group">
+          <rect x="0" y="0" width={@track_width} height="30" fill="transparent" />
+          <text x="0" y="12" class="fill-body text-[11px]">{bar.label}</text>
+          <text x={@track_width} y="12" text-anchor="end" class="fill-dark text-[11px] font-semibold">
+            {bar.value_label}
+          </text>
+          <rect x="0" y="18" width={@track_width} height="8" rx="4" class="fill-black/5" />
+          <rect x="0" y="18" width={bar.bar_width} height="8" rx="4" class="fill-primary" />
+
+          <g class="pointer-events-none opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+            <rect
+              x={bar.tooltip_x}
+              y="-20"
+              width={bar.tooltip_width}
+              height="16"
+              rx="4"
+              class="fill-dark"
+            />
+            <text
+              x={bar.tooltip_x + bar.tooltip_width / 2}
+              y="-8"
+              text-anchor="middle"
+              class="fill-white text-[10px] font-semibold"
+            >
+              {bar.tooltip}
+            </text>
+          </g>
+        </g>
+      </svg>
+      <p :if={@data == []} class="mt-3 rounded-2xl bg-soft p-6 text-center text-sm text-muted">
+        {@empty_message}
+      </p>
+    </div>
+    """
+  end
+
+  @doc """
+  Vertical column chart scaled to the data's own maximum — used for
+  monthly revenue, where there's no fixed upper bound like a percentage.
+
+  Same `%{label:, value:, value_label:}` shape as `bar_chart/1`, plus the
+  same optional `:tooltip` override shown on hover.
+  """
+  attr :title, :string, required: true
+  attr :data, :list, required: true
+  attr :empty_message, :string, default: "No data yet."
+
+  def column_chart(assigns) do
+    # Fixed canvas, same principle as bar_chart/1's constant track_width —
+    # the number of columns changes how that space is divided, never the
+    # canvas itself, so the aspect ratio stays sane whether there's 1
+    # column or 12 and nothing needs non-uniform (distorting) scaling.
+    chart_width = 600
+    bars_area_height = 160
+    top_padding = 36
+
+    max_value =
+      case assigns.data do
+        [] -> 0
+        data -> data |> Enum.map(& &1.value) |> Enum.max()
+      end
+
+    count = length(assigns.data)
+    column_width = if count > 0, do: chart_width / count, else: 0
+    bar_width = column_width |> Kernel.*(0.5) |> min(60)
+
+    bars =
+      assigns.data
+      |> Enum.with_index()
+      |> Enum.map(fn {item, index} ->
+        height = if max_value > 0, do: item.value / max_value * bars_area_height, else: 0
+        height = max(height, 1)
+        center_x = index * column_width + column_width / 2
+        tooltip = Map.get(item, :tooltip, item.value_label)
+        tooltip_width = estimate_tooltip_width(tooltip)
+
+        %{
+          label: item.label,
+          value_label: item.value_label,
+          tooltip: tooltip,
+          x: center_x - bar_width / 2,
+          y: top_padding + bars_area_height - height,
+          width: bar_width,
+          height: height,
+          center_x: center_x,
+          tooltip_x: clamp(center_x - tooltip_width / 2, 0, chart_width - tooltip_width),
+          tooltip_width: tooltip_width
+        }
+      end)
+
+    assigns =
+      assigns
+      |> assign(:bars, bars)
+      |> assign(:chart_width, chart_width)
+      |> assign(:column_width, column_width)
+      |> assign(:bars_area_height, bars_area_height)
+      |> assign(:top_padding, top_padding)
+
+    ~H"""
+    <div>
+      <p class="text-sm font-medium text-muted">{@title}</p>
+      <svg
+        :if={@data != []}
+        viewBox={"0 0 #{@chart_width} #{@top_padding + @bars_area_height + 34}"}
+        class="mt-3 w-full"
+        role="img"
+        aria-label={@title}
+      >
+        <g :for={bar <- @bars} class="group">
+          <rect
+            x={bar.center_x - @column_width / 2}
+            y="0"
+            width={@column_width}
+            height={@top_padding + @bars_area_height + 18}
+            fill="transparent"
+          />
+          <rect x={bar.x} y={bar.y} width={bar.width} height={bar.height} rx="4" class="fill-primary" />
+          <text
+            x={bar.center_x}
+            y={bar.y - 6}
+            text-anchor="middle"
+            class="fill-dark text-[10px] font-semibold"
+          >
+            {bar.value_label}
+          </text>
+          <text
+            x={bar.center_x}
+            y={@top_padding + @bars_area_height + 18}
+            text-anchor="middle"
+            class="fill-muted text-[10px]"
+          >
+            {bar.label}
+          </text>
+
+          <g class="pointer-events-none opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+            <rect
+              x={bar.tooltip_x}
+              y={bar.y - 30}
+              width={bar.tooltip_width}
+              height="16"
+              rx="4"
+              class="fill-dark"
+            />
+            <text
+              x={bar.tooltip_x + bar.tooltip_width / 2}
+              y={bar.y - 18}
+              text-anchor="middle"
+              class="fill-white text-[10px] font-semibold"
+            >
+              {bar.tooltip}
+            </text>
+          </g>
+        </g>
+      </svg>
+      <p :if={@data == []} class="mt-3 rounded-2xl bg-soft p-6 text-center text-sm text-muted">
+        {@empty_message}
+      </p>
+    </div>
+    """
+  end
+
+  defp estimate_tooltip_width(text), do: max(String.length(text) * 6.5 + 16, 40)
+
+  defp clamp(value, min, max), do: value |> Kernel.max(min) |> Kernel.min(max)
 
   defp status_classes(status) when status in [:published, :successful, :active],
     do: "bg-mint text-primary"

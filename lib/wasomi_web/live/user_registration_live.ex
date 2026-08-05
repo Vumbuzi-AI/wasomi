@@ -105,7 +105,7 @@ defmodule WasomiWeb.UserRegistrationLive do
 
     socket =
       socket
-      |> assign(trigger_submit: false, check_errors: false)
+      |> assign(page_title: "Register", trigger_submit: false, check_errors: false)
       |> assign_form(changeset)
 
     {:ok, socket, temporary_assigns: [form: nil]}

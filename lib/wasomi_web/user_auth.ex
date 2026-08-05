@@ -182,7 +182,7 @@ defmodule WasomiWeb.UserAuth do
 
     case socket.assigns.current_user do
       %{role: :admin} ->
-        {:cont, socket}
+        {:cont, Phoenix.Component.assign(socket, :page_title_suffix, " · Wasomi Admin")}
 
       nil ->
         socket =

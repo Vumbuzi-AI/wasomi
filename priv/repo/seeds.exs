@@ -385,48 +385,73 @@ Repo.transaction(fn ->
       course
     end)
 
-  course = List.first(seeded_courses)
+  # Steps back N *calendar* months from `date`, clamping the day so e.g.
+  # Mar 31 minus one month lands on Feb 28/29 instead of crashing.
+  months_ago = fn date, n ->
+    total = date.year * 12 + (date.month - 1) - n
+    year = div(total, 12)
+    month = rem(total, 12) + 1
+    last_day = Date.new!(year, month, 1) |> Date.end_of_month() |> Map.fetch!(:day)
+    Date.new!(year, month, min(date.day, last_day))
+  end
 
-  enrollment =
-    case Repo.get_by(Enrollment, user_id: student.id, course_id: course.id) do
-      nil -> %Enrollment{}
-      existing -> existing
-    end
-    |> Enrollment.changeset(%{
+  today = DateTime.to_date(confirmed_at)
+
+  # One paid enrollment per seeded course, staggered across the last six
+  # months, so the admin revenue chart has an actual trend to show instead
+  # of a single bar.
+  seeded_courses
+  |> Enum.take(6)
+  |> Enum.with_index()
+  |> Enum.each(fn {course, index} ->
+    paid_at =
+      today
+      |> months_ago.(index)
+      |> DateTime.new!(~T[10:00:00], "Etc/UTC")
+
+    enrollment =
+      case Repo.get_by(Enrollment, user_id: student.id, course_id: course.id) do
+        nil -> %Enrollment{}
+        existing -> existing
+      end
+      |> Enrollment.changeset(%{
+        user_id: student.id,
+        course_id: course.id,
+        status: :active,
+        enrolled_at: paid_at,
+        activated_at: paid_at
+      })
+      |> then(fn changeset ->
+        if changeset.data.id, do: Repo.update!(changeset), else: Repo.insert!(changeset)
+      end)
+
+    provider_reference = "KBI-SEED-PAID-STUDENT-#{String.upcase(course.slug)}"
+
+    payment_attrs = %{
       user_id: student.id,
       course_id: course.id,
-      status: :active,
-      enrolled_at: confirmed_at,
-      activated_at: confirmed_at
-    })
+      enrollment_id: enrollment.id,
+      provider: :paystack,
+      provider_reference: provider_reference,
+      amount_minor: course.price_minor,
+      currency: course.currency,
+      status: :successful,
+      paid_at: paid_at,
+      raw_payload: %{
+        "seeded" => true,
+        "status" => "success",
+        "reference" => provider_reference
+      }
+    }
+
+    case Repo.get_by(Payment, provider_reference: provider_reference) do
+      nil -> %Payment{}
+      existing -> existing
+    end
+    |> Payment.changeset(payment_attrs)
     |> then(fn changeset ->
       if changeset.data.id, do: Repo.update!(changeset), else: Repo.insert!(changeset)
     end)
-
-  payment_attrs = %{
-    user_id: student.id,
-    course_id: course.id,
-    enrollment_id: enrollment.id,
-    provider: :paystack,
-    provider_reference: "KBI-SEED-PAID-STUDENT-HUMAN-STACK",
-    amount_minor: course.price_minor,
-    currency: course.currency,
-    status: :successful,
-    paid_at: confirmed_at,
-    raw_payload: %{
-      "seeded" => true,
-      "status" => "success",
-      "reference" => "KBI-SEED-PAID-STUDENT-HUMAN-STACK"
-    }
-  }
-
-  case Repo.get_by(Payment, provider_reference: payment_attrs.provider_reference) do
-    nil -> %Payment{}
-    existing -> existing
-  end
-  |> Payment.changeset(payment_attrs)
-  |> then(fn changeset ->
-    if changeset.data.id, do: Repo.update!(changeset), else: Repo.insert!(changeset)
   end)
 end)
 

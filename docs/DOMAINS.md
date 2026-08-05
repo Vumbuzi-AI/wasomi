@@ -31,6 +31,8 @@ Key functions include `list_published_courses/0`, `get_published_course_by_slug!
 
 Catalog connects to enrollments for access control, payments for checkout amounts, learning for progress, and certificates for completion scopes.
 
+`Wasomi.Catalog.Analytics` is the one exception to "each context only queries its own tables": it's a query-only module for the admin dashboard that reaches directly into Enrollments, Learning, Assessments, and Payments tables to compute `module_completion_rates/1`, `average_quiz_scores/1`, `video_dropoff_seconds/1`, and `monthly_revenue/1`, each accepting optional `:course_id`/`:from`/`:to` filters. It owns no schema of its own.
+
 ## Enrollments
 
 Context: `Wasomi.Enrollments`

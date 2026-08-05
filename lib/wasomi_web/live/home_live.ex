@@ -10,6 +10,7 @@ defmodule WasomiWeb.HomeLive do
     {:ok,
      socket
      |> assign(:page_title, "Wasomi Business Institute")
+     |> assign(:page_title_suffix, "")
      |> assign(:current_user, current_user(session))
      |> assign(:courses, Catalog.list_published_courses())}
   end

@@ -223,6 +223,24 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
     assert render(view) =~ "Question 1 of 1"
   end
 
+  test "a quiz on a module with zero lectures stays locked, not vacuously unlocked", %{
+    conn: conn,
+    user: user
+  } do
+    course = course_fixture(status: :published)
+    populated_module = course_module_fixture(course_id: course.id, position: 1)
+    lecture_fixture(module_id: populated_module.id, position: 1)
+    empty_module = course_module_fixture(course_id: course.id, position: 2)
+    quiz = Wasomi.AssessmentsFixtures.quiz_fixture(%{module: empty_module})
+    Wasomi.AssessmentsFixtures.question_fixture(%{quiz: quiz})
+    {:ok, pending} = Enrollments.create_pending_enrollment(user, course)
+    {:ok, _active} = Enrollments.activate_enrollment(pending)
+
+    {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
+
+    assert has_element?(view, "button[disabled][data-locked='true']", "Module 2 Quiz")
+  end
+
   test "cannot select a locked module quiz by forging a client event", %{
     conn: conn,
     user: user

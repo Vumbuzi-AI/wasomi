@@ -16,8 +16,9 @@ defmodule Wasomi.Catalog.PublishGuard do
   alias Wasomi.Catalog.Course
 
   @doc """
-  Checks whether `course` is ready to publish. Expects modules and lectures
-  to already be preloaded (see `Wasomi.Catalog.get_course_with_outline!/1`).
+  Checks whether `course` is ready to publish. Expects modules, lectures, and
+  each module's quiz to already be preloaded (see
+  `Wasomi.Catalog.get_course_with_outline!/1`).
 
   Returns `:ok`, or `{:error, issues}` where `issues` is an ordered list of
   human-readable strings describing exactly what's missing — enough to
@@ -32,11 +33,19 @@ defmodule Wasomi.Catalog.PublishGuard do
       |> add_issue(modules == [], "Add at least one module.")
       |> add_issue(modules != [] and lectures == [], "Add at least one lecture.")
       |> add_issue(
+        lectures != [] and Enum.any?(modules, &(&1.lectures == [])),
+        "Every module needs at least one lecture."
+      )
+      |> add_issue(
         lectures != [] and Enum.any?(lectures, &missing_video?/1),
         "Every lecture needs a video attached."
       )
       |> add_issue(is_nil(course.price_minor), "Set a course price.")
       |> add_issue(blank?(course.thumbnail_key), "Attach a course thumbnail.")
+      |> add_issue(
+        Enum.any?(modules, &unpublished_quiz?/1),
+        "Publish every module's quiz before publishing the course."
+      )
 
     case Enum.reverse(issues) do
       [] -> :ok
@@ -45,6 +54,9 @@ defmodule Wasomi.Catalog.PublishGuard do
   end
 
   defp missing_video?(lecture), do: blank?(lecture.video_asset_id)
+
+  defp unpublished_quiz?(%{quiz: %{active: false}}), do: true
+  defp unpublished_quiz?(_module), do: false
 
   defp blank?(nil), do: true
   defp blank?(""), do: true

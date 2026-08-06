@@ -4,6 +4,28 @@ defmodule Wasomi.LearningFixtures do
   entities via the `Wasomi.Learning` context.
   """
 
+  import Ecto.Query
+
+  @doc """
+  Completes a lecture via real `record_progress/3` calls (not a raw insert),
+  so completion side effects still fire. Backdates the intermediate save so
+  the jump to full duration isn't rejected by the anti-cheat clamp.
+  """
+  def complete_lecture_via_progress!(user, lecture) do
+    {:ok, _progress, _events} = Wasomi.Learning.record_progress(user, lecture, 1)
+
+    Wasomi.Learning.LectureProgress
+    |> where([p], p.user_id == ^user.id and p.lecture_id == ^lecture.id)
+    |> Wasomi.Repo.update_all(
+      set: [
+        updated_at:
+          DateTime.utc_now() |> DateTime.add(-3600, :second) |> DateTime.truncate(:second)
+      ]
+    )
+
+    Wasomi.Learning.record_progress(user, lecture, lecture.duration_seconds)
+  end
+
   @doc """
   Generate a lecture_progress.
   """

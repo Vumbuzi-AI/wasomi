@@ -4,6 +4,7 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
   import Phoenix.LiveViewTest
   import Wasomi.CatalogFixtures
   import Wasomi.CertificatesFixtures
+  import Wasomi.LearningFixtures
 
   alias Wasomi.{Certificates, Enrollments, Learning}
 
@@ -60,13 +61,22 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
 
     render_hook(view, "video-progress", %{
       "lecture_id" => first.id,
-      "position_seconds" => 40
+      "position_seconds" => 15
     })
 
-    assert %{status: :in_progress, last_position_seconds: 40} =
+    assert %{status: :in_progress, last_position_seconds: 15} =
              Learning.get_lecture_progress(user, first)
 
     assert has_element?(view, "button[data-lecture-id='#{second.id}'][data-locked='true']")
+
+    # Backdate so the plausibility clamp accepts this jump as real watch time.
+    progress = Learning.get_lecture_progress(user, first)
+
+    Wasomi.Repo.update!(
+      Ecto.Changeset.change(progress,
+        updated_at: DateTime.utc_now() |> DateTime.add(-60, :second) |> DateTime.truncate(:second)
+      )
+    )
 
     render_hook(view, "video-progress", %{
       "lecture_id" => first.id,
@@ -109,6 +119,18 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
 
     {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
 
+    render_hook(view, "video-progress", %{"lecture_id" => lecture.id, "position_seconds" => 15})
+
+    # Backdate so the plausibility clamp accepts this jump as real watch time.
+    Wasomi.Repo.update!(
+      Ecto.Changeset.change(Learning.get_lecture_progress(user, lecture),
+        updated_at: DateTime.utc_now() |> DateTime.add(-30, :second) |> DateTime.truncate(:second)
+      )
+    )
+
+    render_hook(view, "video-progress", %{"lecture_id" => lecture.id, "position_seconds" => 85})
+    assert has_element?(view, "#mark-lecture-complete:not([disabled])")
+
     view
     |> element("#mark-lecture-complete")
     |> render_click()
@@ -118,6 +140,39 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
 
     assert has_element?(view, "#course-progress-percent", "100%")
     refute has_element?(view, "#mark-lecture-complete")
+  end
+
+  test "the mark-complete button is disabled and explains why below the 80% watch threshold", %{
+    conn: conn,
+    user: user
+  } do
+    course = course_fixture(status: :published)
+    module = course_module_fixture(course_id: course.id, position: 1)
+    lecture_fixture(module_id: module.id, position: 1, duration_seconds: 100)
+    {:ok, pending} = Enrollments.create_pending_enrollment(user, course)
+    {:ok, _active} = Enrollments.activate_enrollment(pending)
+
+    {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
+
+    assert has_element?(view, "#mark-lecture-complete[disabled]")
+    assert render(view) =~ "Watch at least 80% of this lecture to unlock this button."
+  end
+
+  test "cannot mark a lecture complete below the watch threshold by forging a client event", %{
+    conn: conn,
+    user: user
+  } do
+    course = course_fixture(status: :published)
+    module = course_module_fixture(course_id: course.id, position: 1)
+    lecture = lecture_fixture(module_id: module.id, position: 1, duration_seconds: 100)
+    {:ok, pending} = Enrollments.create_pending_enrollment(user, course)
+    {:ok, _active} = Enrollments.activate_enrollment(pending)
+
+    {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
+    render_hook(view, "complete-lecture", %{"lecture_id" => to_string(lecture.id)})
+
+    assert render(view) =~ "Watch more of this lecture before marking it complete."
+    refute match?(%{status: :completed}, Learning.get_lecture_progress(user, lecture))
   end
 
   test "certificate ready PubSub events reveal a download button", %{conn: conn, user: user} do
@@ -139,6 +194,84 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
              view,
              "#certificate-#{certificate.id} a[href='/certificates/#{certificate.id}/download']"
            )
+  end
+
+  test "a module quiz is locked in the sidebar until every lecture in that module is completed",
+       %{conn: conn, user: user} do
+    course = course_fixture(status: :published)
+    module = course_module_fixture(course_id: course.id, position: 1)
+    first = lecture_fixture(module_id: module.id, position: 1, duration_seconds: 100)
+    second = lecture_fixture(module_id: module.id, position: 2, duration_seconds: 100)
+    quiz = Wasomi.AssessmentsFixtures.quiz_fixture(%{module: module})
+    Wasomi.AssessmentsFixtures.question_fixture(%{quiz: quiz})
+    {:ok, pending} = Enrollments.create_pending_enrollment(user, course)
+    {:ok, _active} = Enrollments.activate_enrollment(pending)
+
+    {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
+
+    assert has_element?(view, "button[disabled][data-locked='true']", "Module 1 Quiz")
+
+    {:ok, _progress, _events} = complete_lecture_via_progress!(user, first)
+    {:ok, _progress, _events} = complete_lecture_via_progress!(user, second)
+
+    {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
+
+    refute has_element?(view, "button[disabled]", "Module 1 Quiz")
+    assert has_element?(view, "button[data-locked='false']", "Module 1 Quiz")
+
+    view |> element("button", "Module 1 Quiz") |> render_click()
+    assert render(view) =~ "Question 1 of 1"
+  end
+
+  test "cannot select a locked module quiz by forging a client event", %{
+    conn: conn,
+    user: user
+  } do
+    course = course_fixture(status: :published)
+    module = course_module_fixture(course_id: course.id, position: 1)
+    lecture_fixture(module_id: module.id, position: 1)
+    quiz = Wasomi.AssessmentsFixtures.quiz_fixture(%{module: module})
+    Wasomi.AssessmentsFixtures.question_fixture(%{quiz: quiz})
+    {:ok, pending} = Enrollments.create_pending_enrollment(user, course)
+    {:ok, _active} = Enrollments.activate_enrollment(pending)
+
+    {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
+    render_hook(view, "select-quiz", %{"module_id" => to_string(module.id)})
+
+    assert render(view) =~ "Complete this module&#39;s lectures to unlock its quiz."
+    refute render(view) =~ "Question 1 of"
+  end
+
+  test "reopening a quiz with an existing real submission does not crash the LiveView", %{
+    conn: conn,
+    user: user
+  } do
+    course = course_fixture(status: :published)
+    module = course_module_fixture(course_id: course.id, position: 1)
+    lecture = lecture_fixture(module_id: module.id, position: 1)
+    quiz = Wasomi.AssessmentsFixtures.quiz_fixture(%{module: module})
+    question = Wasomi.AssessmentsFixtures.question_fixture(%{quiz: quiz})
+    correct_option = Enum.find(question.question_options, & &1.correct)
+    {:ok, pending} = Enrollments.create_pending_enrollment(user, course)
+    {:ok, _active} = Enrollments.activate_enrollment(pending)
+    {:ok, _progress, _events} = complete_lecture_via_progress!(user, lecture)
+
+    {:ok, submission} =
+      Wasomi.Assessments.submit_quiz(user, quiz, %{
+        to_string(question.id) => to_string(correct_option.id)
+      })
+
+    assert %Wasomi.Assessments.QuizSubmission{} = submission
+
+    {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
+
+    html =
+      view
+      |> element("button", "Module 1 Quiz")
+      |> render_click()
+
+    assert html =~ "#{submission.score_percent}%"
+    refute html =~ "Admin Preview Result"
   end
 
   describe "admin preview mode" do
@@ -174,12 +307,14 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
       conn = build_conn() |> log_in_user(admin_fixture())
       course = course_fixture(status: :draft)
       module = course_module_fixture(course_id: course.id, position: 1)
-      _first = lecture_fixture(module_id: module.id, position: 1, duration_seconds: 100)
+      first = lecture_fixture(module_id: module.id, position: 1, duration_seconds: 100)
       second = lecture_fixture(module_id: module.id, position: 2, duration_seconds: 100)
 
       {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}/preview")
 
       assert has_element?(view, "button[data-lecture-id='#{second.id}'][data-locked='true']")
+
+      render_hook(view, "video-progress", %{"lecture_id" => first.id, "position_seconds" => 90})
 
       view
       |> element("#mark-lecture-complete")
@@ -218,13 +353,16 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
       conn = build_conn() |> log_in_user(admin)
       course = course_fixture(status: :draft)
       module = course_module_fixture(course_id: course.id, position: 1)
-      lecture_fixture(module_id: module.id, position: 1)
+      lecture = lecture_fixture(module_id: module.id, position: 1)
       quiz = Wasomi.AssessmentsFixtures.quiz_fixture(%{module: module})
 
       question = Wasomi.AssessmentsFixtures.question_fixture(%{quiz: quiz})
       correct_option = Enum.find(question.question_options, & &1.correct)
 
       {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}/preview")
+
+      render_hook(view, "video-progress", %{"lecture_id" => lecture.id, "position_seconds" => 40})
+      render_hook(view, "complete-lecture", %{"lecture_id" => lecture.id})
 
       view
       |> element("button", "Module 1 Quiz")
@@ -249,7 +387,7 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
       conn = build_conn() |> log_in_user(admin_fixture())
       course = course_fixture(status: :draft)
       module = course_module_fixture(course_id: course.id, position: 1)
-      lecture_fixture(module_id: module.id, position: 1)
+      lecture = lecture_fixture(module_id: module.id, position: 1)
       quiz = Wasomi.AssessmentsFixtures.quiz_fixture(%{module: module})
 
       first = Wasomi.AssessmentsFixtures.question_fixture(%{quiz: quiz, position: 1})
@@ -257,6 +395,8 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
 
       {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}/preview")
 
+      render_hook(view, "video-progress", %{"lecture_id" => lecture.id, "position_seconds" => 40})
+      render_hook(view, "complete-lecture", %{"lecture_id" => lecture.id})
       view |> element("button", "Module 1 Quiz") |> render_click()
 
       html = render(view)

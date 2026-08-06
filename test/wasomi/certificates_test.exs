@@ -5,12 +5,12 @@ defmodule Wasomi.CertificatesTest do
   import Wasomi.CatalogFixtures
   import Wasomi.CertificatesFixtures
   import Wasomi.EnrollmentsFixtures
+  import Wasomi.LearningFixtures
   import Mox
 
   alias Wasomi.Certificates
   alias Wasomi.Certificates.Certificate
   alias Wasomi.Certificates.Workers.IssueCertificate
-  alias Wasomi.Learning
 
   setup :verify_on_exit!
 
@@ -28,7 +28,7 @@ defmodule Wasomi.CertificatesTest do
     expect_render_and_upload(2)
 
     assert {:ok, _, [_lecture, {:module_completed, _}, {:course_completed, _}]} =
-             Learning.mark_complete(context.user, context.lecture)
+             complete_lecture_via_progress!(context.user, context.lecture)
 
     assert Repo.aggregate(
              from(job in Oban.Job,
@@ -67,7 +67,9 @@ defmodule Wasomi.CertificatesTest do
 
   test "issuance is idempotent and doesn't render or upload twice", context do
     expect_render_and_upload(1)
-    {:ok, _, _events} = Learning.mark_complete(context.user, context.lecture)
+
+    {:ok, _, _events} =
+      complete_lecture_via_progress!(context.user, context.lecture)
 
     args = %{
       user_id: context.user.id,
@@ -144,7 +146,8 @@ defmodule Wasomi.CertificatesTest do
 
     expect(Wasomi.CertificateStorageMock, :upload, fn _key, _pdf -> :ok end)
 
-    {:ok, _, _events} = Learning.mark_complete(context.user, context.lecture)
+    {:ok, _, _events} =
+      complete_lecture_via_progress!(context.user, context.lecture)
 
     assert {:ok, _certificate, :created} =
              Certificates.issue(context.user.id, :course, context.course.id)
@@ -157,7 +160,8 @@ defmodule Wasomi.CertificatesTest do
         "certificate_enabled" => "false"
       })
 
-    {:ok, _, _events} = Learning.mark_complete(context.user, context.lecture)
+    {:ok, _, _events} =
+      complete_lecture_via_progress!(context.user, context.lecture)
 
     assert {:error, :certificates_disabled} =
              Certificates.issue(context.user.id, :course, context.course.id)
@@ -172,7 +176,8 @@ defmodule Wasomi.CertificatesTest do
         "certificate_enabled" => "false"
       })
 
-    {:ok, _, _events} = Learning.mark_complete(context.user, context.lecture)
+    {:ok, _, _events} =
+      complete_lecture_via_progress!(context.user, context.lecture)
 
     # :ok (not {:error, _}) is the whole point here — Oban retries any
     # {:error, _} return up to max_attempts, which would be pointless for a

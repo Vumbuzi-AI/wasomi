@@ -111,33 +111,39 @@ defmodule WasomiWeb.CoursePlayerLive do
           {:noreply, put_flash(socket, :error, "No quiz is available for this module yet.")}
 
         quiz ->
-          questions = Assessments.list_published_questions(quiz)
+          cond do
+            not module_quiz_unlocked?(module, socket.assigns.progress) ->
+              {:noreply,
+               put_flash(socket, :error, "Complete this module's lectures to unlock its quiz.")}
 
-          if questions == [] do
-            {:noreply,
-             put_flash(socket, :error, "This quiz does not have any published questions yet.")}
-          else
-            existing_submission =
-              if socket.assigns.preview? do
-                nil
-              else
-                user_submissions =
-                  Assessments.list_submissions_for_user(socket.assigns.current_user, quiz)
+            Assessments.list_published_questions(quiz) == [] ->
+              {:noreply,
+               put_flash(socket, :error, "This quiz does not have any published questions yet.")}
 
-                List.first(user_submissions)
-              end
+            true ->
+              questions = Assessments.list_published_questions(quiz)
 
-            {:noreply,
-             socket
-             |> assign(:current_lecture, nil)
-             |> assign(:current_quiz, %{quiz: quiz, module: module, questions: questions})
-             |> assign(:quiz_answers, %{})
-             |> assign(:quiz_result, existing_submission)
-             |> assign(:current_question_index, 0)
-             |> assign(
-               :page_title,
-               "Module Quiz: #{module.title} · #{socket.assigns.course.title}"
-             )}
+              existing_submission =
+                if socket.assigns.preview? do
+                  nil
+                else
+                  user_submissions =
+                    Assessments.list_submissions_for_user(socket.assigns.current_user, quiz)
+
+                  List.first(user_submissions)
+                end
+
+              {:noreply,
+               socket
+               |> assign(:current_lecture, nil)
+               |> assign(:current_quiz, %{quiz: quiz, module: module, questions: questions})
+               |> assign(:quiz_answers, %{})
+               |> assign(:quiz_result, existing_submission)
+               |> assign(:current_question_index, 0)
+               |> assign(
+                 :page_title,
+                 "Module Quiz: #{module.title} · #{socket.assigns.course.title}"
+               )}
           end
       end
     else
@@ -260,14 +266,23 @@ defmodule WasomiWeb.CoursePlayerLive do
         {:noreply, socket}
 
       lecture ->
-        if socket.assigns.preview? do
-          {:noreply,
-           socket
-           |> put_preview_progress(lecture.id, :completed, lecture.duration_seconds)
-           |> refresh_progress()
-           |> put_flash(:info, "Lecture marked complete — preview only, nothing was saved.")}
-        else
-          persist_progress(socket, lecture, lecture.duration_seconds, true)
+        cond do
+          not Learning.watched_enough?(
+            progress_position(socket.assigns.progress, lecture.id),
+            lecture.duration_seconds
+          ) ->
+            {:noreply,
+             put_flash(socket, :error, "Watch more of this lecture before marking it complete.")}
+
+          socket.assigns.preview? ->
+            {:noreply,
+             socket
+             |> put_preview_progress(lecture.id, :completed, lecture.duration_seconds)
+             |> refresh_progress()
+             |> put_flash(:info, "Lecture marked complete — preview only, nothing was saved.")}
+
+          true ->
+            persist_progress(socket, lecture, lecture.duration_seconds, true)
         end
     end
   end
@@ -292,6 +307,10 @@ defmodule WasomiWeb.CoursePlayerLive do
 
       {:error, :forbidden} ->
         {:noreply, redirect_to_checkout(socket)}
+
+      {:error, :insufficient_watch_time} ->
+        {:noreply,
+         put_flash(socket, :error, "Watch more of this lecture before marking it complete.")}
 
       {:error, _reason} ->
         {:noreply, put_flash(socket, :error, "We couldn't save your progress.")}
@@ -450,7 +469,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                         {result_score(@quiz_result)}%
                       </p>
 
-                      <p :if={@quiz_result[:preview?]} class="mt-3 text-xs text-muted">
+                      <p :if={preview_result?(@quiz_result)} class="mt-3 text-xs text-muted">
                         Admin Preview Result — score was evaluated in-memory and not saved.
                       </p>
 
@@ -593,6 +612,11 @@ defmodule WasomiWeb.CoursePlayerLive do
                       {@current_lecture.description}
                     </p>
 
+                    <% watched_enough? =
+                      Learning.watched_enough?(
+                        progress_position(@progress, @current_lecture.id),
+                        @current_lecture.duration_seconds
+                      ) %>
                     <div class="mt-8 flex flex-wrap items-center gap-3">
                       <button
                         :if={progress_status(@progress, @current_lecture.id) != :completed}
@@ -600,7 +624,12 @@ defmodule WasomiWeb.CoursePlayerLive do
                         type="button"
                         phx-click="complete-lecture"
                         phx-value-lecture_id={@current_lecture.id}
-                        class="rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-white transition hover:bg-dark"
+                        disabled={!watched_enough?}
+                        title={
+                          if !watched_enough?,
+                            do: "Watch at least 80% of this lecture to unlock this button."
+                        }
+                        class="rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-white transition hover:bg-dark disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         Mark complete
                       </button>
@@ -611,6 +640,15 @@ defmodule WasomiWeb.CoursePlayerLive do
                         <.icon name="hero-check-circle" class="h-5 w-5" /> Completed
                       </span>
                     </div>
+                    <p
+                      :if={
+                        progress_status(@progress, @current_lecture.id) != :completed &&
+                          !watched_enough?
+                      }
+                      class="mt-2 text-xs text-muted"
+                    >
+                      Watch at least 80% of this lecture to unlock this button.
+                    </p>
                   </div>
                 <% else %>
                   <div class="grid min-h-80 place-items-center bg-white p-8 text-center text-muted">
@@ -688,21 +726,31 @@ defmodule WasomiWeb.CoursePlayerLive do
                       </span>
                     </button>
 
+                    <% quiz_unlocked? = module_quiz_unlocked?(module, @progress) %>
                     <button
                       :if={module_quiz = Map.get(@quizzes_by_module, module.id)}
                       type="button"
                       phx-click="select-quiz"
                       phx-value-module_id={module.id}
+                      disabled={!quiz_unlocked?}
+                      data-locked={if quiz_unlocked?, do: "false", else: "true"}
                       class={[
                         "mt-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition",
                         @current_quiz && @current_quiz.quiz.id == module_quiz.id &&
                           "bg-mint font-medium text-primary",
                         (!@current_quiz || @current_quiz.quiz.id != module_quiz.id) &&
-                          "text-body hover:bg-soft hover:text-dark"
+                          quiz_unlocked? &&
+                          "text-body hover:bg-soft hover:text-dark",
+                        !quiz_unlocked? && "cursor-not-allowed text-muted"
                       ]}
                     >
-                      <span class="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-mint text-xs font-semibold text-primary">
-                        <.icon name="hero-academic-cap" class="h-3.5 w-3.5" />
+                      <span class={[
+                        "grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs font-semibold",
+                        quiz_unlocked? && "bg-mint text-primary",
+                        !quiz_unlocked? && "text-muted/60"
+                      ]}>
+                        <.icon :if={quiz_unlocked?} name="hero-academic-cap" class="h-3.5 w-3.5" />
+                        <.icon :if={!quiz_unlocked?} name="hero-lock-closed" class="h-3.5 w-3.5" />
                       </span>
                       <span class="min-w-0 flex-1">
                         <span class="block font-medium truncate">Module {module.position} Quiz</span>
@@ -858,6 +906,11 @@ defmodule WasomiWeb.CoursePlayerLive do
   defp lecture_unlocked?(unlocked_lecture_ids, lecture_id),
     do: MapSet.member?(unlocked_lecture_ids, lecture_id)
 
+  defp module_quiz_unlocked?(module, progress) do
+    module.lectures != [] and
+      Enum.all?(module.lectures, &(progress_status(progress, &1.id) == :completed))
+  end
+
   defp progress_status(progress, lecture_id) do
     case progress[lecture_id] do
       %{status: status} -> status
@@ -894,4 +947,8 @@ defmodule WasomiWeb.CoursePlayerLive do
   defp result_score(%{score_percent: score}), do: score
   defp result_score(%Wasomi.Assessments.QuizSubmission{score_percent: score}), do: score
   defp result_score(_), do: 0
+
+  defp preview_result?(%{preview?: preview?}), do: preview?
+  defp preview_result?(%Wasomi.Assessments.QuizSubmission{}), do: false
+  defp preview_result?(_), do: false
 end

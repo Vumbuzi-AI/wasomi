@@ -214,6 +214,8 @@ Hooks.ProtectedVideo = {
       this.player = player
       this.lastSavedPosition = Number(this.el.dataset.startPosition || 0)
       this.lastSaveAt = 0
+      // Furthest position actually played, updated every tick (unthrottled).
+      this.furthestWatched = Number(this.el.dataset.startPosition || 0)
 
       player.addEventListener("loadedmetadata", () => {
         const startPosition = Number(this.el.dataset.startPosition || 0)
@@ -224,6 +226,8 @@ Hooks.ProtectedVideo = {
       })
 
       player.addEventListener("timeupdate", () => {
+        this.furthestWatched = Math.max(this.furthestWatched, player.currentTime)
+
         const now = Date.now()
 
         if (
@@ -234,7 +238,16 @@ Hooks.ProtectedVideo = {
         }
       })
 
+      // Snap back seeks past furthestWatched; tolerance absorbs rounding only.
+      player.addEventListener("seeking", () => {
+        if (player.currentTime > this.furthestWatched + 0.5) {
+          player.currentTime = this.furthestWatched
+        }
+      })
+
       player.addEventListener("ended", () => {
+        // Flush final position so mark_complete's watch-threshold check sees it.
+        this.saveProgress()
         this.pushEvent("complete-lecture", {lecture_id: this.el.dataset.lectureId})
       })
 

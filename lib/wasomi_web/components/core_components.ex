@@ -368,6 +368,58 @@ defmodule WasomiWeb.CoreComponents do
     """
   end
 
+  def input(%{type: "date"} = assigns) do
+    assigns = assign_new(assigns, :placeholder, fn -> nil end)
+
+    ~H"""
+    <div
+      class="calendar-container relative"
+      id={@id <> "-container"}
+      phx-hook="DatePicker"
+      data-max={@rest[:max] || assigns[:max]}
+    >
+      <.label :if={@label} for={@id}>{@label}</.label>
+      <input
+        type="hidden"
+        name={@name}
+        id={@id}
+        value={Phoenix.HTML.Form.normalize_value("date", @value)}
+        data-dp-input
+      />
+      <button
+        type="button"
+        data-dp-trigger
+        class={[
+          "mt-2 flex w-full items-center justify-between gap-2 rounded-lg border bg-white px-3 py-2 text-left text-zinc-900 shadow-sm focus:ring-0 sm:text-sm sm:leading-6 cursor-pointer",
+          @errors == [] && "border-zinc-300 hover:border-zinc-400 focus:border-zinc-400",
+          @errors != [] && "border-rose-400 focus:border-rose-400"
+        ]}
+      >
+        <span data-dp-display data-placeholder={@placeholder || "Choose a date"} class="text-sm">
+          {Phoenix.HTML.Form.normalize_value("date", @value)}
+        </span>
+        <svg class="h-4 w-4 shrink-0 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+          />
+        </svg>
+      </button>
+
+      <div
+        data-dp-pop
+        hidden
+        class="calendar-popover absolute left-0 top-full z-50 mt-1.5 w-72 rounded-2xl border bg-white p-3.5 shadow-lg"
+      >
+        <div data-dp-body></div>
+      </div>
+      <.error :for={msg <- @errors}>{msg}</.error>
+    </div>
+    """
+  end
+
   # All other inputs text, datetime-local, url, password, etc. are handled here...
   def input(assigns) do
     ~H"""

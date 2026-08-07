@@ -111,7 +111,7 @@ defmodule WasomiWeb.Admin.ExportController do
     |> join(:left, [p], u in assoc(p, :user))
     |> join(:left, [p], c in assoc(p, :course))
     |> filter_direct_course(filters)
-    |> filter_range(:inserted_at, filters)
+    |> filter_payment_range(filters)
     |> order_by([p], asc: p.id)
     |> select([p, u, c], %{
       id: p.id,
@@ -198,13 +198,22 @@ defmodule WasomiWeb.Admin.ExportController do
   # Reuses the course's existing public slug (same one used in course URLs)
   # rather than re-deriving one from the title, so a course-scoped export
   # is easy to tell apart from the rest — e.g.
-  # wasomi_enrollments_the-human-stack_2026-07-28.csv.
   defp filename(type, filters) do
-    case filters.course_id && Repo.get(Course, filters.course_id) do
-      %Course{slug: slug} -> "wasomi_#{type}_#{slug}_#{Date.utc_today()}.csv"
-      _ -> "wasomi_#{type}_#{Date.utc_today()}.csv"
-    end
+    course_part =
+      case filters.course_id && Repo.get(Course, filters.course_id) do
+        %Course{slug: slug} -> "#{slug}_"
+        _ -> ""
+      end
+
+    date_part = date_suffix(filters.from, filters.to)
+
+    "wasomi_#{type}_#{course_part}#{date_part}.csv"
   end
+
+  defp date_suffix(%Date{} = from, %Date{} = to), do: "#{from}_to_#{to}"
+  defp date_suffix(%Date{} = from, nil), do: "from_#{from}"
+  defp date_suffix(nil, %Date{} = to), do: "to_#{to}"
+  defp date_suffix(nil, nil), do: "#{Date.utc_today()}"
 
   # -- filters --------------------------------------------------------------
 
@@ -258,6 +267,22 @@ defmodule WasomiWeb.Admin.ExportController do
 
   defp filter_to(query, _field, nil), do: query
   defp filter_to(query, field, to), do: where(query, [x], field(x, ^field) <= ^to)
+
+  defp filter_payment_range(query, filters) do
+    query
+    |> filter_payment_from(start_of_day(filters.from))
+    |> filter_payment_to(end_of_day(filters.to))
+  end
+
+  defp filter_payment_from(query, nil), do: query
+
+  defp filter_payment_from(query, from),
+    do: where(query, [p], fragment("coalesce(?, ?)", p.paid_at, p.inserted_at) >= ^from)
+
+  defp filter_payment_to(query, nil), do: query
+
+  defp filter_payment_to(query, to),
+    do: where(query, [p], fragment("coalesce(?, ?)", p.paid_at, p.inserted_at) <= ^to)
 
   defp start_of_day(nil), do: nil
   defp start_of_day(%Date{} = date), do: DateTime.new!(date, ~T[00:00:00], "Etc/UTC")

@@ -155,8 +155,8 @@ defmodule WasomiWeb.AdminLive.Dashboard do
                 options={Enum.map(@courses, &{&1.title, &1.id})}
               />
             </div>
-            <.input field={@filter_form[:from]} type="date" label="From" />
-            <.input field={@filter_form[:to]} type="date" label="To" />
+            <.input field={@filter_form[:from]} type="date" label="From" max="today" />
+            <.input field={@filter_form[:to]} type="date" label="To" max="today" />
           </.form>
 
           <div class="mt-6 grid gap-8 lg:grid-cols-2">

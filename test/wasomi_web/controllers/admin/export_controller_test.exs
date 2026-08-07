@@ -153,11 +153,12 @@ defmodule WasomiWeb.Admin.ExportControllerTest do
           inserted_at_override: ~U[2026-06-15 10:00:00Z]
         )
 
-      _out_of_range =
+      out_of_range =
         payment_fixture(
           course_id: course.id,
           status: :successful,
-          provider_reference: "out-of-range"
+          provider_reference: "out-of-range",
+          paid_at: ~U[2026-07-15 10:00:00Z]
         )
 
       Repo.update_all(
@@ -165,7 +166,16 @@ defmodule WasomiWeb.Admin.ExportControllerTest do
         set: [inserted_at: ~U[2026-06-15 10:00:00Z]]
       )
 
+      Repo.update_all(
+        from(p in Wasomi.Payments.Payment, where: p.id == ^out_of_range.id),
+        set: [inserted_at: ~U[2026-07-15 10:00:00Z]]
+      )
+
       conn = get(conn, ~p"/admin/exports/payments?from=2026-06-01&to=2026-06-30")
+
+      assert get_resp_header(conn, "content-disposition") == [
+               ~s(attachment; filename="wasomi_payments_2026-06-01_to_2026-06-30.csv")
+             ]
 
       [_header | rows] = csv_rows(conn)
       references = Enum.map(rows, &Enum.at(&1, 4))

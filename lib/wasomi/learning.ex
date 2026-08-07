@@ -16,6 +16,11 @@ defmodule Wasomi.Learning do
   alias Wasomi.Learning.LectureProgress
 
   @completion_ratio 0.95
+  @mark_complete_ratio 0.80
+  # Anti-cheat backstop: caps claimed advance to what's plausible given
+  # elapsed real time, so a forged/bypassed video-progress event can't jump.
+  @max_plausible_playback_rate 4
+  @min_plausible_advance_seconds 20
 
   @doc """
   Saves a playback position and automatically completes the lecture at 95%.
@@ -32,11 +37,37 @@ defmodule Wasomi.Learning do
     do: {:error, :invalid_position}
 
   @doc """
-  Explicitly completes a lecture, used by the player `ended` event and the
-  learner-facing "Mark complete" action.
+  Explicitly completes a lecture (player `ended` event, "Mark complete" button).
+
+  Requires >= 80% watched (lower than `record_progress/3`'s 95%
+  auto-complete, so the button has a real enabled window), checked against
+  last recorded position, not the caller's claim. Returns
+  `{:error, :insufficient_watch_time}` otherwise.
   """
   def mark_complete(%User{} = user, %Lecture{} = lecture) do
-    persist_progress(user, lecture, lecture.duration_seconds, true)
+    if Enrollments.can_access_lecture?(user, lecture) do
+      watched_position =
+        case get_lecture_progress(user, lecture) do
+          nil -> 0
+          %LectureProgress{last_position_seconds: position} -> position
+        end
+
+      if watched_enough?(watched_position, lecture.duration_seconds) do
+        persist_progress(user, lecture, lecture.duration_seconds, true)
+      else
+        {:error, :insufficient_watch_time}
+      end
+    else
+      {:error, :forbidden}
+    end
+  end
+
+  @doc """
+  Whether `position_seconds` of `duration_seconds` clears the 80% mark-complete threshold.
+  """
+  def watched_enough?(position_seconds, duration_seconds)
+      when is_number(position_seconds) and is_number(duration_seconds) do
+    position_seconds >= mark_complete_threshold(duration_seconds)
   end
 
   @doc """
@@ -223,15 +254,11 @@ defmodule Wasomi.Learning do
 
   defp persist_progress(user, lecture, position_seconds, explicit_complete?) do
     if Enrollments.can_access_lecture?(user, lecture) do
-      position =
+      requested_position =
         position_seconds
         |> trunc()
         |> max(0)
         |> min(lecture.duration_seconds)
-
-      completed? =
-        explicit_complete? or
-          position >= completion_position(lecture.duration_seconds)
 
       case Repo.transaction(fn ->
              Repo.query!("SELECT pg_advisory_xact_lock($1, $2)", [user.id, lecture.id])
@@ -244,6 +271,13 @@ defmodule Wasomi.Learning do
                )
                |> lock("FOR UPDATE")
                |> Repo.one()
+
+             position =
+               clamp_implausible_advance(progress, requested_position, explicit_complete?)
+
+             completed? =
+               explicit_complete? or
+                 position >= completion_position(lecture.duration_seconds)
 
              previous_status = progress && progress.status
              progress = progress || %LectureProgress{user_id: user.id, lecture_id: lecture.id}
@@ -352,6 +386,27 @@ defmodule Wasomi.Learning do
 
   defp completion_position(duration_seconds),
     do: duration_seconds * @completion_ratio
+
+  defp mark_complete_threshold(duration_seconds),
+    do: duration_seconds * @mark_complete_ratio
+
+  # mark_complete/2 already verified real watched position; its jump to
+  # duration_seconds is legitimate, not forged — exempt from the check.
+  defp clamp_implausible_advance(_progress, position, true), do: position
+
+  # No prior save — treat as a first save of 0 now, so a first-ever forged
+  # event can't claim an arbitrary jump.
+  defp clamp_implausible_advance(nil, position, false),
+    do: min(position, @min_plausible_advance_seconds)
+
+  defp clamp_implausible_advance(%LectureProgress{} = progress, position, false) do
+    elapsed_seconds = DateTime.diff(DateTime.utc_now(), progress.updated_at)
+
+    max_advance =
+      max(elapsed_seconds * @max_plausible_playback_rate, @min_plausible_advance_seconds)
+
+    min(position, progress.last_position_seconds + max_advance)
+  end
 
   defp percentage(_completed, 0), do: 0
   defp percentage(completed, total), do: round(completed / total * 100)

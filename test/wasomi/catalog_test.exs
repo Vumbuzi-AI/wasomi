@@ -450,6 +450,20 @@ defmodule Wasomi.CatalogTest do
       assert "Add at least one lecture." in issues
     end
 
+    test "PublishGuard.check/1 flags one empty module even when other modules have lectures" do
+      course = course_fixture()
+      populated_module = course_module_fixture(course_id: course.id, position: 1)
+      lecture_fixture(module_id: populated_module.id, position: 1, video_asset_id: "abc123")
+      course_module_fixture(course_id: course.id, position: 2)
+
+      assert {:error, issues} =
+               Catalog.get_course_with_outline!(course.id) |> PublishGuard.check()
+
+      assert "Every module needs at least one lecture." in issues
+      # Aggregate check shouldn't also fire — this course does have lectures.
+      refute "Add at least one lecture." in issues
+    end
+
     test "PublishGuard.check/1 flags a lecture with no video attached" do
       # `Wasomi.Catalog.Lecture`'s own changeset already requires
       # `video_asset_id`, so a real persisted lecture can never actually
@@ -473,6 +487,35 @@ defmodule Wasomi.CatalogTest do
       course = course_fixture(price_minor: 150_000, thumbnail_key: "cover.jpg")
       course_module = course_module_fixture(course_id: course.id, position: 1)
       lecture_fixture(module_id: course_module.id, position: 1, video_asset_id: "abc123")
+
+      assert PublishGuard.check(Catalog.get_course_with_outline!(course.id)) == :ok
+    end
+
+    test "PublishGuard.check/1 does not require a quiz on modules that have none" do
+      course = course_fixture(price_minor: 150_000, thumbnail_key: "cover.jpg")
+      course_module = course_module_fixture(course_id: course.id, position: 1)
+      lecture_fixture(module_id: course_module.id, position: 1, video_asset_id: "abc123")
+
+      assert PublishGuard.check(Catalog.get_course_with_outline!(course.id)) == :ok
+    end
+
+    test "PublishGuard.check/1 flags a module whose quiz has questions published but was never activated" do
+      course = course_fixture(price_minor: 150_000, thumbnail_key: "cover.jpg")
+      course_module = course_module_fixture(course_id: course.id, position: 1)
+      lecture_fixture(module_id: course_module.id, position: 1, video_asset_id: "abc123")
+      Wasomi.AssessmentsFixtures.quiz_fixture(%{module: course_module, active: false})
+
+      assert {:error, issues} =
+               Catalog.get_course_with_outline!(course.id) |> PublishGuard.check()
+
+      assert "Publish every module's quiz before publishing the course." in issues
+    end
+
+    test "PublishGuard.check/1 passes when the module quiz is already active" do
+      course = course_fixture(price_minor: 150_000, thumbnail_key: "cover.jpg")
+      course_module = course_module_fixture(course_id: course.id, position: 1)
+      lecture_fixture(module_id: course_module.id, position: 1, video_asset_id: "abc123")
+      Wasomi.AssessmentsFixtures.quiz_fixture(%{module: course_module, active: true})
 
       assert PublishGuard.check(Catalog.get_course_with_outline!(course.id)) == :ok
     end

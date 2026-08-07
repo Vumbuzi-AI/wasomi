@@ -64,21 +64,22 @@ defmodule Wasomi.LearningTest do
 
     test "upserts monotonic progress below the completion threshold", context do
       assert {:ok, progress, []} =
-               Learning.record_progress(context.user, context.lecture, 40)
+               Learning.record_progress(context.user, context.lecture, 15)
 
       assert progress.status == :in_progress
-      assert progress.last_position_seconds == 40
+      assert progress.last_position_seconds == 15
       assert is_nil(progress.completed_at)
 
       assert {:ok, progress, []} =
-               Learning.record_progress(context.user, context.lecture, 12)
+               Learning.record_progress(context.user, context.lecture, 5)
 
-      assert progress.last_position_seconds == 40
+      assert progress.last_position_seconds == 15
       assert Repo.aggregate(LectureProgress, :count) == 1
     end
 
     test "completes at 95 percent and emits lecture/module/course events", context do
       :ok = Learning.subscribe(context.user)
+      seed_and_backdate_save!(context.user, context.lecture, 30)
 
       assert {:ok, progress,
               [
@@ -102,17 +103,58 @@ defmodule Wasomi.LearningTest do
     end
 
     test "94 percent remains in progress", context do
+      seed_and_backdate_save!(context.user, context.lecture, 30)
+
       assert {:ok, progress, []} =
                Learning.record_progress(context.user, context.lecture, 94)
 
       assert progress.status == :in_progress
     end
 
-    test "explicit completion is idempotent", context do
+    test "rejects a forged jump-ahead as an anti-cheat backstop for the client-side seek guard",
+         context do
+      assert {:ok, _progress, []} = Learning.record_progress(context.user, context.lecture, 10)
+
+      # +85s claimed with ~0 real time elapsed — a forged jump.
+      assert {:ok, progress, []} = Learning.record_progress(context.user, context.lecture, 95)
+
+      assert progress.status == :in_progress
+      # Clamped to last (10) + floor allowance (20), not the raw 95.
+      assert progress.last_position_seconds == 30
+    end
+
+    test "a large jump is accepted once enough real time has plausibly elapsed", context do
+      assert {:ok, progress, []} = Learning.record_progress(context.user, context.lecture, 10)
+
+      Repo.update!(
+        Ecto.Changeset.change(progress,
+          updated_at:
+            DateTime.utc_now() |> DateTime.add(-30, :second) |> DateTime.truncate(:second)
+        )
+      )
+
+      # +85s over 30s elapsed — within the 4x allowance.
+      assert {:ok, progress, [_lecture, _module, _course]} =
+               Learning.record_progress(context.user, context.lecture, 95)
+
+      assert progress.status == :completed
+      assert progress.last_position_seconds == 95
+    end
+
+    test "rejects a forged jump-ahead on the very first save for a lecture", context do
+      # No prior row — the simplest version of the exploit.
+      assert {:ok, progress, []} = Learning.record_progress(context.user, context.lecture, 95)
+
+      assert progress.status == :in_progress
+      assert progress.last_position_seconds == 20
+    end
+
+    test "mark_complete/2 is a no-op once the lecture is already completed", context do
       :ok = Learning.subscribe(context.user)
+      seed_and_backdate_save!(context.user, context.lecture, 30)
 
       assert {:ok, first, [_lecture, _module, _course]} =
-               Learning.mark_complete(context.user, context.lecture)
+               Learning.record_progress(context.user, context.lecture, 96)
 
       assert_receive {:lecture_completed, _}
       assert_receive {:module_completed, _}
@@ -123,6 +165,18 @@ defmodule Wasomi.LearningTest do
       refute_receive {:lecture_completed, _}
       refute_receive {:module_completed, _}
       refute_receive {:course_completed, _}
+    end
+
+    test "mark_complete/2 rejects a lecture that hasn't been watched enough", context do
+      assert {:error, :insufficient_watch_time} =
+               Learning.mark_complete(context.user, context.lecture)
+
+      {:ok, _progress, []} = Learning.record_progress(context.user, context.lecture, 40)
+
+      assert {:error, :insufficient_watch_time} =
+               Learning.mark_complete(context.user, context.lecture)
+
+      refute Learning.get_lecture_progress(context.user, context.lecture).status == :completed
     end
 
     test "rejects progress without an active enrollment", context do
@@ -158,7 +212,9 @@ defmodule Wasomi.LearningTest do
       assert Learning.lecture_unlocked?(user, course, first)
       refute Learning.lecture_unlocked?(user, course, second)
 
-      assert {:ok, _, [{:lecture_completed, _}]} = Learning.mark_complete(user, first)
+      assert {:ok, _, [{:lecture_completed, _}]} =
+               complete_lecture_via_progress!(user, first)
+
       assert Learning.lecture_unlocked?(user, course, second)
       refute Learning.lecture_unlocked?(user, course, third)
 
@@ -166,7 +222,7 @@ defmodule Wasomi.LearningTest do
               [
                 {:lecture_completed, _},
                 {:module_completed, completed_module}
-              ]} = Learning.mark_complete(user, second)
+              ]} = complete_lecture_via_progress!(user, second)
 
       assert completed_module.id == first_module.id
       assert Learning.lecture_unlocked?(user, course, third)
@@ -176,7 +232,7 @@ defmodule Wasomi.LearningTest do
                 {:lecture_completed, _},
                 {:module_completed, completed_module},
                 {:course_completed, completed_course}
-              ]} = Learning.mark_complete(user, third)
+              ]} = complete_lecture_via_progress!(user, third)
 
       assert completed_module.id == second_module.id
       assert completed_course.id == course.id
@@ -184,5 +240,19 @@ defmodule Wasomi.LearningTest do
       assert %{completed: 3, total: 3, percent: 100, complete?: true} =
                Learning.course_progress(user, course)
     end
+  end
+
+  # Seeds a small first save and backdates it, so a later big jump reads as
+  # plausible instead of getting clamped.
+  defp seed_and_backdate_save!(user, lecture, seconds_ago) do
+    {:ok, _progress, []} = Learning.record_progress(user, lecture, 1)
+
+    Repo.update!(
+      Ecto.Changeset.change(
+        Learning.get_lecture_progress(user, lecture),
+        updated_at:
+          DateTime.utc_now() |> DateTime.add(-seconds_ago, :second) |> DateTime.truncate(:second)
+      )
+    )
   end
 end

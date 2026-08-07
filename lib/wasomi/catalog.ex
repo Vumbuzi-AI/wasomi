@@ -138,7 +138,9 @@ defmodule Wasomi.Catalog do
         ]
       )
 
-    Repo.preload(course_or_courses, modules: {modules_query, lectures: lectures_query})
+    Repo.preload(course_or_courses,
+      modules: {modules_query, [:quiz, lectures: lectures_query]}
+    )
   end
 
   @doc """

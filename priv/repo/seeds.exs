@@ -444,14 +444,17 @@ Repo.transaction(fn ->
       }
     }
 
-    case Repo.get_by(Payment, provider_reference: provider_reference) do
-      nil -> %Payment{}
-      existing -> existing
-    end
-    |> Payment.changeset(payment_attrs)
-    |> then(fn changeset ->
-      if changeset.data.id, do: Repo.update!(changeset), else: Repo.insert!(changeset)
-    end)
+    payment =
+      case Repo.get_by(Payment, provider_reference: provider_reference) do
+        nil -> %Payment{}
+        existing -> existing
+      end
+      |> Payment.changeset(payment_attrs)
+      |> then(fn changeset ->
+        if changeset.data.id, do: Repo.update!(changeset), else: Repo.insert!(changeset)
+      end)
+
+    Repo.update_all(from(p in Payment, where: p.id == ^payment.id), set: [inserted_at: paid_at])
   end)
 end)
 

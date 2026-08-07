@@ -522,6 +522,294 @@ Hooks.PdfDownload = {
   }
 }
 
+const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+const DOW = ["S","M","T","W","T","F","S"];
+
+export class CustomDatePicker {
+  constructor(element) {
+    this.el = element;
+    this.input = this.el.querySelector("[data-dp-input]");
+    this.trigger = this.el.querySelector("[data-dp-trigger]");
+    this.display = this.el.querySelector("[data-dp-display]");
+    this.pop = this.el.querySelector("[data-dp-pop]");
+    this.body = this.el.querySelector("[data-dp-body]");
+    
+    this.initToday();
+    this.parseValue();
+    this.bindEvents();
+  }
+
+  initToday() {
+    this.today = new Date();
+    this.today.setHours(0,0,0,0);
+    const maxVal = this.el.dataset.max;
+    if (maxVal === "today") {
+      this.max = this.today;
+    } else if (maxVal && /^\d{4}-\d{2}-\d{2}$/.test(maxVal)) {
+      const [y, m, d] = maxVal.split("-").map(Number);
+      this.max = new Date(y, m - 1, d);
+      this.max.setHours(0,0,0,0);
+    } else {
+      this.max = null;
+    }
+  }
+
+  minYear() { return this.today.getFullYear() - 120; }
+  maxYear() { return this.max ? this.max.getFullYear() : this.today.getFullYear() + 10; }
+
+  parseValue() {
+    const v = this.input ? this.input.value : "";
+    if (v && /^\d{4}-\d{2}-\d{2}$/.test(v)) {
+      const [y, m, d] = v.split("-").map(Number);
+      this.selected = new Date(y, m - 1, d);
+      this.selected.setHours(0,0,0,0);
+    } else {
+      this.selected = null;
+    }
+    this.renderDisplay();
+  }
+
+  iso(date) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    const d = String(date.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+
+  fmt(date) {
+    return date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  }
+
+  renderDisplay() {
+    if (!this.display) return;
+    if (this.selected) {
+      this.display.textContent = this.fmt(this.selected);
+      this.display.classList.remove("text-muted");
+    } else {
+      this.display.textContent = this.display.dataset.placeholder || "Choose a date";
+      this.display.classList.add("text-muted");
+    }
+  }
+
+  open() {
+    const base = this.selected || this.today;
+    this.viewYear = base.getFullYear();
+    this.viewMonth = base.getMonth();
+    this.mode = "days";
+    this.renderCalendar();
+    this.pop.removeAttribute("hidden");
+  }
+
+  close() {
+    this.pop.setAttribute("hidden", "");
+  }
+
+  toggle() {
+    this.pop.hasAttribute("hidden") ? this.open() : this.close();
+  }
+
+  bindEvents() {
+    this.onTriggerClick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.toggle();
+    };
+    this.trigger.addEventListener("click", this.onTriggerClick);
+
+    this.onPopClick = (e) => this.handlePopClick(e);
+    this.pop.addEventListener("click", this.onPopClick);
+
+    this.onDocClick = (e) => {
+      if (!this.el.contains(e.target) && !this.pop.contains(e.target)) this.close();
+    };
+    document.addEventListener("click", this.onDocClick);
+
+    this.onDocKeydown = (e) => {
+      if (e.key === "Escape") this.close();
+    };
+    document.addEventListener("keydown", this.onDocKeydown);
+  }
+
+  destroy() {
+    this.trigger.removeEventListener("click", this.onTriggerClick);
+    this.pop.removeEventListener("click", this.onPopClick);
+    document.removeEventListener("click", this.onDocClick);
+    document.removeEventListener("keydown", this.onDocKeydown);
+  }
+
+  handlePopClick(e) {
+    e.stopPropagation();
+    
+    // Month navigation (< or >)
+    const nav = e.target.closest("[data-dp-nav]");
+    if (nav) {
+      e.preventDefault();
+      this.viewMonth += parseInt(nav.dataset.dpNav, 10);
+      if (this.viewMonth < 0) { this.viewMonth = 11; this.viewYear--; }
+      if (this.viewMonth > 11) { this.viewMonth = 0; this.viewYear++; }
+      this.renderCalendar();
+      return;
+    }
+
+    // View switcher (open months or years list)
+    const open = e.target.closest("[data-dp-open]");
+    if (open) {
+      e.preventDefault();
+      this.mode = open.dataset.dpOpen;
+      this.renderCalendar();
+      return;
+    }
+
+    // Year selection
+    const yr = e.target.closest("[data-dp-year]");
+    if (yr && !yr.disabled) {
+      e.preventDefault();
+      this.viewYear = parseInt(yr.dataset.dpYear, 10);
+      if (this.viewMonth > this.maxMonthFor(this.viewYear)) this.viewMonth = this.maxMonthFor(this.viewYear);
+      this.mode = "days";
+      this.renderCalendar();
+      return;
+    }
+
+    // Month selection
+    const mo = e.target.closest("[data-dp-month]");
+    if (mo && !mo.disabled) {
+      e.preventDefault();
+      this.viewMonth = parseInt(mo.dataset.dpMonth, 10);
+      this.mode = "days";
+      this.renderCalendar();
+      return;
+    }
+
+    // Day selection
+    const day = e.target.closest("[data-dp-day]");
+    if (day && !day.disabled) {
+      e.preventDefault();
+      this.selected = new Date(this.viewYear, this.viewMonth, parseInt(day.dataset.dpDay, 10));
+      this.selected.setHours(0,0,0,0);
+      this.input.value = this.iso(this.selected);
+      this.input.dispatchEvent(new Event("input", { bubbles: true }));
+      this.input.dispatchEvent(new Event("change", { bubbles: true }));
+      this.renderDisplay();
+      this.close();
+    }
+  }
+
+  maxMonthFor(year) {
+    return (this.max && year === this.max.getFullYear()) ? this.max.getMonth() : 11;
+  }
+
+  renderCalendar() {
+    if (this.mode === "years") return this.renderYears();
+    if (this.mode === "months") return this.renderMonths();
+    this.renderDays();
+  }
+
+  listHeader(label) {
+    return `<div style="display:flex;align-items:center;gap:4px;margin-bottom:12px;">
+      <button type="button" data-dp-open="days" aria-label="Back to days" class="cal-nav-btn">&#8249;</button>
+      <span style="flex:1;text-align:center;font-size:14px;font-weight:600;">${label}</span>
+      <span style="width:32px;"></span>
+    </div>`;
+  }
+
+  renderDays() {
+    const first = new Date(this.viewYear, this.viewMonth, 1);
+    const startDow = first.getDay();
+    const daysInMonth = new Date(this.viewYear, this.viewMonth + 1, 0).getDate();
+
+    let head = `
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:12px;">
+        <button type="button" data-dp-nav="-1" aria-label="Previous month" class="cal-nav-btn">&#8249;</button>
+        <button type="button" data-dp-open="months" class="cal-select-trigger" style="flex:1;">
+          <span>${MONTHS[this.viewMonth]}</span><span class="opacity-50">&#9662;</span>
+        </button>
+        <button type="button" data-dp-open="years" class="cal-select-trigger">
+          <span>${this.viewYear}</span><span class="opacity-50">&#9662;</span>
+        </button>
+        <button type="button" data-dp-nav="1" aria-label="Next month" class="cal-nav-btn">&#8250;</button>
+      </div>`;
+
+    let dow = `<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:6px;">`;
+    DOW.forEach(d => { dow += `<span style="text-align:center;font-size:12px;font-weight:500;" class="text-muted">${d}</span>`; });
+    dow += `</div>`;
+
+    let grid = `<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;">`;
+    for (let i = 0; i < startDow; i++) grid += `<span></span>`;
+    
+    for (let d = 1; d <= daysInMonth; d++) {
+      const cur = new Date(this.viewYear, this.viewMonth, d);
+      cur.setHours(0,0,0,0);
+      const isSel = this.selected && cur.getTime() === this.selected.getTime();
+      const isToday = cur.getTime() === this.today.getTime();
+      const disabled = this.max && cur.getTime() > this.max.getTime();
+
+      let classes = ["cal-day-cell"];
+      if (isSel) classes.push("is-selected");
+      if (isToday) classes.push("is-today");
+
+      grid += `<button type="button" data-dp-day="${d}" ${disabled ? "disabled" : ""} class="${classes.join(" ")}">${d}</button>`;
+    }
+    grid += `</div>`;
+
+    this.body.innerHTML = head + dow + grid;
+  }
+
+  renderMonths() {
+    let head = this.listHeader("Select month");
+    let grid = `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">`;
+    const maxMonth = this.maxMonthFor(this.viewYear);
+    
+    MONTHS.forEach((name, i) => {
+      const isSel = i === this.viewMonth;
+      const disabled = i > maxMonth;
+      let classes = ["cal-month-cell"];
+      if (isSel) classes.push("is-selected");
+      
+      grid += `<button type="button" data-dp-month="${i}" ${disabled ? "disabled" : ""} class="${classes.join(" ")}">${name.slice(0,3)}</button>`;
+    });
+    grid += `</div>`;
+    this.body.innerHTML = head + grid;
+  }
+
+  renderYears() {
+    let head = this.listHeader("Select year");
+    let grid = `<div data-dp-years class="cal-years-grid">`;
+    
+    for (let y = this.maxYear(); y >= this.minYear(); y--) {
+      const isSel = y === this.viewYear;
+      let classes = ["cal-year-cell"];
+      if (isSel) classes.push("is-selected");
+      grid += `<button type="button" data-dp-year="${y}" class="${classes.join(" ")}">${y}</button>`;
+    }
+    grid += `</div>`;
+    this.body.innerHTML = head + grid;
+
+    const container = this.pop.querySelector("[data-dp-years]");
+    const sel = this.pop.querySelector(`[data-dp-year="${this.viewYear}"]`);
+    if (container && sel) {
+      container.scrollTop = sel.offsetTop - container.clientHeight / 2 + sel.clientHeight / 2;
+    }
+  }
+}
+
+Hooks.DatePicker = {
+  mounted() {
+    this.picker = new CustomDatePicker(this.el)
+  },
+  updated() {
+    if (this.picker) {
+      this.picker.initToday()
+      this.picker.parseValue()
+    }
+  },
+  destroyed() {
+    if (this.picker) {
+      this.picker.destroy()
+    }
+  }
+}
+
 let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 let liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,

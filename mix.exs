@@ -68,7 +68,8 @@ defmodule Wasomi.MixProject do
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:mox, "~> 1.2", only: :test},
       {:dns_cluster, "~> 0.1.1"},
-      {:bandit, "~> 1.5"}
+      {:bandit, "~> 1.5"},
+      {:nimble_csv, "~> 1.2"}
     ]
   end
 

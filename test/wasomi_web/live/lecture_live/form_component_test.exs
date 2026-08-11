@@ -103,6 +103,24 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
     refute html =~ "data:image/jpeg;base64,abc123"
   end
 
+  test "surfaces an error when the direct PUT to Mux fails partway through", %{conn: conn} do
+    course = course_fixture()
+    course_module = course_module_fixture(course_id: course.id)
+
+    expect(Wasomi.MediaProviderMock, :create_upload, fn %Catalog.Lecture{}, [] ->
+      {:ok, %{id: "upload-123", url: "https://storage.mux.test/direct-upload"}}
+    end)
+
+    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.id}")
+    render_click(view, "new_lecture", %{"module-id" => to_string(course_module.id)})
+
+    upload = element(view, "#lecture-video-upload")
+    render_hook(upload, "create-upload", %{})
+    html = render_hook(upload, "upload-failed", %{"status" => 500})
+
+    assert html =~ "The upload to Mux failed (HTTP 500)"
+  end
+
   test "surfaces an error and leaves the lecture unsaved when Mux cannot start the upload", %{
     conn: conn
   } do

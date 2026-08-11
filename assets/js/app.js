@@ -566,11 +566,13 @@ Hooks.MuxUpload = {
         this.pushUp("upload-complete", {})
       } else {
         console.error(`Mux upload failed (${request.status})`)
+        this.pushUp("upload-failed", {status: request.status})
       }
     })
 
     request.addEventListener("error", () => {
       console.error("Mux upload failed because of a network error")
+      this.pushUp("upload-failed", {})
     })
 
     request.open("PUT", url)

@@ -555,6 +555,13 @@ defmodule WasomiWeb.LectureLive.FormComponent do
      |> push_event("mux-check-upload", %{})}
   end
 
+  def handle_event("upload-failed", params, socket) do
+    {:noreply,
+     socket
+     |> assign(:video_upload_state, :error)
+     |> assign(:video_upload_message, upload_failure_message(params["status"]))}
+  end
+
   def handle_event("remove-video", _params, socket) do
     {:noreply,
      socket
@@ -730,6 +737,13 @@ defmodule WasomiWeb.LectureLive.FormComponent do
       "the Mux signing key isn't configured correctly (MUX_SIGNING_KEY_ID / MUX_SIGNING_PRIVATE_KEY): #{message}"
 
   defp video_error_message(reason), do: inspect(reason)
+
+  defp upload_failure_message(status) when is_integer(status),
+    do: "The upload to Mux failed (HTTP #{status}). Remove it and try selecting the file again."
+
+  defp upload_failure_message(_status),
+    do:
+      "The upload to Mux failed because of a network error. Remove it and try selecting the file again."
 
   defp format_file_size(size) when is_number(size) and size > 0 do
     {value, unit} = scale_bytes(size / 1, ["B", "KB", "MB", "GB"])

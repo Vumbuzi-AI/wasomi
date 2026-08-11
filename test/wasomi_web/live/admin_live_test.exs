@@ -358,6 +358,24 @@ defmodule WasomiWeb.AdminLiveTest do
       assert Wasomi.Catalog.get_course_module!(module.id).position == 2
     end
 
+    test "the lecture and module modals can't be dismissed by a stray click or Escape", %{
+      conn: conn
+    } do
+      course = course_fixture()
+      module = course_module_fixture(course_id: course.id)
+      {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.id}")
+
+      html = render_click(view, "new_module", %{})
+      assert html =~ ~s(id="module-modal")
+      refute html =~ "phx-click-away"
+
+      render_click(view, "close_modal", %{})
+
+      html = render_click(view, "new_lecture", %{"module-id" => to_string(module.id)})
+      assert html =~ ~s(id="lecture-modal")
+      refute html =~ "phx-click-away"
+    end
+
     test "uploads a lecture video via Mux and deletes the lecture", %{conn: conn} do
       import Mox
 

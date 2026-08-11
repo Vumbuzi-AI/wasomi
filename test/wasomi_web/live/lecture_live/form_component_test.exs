@@ -103,6 +103,29 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
     refute html =~ "data:image/jpeg;base64,abc123"
   end
 
+  test "handles malformed create-upload payloads without crashing", %{conn: conn} do
+    course = course_fixture()
+    course_module = course_module_fixture(course_id: course.id)
+
+    expect(Wasomi.MediaProviderMock, :create_upload, fn %Catalog.Lecture{}, [] ->
+      {:ok, %{id: "upload-123", url: "https://storage.mux.test/direct-upload"}}
+    end)
+
+    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.id}")
+    render_click(view, "new_lecture", %{"module-id" => to_string(course_module.id)})
+
+    upload = element(view, "#lecture-video-upload")
+
+    html =
+      render_hook(upload, "create-upload", %{
+        "filename" => String.duplicate("a", 5000) <> ".mp4",
+        "size" => "not-a-number"
+      })
+
+    assert html =~ "Uploading directly to Mux"
+    refute html =~ String.duplicate("a", 5000)
+  end
+
   test "surfaces an error when the direct PUT to Mux fails partway through", %{conn: conn} do
     course = course_fixture()
     course_module = course_module_fixture(course_id: course.id)
@@ -119,6 +142,53 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
     html = render_hook(upload, "upload-failed", %{"status" => 500})
 
     assert html =~ "The upload to Mux failed (HTTP 500)"
+  end
+
+  test "the confirmed Mux upload always wins over stray video_asset_id/duration_seconds params",
+       %{conn: conn} do
+    course = course_fixture()
+    course_module = course_module_fixture(course_id: course.id)
+
+    expect(Wasomi.MediaProviderMock, :create_upload, fn %Catalog.Lecture{}, [] ->
+      {:ok, %{id: "upload-123", url: "https://storage.mux.test/direct-upload"}}
+    end)
+
+    expect(Wasomi.MediaProviderMock, :upload_status, fn "upload-123" ->
+      {:ok, {:ready, "signed-playback-456", 612}}
+    end)
+
+    expect(Wasomi.MediaProviderMock, :thumbnail_url, fn %Catalog.Lecture{}, _user ->
+      {:ok, "https://image.mux.test/signed-playback-456/thumbnail.jpg?token=abc"}
+    end)
+
+    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.id}")
+    render_click(view, "new_lecture", %{"module-id" => to_string(course_module.id)})
+
+    upload = element(view, "#lecture-video-upload")
+    render_hook(upload, "create-upload", %{})
+    render_hook(upload, "upload-complete", %{})
+    render_hook(upload, "check-upload", %{})
+
+    # The Advanced fields are hidden by the UI once a Mux upload is
+    # confirmed, but submit them anyway (bypassing the DOM) to lock in
+    # that put_video_fields/2 always prefers the confirmed upload.
+    render_submit(element(view, "#lecture-form"), %{
+      "lecture" => %{
+        "title" => "Intro to Elixir",
+        "description" => "A first look at Elixir.",
+        "position" => "1",
+        "video_asset_id" => "attacker-supplied-id",
+        "duration_seconds" => "999"
+      }
+    })
+
+    lecture =
+      Catalog.get_course_with_outline!(course.id).modules
+      |> Enum.flat_map(& &1.lectures)
+      |> Enum.find(&(&1.title == "Intro to Elixir"))
+
+    assert lecture.video_asset_id == "signed-playback-456"
+    assert lecture.duration_seconds == 612
   end
 
   test "surfaces an error and leaves the lecture unsaved when Mux cannot start the upload", %{

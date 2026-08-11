@@ -90,8 +90,8 @@ defmodule WasomiWeb.LectureLive.FormComponent do
                     <.icon name="hero-arrow-path" class="h-5 w-5 animate-spin text-muted" />
                   </div>
                 </div>
-                <div class="text-left">
-                  <p class="text-sm font-medium text-dark">{@video_filename}</p>
+                <div class="min-w-0 flex-1 text-left">
+                  <p class="truncate text-sm font-medium text-dark">{@video_filename}</p>
                   <p class="text-xs text-muted">{format_file_size(@video_size)}</p>
                 </div>
               </div>
@@ -522,8 +522,8 @@ defmodule WasomiWeb.LectureLive.FormComponent do
   def handle_event("create-upload", params, socket) do
     socket =
       socket
-      |> assign(:video_filename, params["filename"])
-      |> assign(:video_size, params["size"])
+      |> assign(:video_filename, normalize_filename(params["filename"]))
+      |> assign(:video_size, normalize_size(params["size"]))
 
     case safe_media_call(fn ->
            Media.create_upload(socket.assigns.current_user, socket.assigns.lecture, [])
@@ -744,6 +744,19 @@ defmodule WasomiWeb.LectureLive.FormComponent do
   defp upload_failure_message(_status),
     do:
       "The upload to Mux failed because of a network error. Remove it and try selecting the file again."
+
+  defp normalize_filename(filename) when is_binary(filename) do
+    case String.trim(filename) do
+      "" -> nil
+      trimmed -> String.slice(trimmed, 0, 255)
+    end
+  end
+
+  defp normalize_filename(_filename), do: nil
+
+  defp normalize_size(size) when is_integer(size) and size >= 0, do: size
+  defp normalize_size(size) when is_float(size) and size >= 0, do: trunc(size)
+  defp normalize_size(_size), do: nil
 
   defp format_file_size(size) when is_number(size) and size > 0 do
     {value, unit} = scale_bytes(size / 1, ["B", "KB", "MB", "GB"])

@@ -126,7 +126,7 @@ defmodule Wasomi.MediaTest do
            )
   end
 
-  test "thumbnail_url/2 builds a URL where the signed token survives URI encoding intact" do
+  test "thumbnail_url/2 builds a URL where the playback id and signed token round-trip intact" do
     lecture =
       lecture_fixture(video_provider: :mux, video_asset_id: "av1Ab2_XyZ-9", duration_seconds: 120)
 
@@ -138,11 +138,10 @@ defmodule Wasomi.MediaTest do
     token = url |> String.split("token=") |> List.last()
     assert [_header, _claims, _signature] = String.split(token, ".")
 
-    # A base64url JWT (produced via Base.url_encode64(padding: false)) is
-    # entirely RFC 3986 "unreserved", so URI.encode/1 must be a no-op for
-    # it — this is the same encoding call already used, unmodified, by
-    # the production .m3u8 stream URL in Media.protected_stream_url/2.
-    assert URI.encode(token) == token
+    # playback_id is a path segment (URI.encode/1), token is a query value
+    # (URI.encode_www_form/1) — assert each survives its actual encoder
+    # unmangled for a real generated JWT, rather than assuming it.
+    assert URI.encode_www_form(token) == token
     refute token =~ "%"
   end
 

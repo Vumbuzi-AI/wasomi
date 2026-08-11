@@ -106,7 +106,11 @@ defmodule Wasomi.Media do
 
   defp protected_stream_url(%Lecture{video_provider: :mux, video_asset_id: playback_id}, token)
        when is_binary(playback_id) and playback_id != "" do
-    {:ok, "https://stream.mux.com/#{URI.encode(playback_id)}.m3u8?token=#{URI.encode(token)}"}
+    # playback_id is a path segment (URI.encode/1's default is exactly the
+    # right predicate for that); token is a query *value*, so it gets the
+    # form-encoding helper meant for that job instead.
+    {:ok,
+     "https://stream.mux.com/#{URI.encode(playback_id)}.m3u8?token=#{URI.encode_www_form(token)}"}
   end
 
   defp protected_stream_url(%Lecture{video_provider: provider}, _token),

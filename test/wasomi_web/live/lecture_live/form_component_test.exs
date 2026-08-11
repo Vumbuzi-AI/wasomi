@@ -37,7 +37,7 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
       {:ok, "https://image.mux.test/signed-playback-456/thumbnail.jpg?token=abc"}
     end)
 
-    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.id}")
+    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
 
     render_click(view, "new_lecture", %{"module-id" => to_string(course_module.id)})
 
@@ -53,8 +53,7 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
       |> form("#lecture-form", %{
         "lecture" => %{
           "title" => "Intro to Elixir",
-          "description" => "A first look at Elixir.",
-          "position" => "1"
+          "description" => "A first look at Elixir."
         }
       })
       |> render_submit()
@@ -88,7 +87,7 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
       {:ok, "https://image.mux.test/signed-playback-456/thumbnail.jpg?token=abc"}
     end)
 
-    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.id}")
+    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
     render_click(view, "new_lecture", %{"module-id" => to_string(course_module.id)})
 
     upload = element(view, "#lecture-video-upload")
@@ -112,7 +111,7 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
       {:ok, %{id: "upload-123", url: "https://storage.mux.test/direct-upload"}}
     end)
 
-    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.id}")
+    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
     render_click(view, "new_lecture", %{"module-id" => to_string(course_module.id)})
 
     upload = element(view, "#lecture-video-upload")
@@ -135,7 +134,7 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
       {:ok, %{id: "upload-123", url: "https://storage.mux.test/direct-upload"}}
     end)
 
-    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.id}")
+    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
     render_click(view, "new_lecture", %{"module-id" => to_string(course_module.id)})
 
     upload = element(view, "#lecture-video-upload")
@@ -153,7 +152,7 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
       raise "MUX_TOKEN_ID is not configured"
     end)
 
-    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.id}")
+    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
     render_click(view, "new_lecture", %{"module-id" => to_string(course_module.id)})
 
     upload = element(view, "#lecture-video-upload")
@@ -182,7 +181,7 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
       {:ok, "https://image.mux.test/signed-playback-456/thumbnail.jpg?token=abc"}
     end)
 
-    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.id}")
+    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
     render_click(view, "new_lecture", %{"module-id" => to_string(course_module.id)})
 
     upload = element(view, "#lecture-video-upload")
@@ -225,7 +224,7 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
     course_module = Catalog.get_course_module!(lecture.module_id)
     course = Catalog.get_course_with_outline!(course_module.course_id)
 
-    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.id}")
+    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
 
     render_click(view, "edit_lecture", %{"id" => to_string(lecture.id)})
 

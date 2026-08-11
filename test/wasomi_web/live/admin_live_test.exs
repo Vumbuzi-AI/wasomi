@@ -363,7 +363,7 @@ defmodule WasomiWeb.AdminLiveTest do
     } do
       course = course_fixture()
       module = course_module_fixture(course_id: course.id)
-      {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.id}")
+      {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
 
       html = render_click(view, "new_module", %{})
       assert html =~ ~s(id="module-modal")

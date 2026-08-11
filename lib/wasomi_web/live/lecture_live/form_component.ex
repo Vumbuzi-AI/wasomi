@@ -1,7 +1,9 @@
 defmodule WasomiWeb.LectureLive.FormComponent do
   use WasomiWeb, :live_component
 
-  alias Wasomi.{Catalog, Storage}
+  require Logger
+
+  alias Wasomi.{Catalog, Media, Storage}
   alias WasomiWeb.AdminLive.Components.ResourceUploader
 
   @impl true
@@ -27,56 +29,98 @@ defmodule WasomiWeb.LectureLive.FormComponent do
 
         <section
           id="lecture-video"
-          phx-hook="VideoPreview"
           class="space-y-4 rounded-2xl border border-black/5 bg-soft/40 p-4 sm:p-5"
         >
           <div>
             <h3 class="font-semibold text-dark">Lecture video</h3>
             <p class="mt-1 text-sm text-muted">
-              The primary video remains used for learner playback.
+              The file uploads directly to Mux. Wasomi stores only the signed playback ID once
+              processing is complete.
             </p>
           </div>
-          <video
-            data-role="preview"
-            controls
-            class="hidden w-full rounded-xl border border-black/10 bg-black"
+
+          <div
+            id="lecture-video-upload"
+            phx-hook="MuxUpload"
+            phx-target={@myself}
+            class="group relative rounded-2xl border-2 border-dashed border-black/10 bg-white p-6 text-center transition-colors hover:border-primary"
           >
-          </video>
-          <.input
-            field={@form[:video_asset_id]}
-            type="text"
-            label="Video asset or playback ID"
-            required
-          />
-          <label class="inline-flex cursor-pointer items-center gap-2 rounded-full bg-dark px-4 py-2.5 text-sm font-medium text-white transition hover:bg-primary">
-            <.icon name="hero-arrow-up-tray" class="h-4 w-4" /> Choose primary video
-            <.live_file_input upload={@uploads.video} class="sr-only" />
-          </label>
-          <p class="text-xs text-muted">MP4, MOV or WebM. The duration is detected automatically.</p>
-          <div :for={entry <- @uploads.video.entries} class="space-y-1">
-            <div class="h-2 overflow-hidden rounded-full bg-soft">
-              <div class="h-full rounded-full bg-primary" style={"width: #{entry.progress}%"}></div>
+            <input
+              id="lecture-video-file"
+              data-role="file"
+              type="file"
+              accept="video/*"
+              class={[
+                "absolute inset-0 h-full w-full cursor-pointer opacity-0",
+                @video_upload_state != :idle && "pointer-events-none"
+              ]}
+            />
+
+            <div :if={@video_upload_state == :idle} class="space-y-2">
+              <.icon name="hero-arrow-up-tray" class="mx-auto h-6 w-6 text-muted" />
+              <p class="text-sm font-medium text-dark">Drop a video here, or click to choose one</p>
+              <p class="text-xs text-muted">MP4, MOV or WebM</p>
             </div>
-            <p :for={error <- upload_errors(@uploads.video, entry)} class="text-sm text-rose-600">
-              {upload_error_to_string(error)}
-            </p>
+
+            <div :if={@video_upload_state != :idle} class="space-y-3">
+              <button
+                type="button"
+                phx-click="remove-video"
+                phx-target={@myself}
+                aria-label="Remove selected video"
+                class="pointer-events-auto absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full bg-dark text-white opacity-0 transition-[opacity,transform] duration-150 ease-out hover:bg-rose-600 group-hover:opacity-100 active:scale-[0.96]"
+              >
+                <.icon name="hero-x-mark" class="h-4 w-4" />
+              </button>
+
+              <div class="flex items-center justify-center gap-3">
+                <div class="relative h-16 w-28 shrink-0 overflow-hidden rounded-lg bg-black">
+                  <img
+                    :if={@video_thumbnail_url || @video_local_preview_url}
+                    data-role="thumbnail"
+                    src={@video_thumbnail_url || @video_local_preview_url}
+                    class="animate-fade-in h-full w-full object-cover outline outline-1 -outline-offset-1 outline-black/10"
+                  />
+                  <div
+                    :if={
+                      is_nil(@video_thumbnail_url) and is_nil(@video_local_preview_url) and
+                        @video_upload_state in [:uploading, :processing]
+                    }
+                    class="absolute inset-0 flex animate-pulse items-center justify-center bg-white/10"
+                  >
+                    <.icon name="hero-arrow-path" class="h-5 w-5 animate-spin text-muted" />
+                  </div>
+                </div>
+                <div class="min-w-0 flex-1 text-left">
+                  <p class="truncate text-sm font-medium text-dark">{@video_filename}</p>
+                  <p class="text-xs text-muted">{format_file_size(@video_size)}</p>
+                </div>
+              </div>
+
+              <div
+                :if={@video_upload_state != :ready}
+                class="h-2 overflow-hidden rounded-full bg-soft"
+              >
+                <div
+                  data-role="progress"
+                  class="h-full w-0 rounded-full bg-primary transition-[width] duration-150 ease-out"
+                >
+                </div>
+              </div>
+            </div>
           </div>
-          <div class="grid gap-4 sm:grid-cols-2">
-            <.input
-              field={@form[:video_provider]}
-              type="select"
-              label="Video provider"
-              options={Catalog.Lecture.video_provider_values()}
-              required
-            />
-            <.input
-              field={@form[:duration_seconds]}
-              type="number"
-              label="Duration (seconds)"
-              min="1"
-              required
-            />
-          </div>
+
+          <p
+            :if={@video_upload_message}
+            class={[
+              "rounded-xl px-4 py-3 text-sm",
+              @video_upload_state == :error && "bg-rose-50 text-rose-700",
+              @video_upload_state == :ready && "bg-mint text-primary",
+              @video_upload_state not in [:error, :ready] && "bg-white text-muted"
+            ]}
+          >
+            {@video_upload_message}
+          </p>
         </section>
 
         <section
@@ -248,13 +292,13 @@ defmodule WasomiWeb.LectureLive.FormComponent do
 
         <:actions>
           <p
-            :if={save_disabled?(@form, @resource_rows, @question_rows, @uploads)}
+            :if={save_disabled?(@form, @resource_rows, @question_rows, @video_ready)}
             class="text-sm text-amber-700"
           >
-            Select a primary video, enter its duration, and finish all resource uploads before saving.
+            Upload a video and finish all resource uploads before saving.
           </p>
           <.button
-            disabled={save_disabled?(@form, @resource_rows, @question_rows, @uploads)}
+            disabled={save_disabled?(@form, @resource_rows, @question_rows, @video_ready)}
             phx-disable-with="Saving..."
           >
             Save Lecture
@@ -296,6 +340,8 @@ defmodule WasomiWeb.LectureLive.FormComponent do
     lecture =
       if lecture.id, do: preload_content(lecture), else: %{lecture | resources: [], questions: []}
 
+    existing_video_ready = existing_video_ready(lecture)
+
     socket =
       socket
       |> assign(assigns)
@@ -304,20 +350,28 @@ defmodule WasomiWeb.LectureLive.FormComponent do
       |> assign_new(:resource_rows, fn -> Enum.map(lecture.resources || [], &resource_attrs/1) end)
       |> assign_new(:question_rows, fn -> Enum.map(lecture.questions || [], &question_attrs/1) end)
       |> assign_new(:resource_error, fn -> nil end)
+      |> assign_new(:video_upload, fn -> nil end)
+      |> assign_new(:video_upload_state, fn ->
+        if existing_video_ready, do: :ready, else: :idle
+      end)
+      |> assign_new(:video_upload_message, fn -> nil end)
+      |> assign_new(:video_ready, fn -> existing_video_ready end)
+      |> assign_new(:video_thumbnail_url, fn ->
+        case existing_video_ready do
+          %{video_asset_id: playback_id} ->
+            resolve_thumbnail_url(assigns.current_user, playback_id)
+
+          nil ->
+            nil
+        end
+      end)
+      |> assign_new(:video_local_preview_url, fn -> nil end)
+      |> assign_new(:video_filename, fn -> existing_video_ready && "Current video" end)
+      |> assign_new(:video_size, fn -> nil end)
 
     socket =
-      if Map.has_key?(socket.assigns, :uploads) do
-        socket
-      else
-        allow_upload(socket, :video,
-          accept: ~w(.mp4 .mov .webm),
-          max_entries: 1,
-          max_file_size: 1_000_000_000
-        )
-      end
-
-    socket =
-      if Map.has_key?(socket.assigns.uploads, :resources) do
+      if Map.has_key?(socket.assigns, :uploads) and
+           Map.has_key?(socket.assigns.uploads, :resources) do
         socket
       else
         ResourceUploader.configure_upload(socket, lecture.id)
@@ -459,9 +513,108 @@ defmodule WasomiWeb.LectureLive.FormComponent do
     {:noreply, assign(socket, question_rows: remove_at(socket.assigns.question_rows, index))}
   end
 
+  def handle_event("create-upload", params, socket) do
+    socket =
+      socket
+      |> assign(:video_filename, normalize_filename(params["filename"]))
+      |> assign(:video_size, normalize_size(params["size"]))
+
+    case safe_media_call(fn ->
+           Media.create_upload(socket.assigns.current_user, socket.assigns.lecture, [])
+         end) do
+      {:ok, upload} ->
+        {:noreply,
+         socket
+         |> assign(:video_upload, upload)
+         |> assign(:video_upload_state, :uploading)
+         |> assign(:video_upload_message, "Uploading directly to Mux…")
+         |> push_event("mux-upload-ready", %{url: upload.url})}
+
+      {:error, reason} ->
+        {:noreply,
+         socket
+         |> assign(:video_upload_state, :error)
+         |> assign(
+           :video_upload_message,
+           "Could not start upload: #{video_error_message(reason)}"
+         )}
+    end
+  end
+
+  def handle_event("upload-complete", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:video_upload_state, :processing)
+     |> assign(:video_upload_message, "Upload complete. Mux is preparing protected playback…")
+     |> push_event("mux-check-upload", %{})}
+  end
+
+  def handle_event("upload-failed", params, socket) do
+    {:noreply,
+     socket
+     |> assign(:video_upload_state, :error)
+     |> assign(:video_upload_message, upload_failure_message(params["status"]))}
+  end
+
+  def handle_event("remove-video", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:video_upload, nil)
+     |> assign(:video_upload_state, :idle)
+     |> assign(:video_upload_message, nil)
+     |> assign(:video_ready, nil)
+     |> assign(:video_thumbnail_url, nil)
+     |> assign(:video_local_preview_url, nil)
+     |> assign(:video_filename, nil)
+     |> assign(:video_size, nil)
+     |> push_event("mux-reset", %{})}
+  end
+
+  def handle_event("local-preview", %{"data_url" => data_url}, socket) do
+    {:noreply, assign(socket, :video_local_preview_url, data_url)}
+  end
+
+  def handle_event(
+        "check-upload",
+        _params,
+        %{assigns: %{video_upload: %{id: upload_id}}} = socket
+      ) do
+    case safe_media_call(fn -> Media.upload_status(socket.assigns.current_user, upload_id) end) do
+      {:ok, {:ready, playback_id, duration_seconds}} ->
+        {:noreply,
+         socket
+         |> assign(:video_ready, %{
+           video_provider: :mux,
+           video_asset_id: playback_id,
+           duration_seconds: duration_seconds
+         })
+         |> assign(:video_thumbnail_url, thumbnail_url(socket, playback_id))
+         |> assign(:video_upload_state, :ready)
+         |> assign(:video_upload_message, nil)}
+
+      {:ok, status} when status in [:waiting, :processing] ->
+        {:noreply,
+         socket
+         |> assign(:video_upload_state, :processing)
+         |> assign(:video_upload_message, "Mux is still processing the video…")
+         |> push_event("mux-check-upload", %{})}
+
+      {:error, reason} ->
+        {:noreply,
+         socket
+         |> assign(:video_upload_state, :error)
+         |> assign(
+           :video_upload_message,
+           "Mux could not process this upload: #{video_error_message(reason)}"
+         )}
+    end
+  end
+
+  def handle_event("check-upload", _params, socket), do: {:noreply, socket}
+
   def handle_event("save", %{"lecture" => lecture_params} = params, socket) do
     socket = consume_resource_uploads(socket)
-    lecture_params = put_uploaded_video(socket, lecture_params)
+    lecture_params = put_video_fields(socket, lecture_params)
     questions = question_params(params, socket.assigns.question_rows)
 
     case validate_resources(socket.assigns.resource_rows) do
@@ -529,16 +682,118 @@ defmodule WasomiWeb.LectureLive.FormComponent do
 
   defp sort_by_position(records), do: Enum.sort_by(records, & &1.position)
 
-  defp put_uploaded_video(socket, params) do
-    case consume_uploaded_entries(socket, :video, fn %{path: tmp_path}, entry ->
-           dir = Path.join(:code.priv_dir(:wasomi), "static/uploads/lectures")
-           File.mkdir_p!(dir)
-           filename = "#{entry.uuid}#{Path.extname(entry.client_name)}"
-           File.cp!(tmp_path, Path.join(dir, filename))
-           {:ok, "/uploads/lectures/#{filename}"}
-         end) do
-      [url | _] -> Map.merge(params, %{"video_asset_id" => url, "video_provider" => :mux})
-      [] -> params
+  defp thumbnail_url(socket, playback_id),
+    do: resolve_thumbnail_url(socket.assigns.current_user, playback_id)
+
+  defp resolve_thumbnail_url(current_user, playback_id) do
+    lecture = %Catalog.Lecture{video_provider: :mux, video_asset_id: playback_id}
+
+    case safe_media_call(fn -> Media.thumbnail_url(current_user, lecture) end) do
+      {:ok, url} -> url
+      {:error, _reason} -> nil
+    end
+  end
+
+  defp existing_video_ready(%Catalog.Lecture{
+         id: id,
+         video_provider: :mux,
+         video_asset_id: asset_id,
+         duration_seconds: duration
+       })
+       when not is_nil(id) and is_binary(asset_id) and asset_id != "" do
+    %{video_provider: :mux, video_asset_id: asset_id, duration_seconds: duration}
+  end
+
+  defp existing_video_ready(_lecture), do: nil
+
+  defp safe_media_call(fun) do
+    fun.()
+  rescue
+    error ->
+      Logger.error(
+        "Media call raised #{inspect(error.__struct__)}: #{Exception.message(error)}\n" <>
+          Exception.format_stacktrace(__STACKTRACE__)
+      )
+
+      {:error, {:exception, Exception.message(error)}}
+  end
+
+  defp video_error_message(:forbidden),
+    do: "you don't have permission to upload lecture videos."
+
+  defp video_error_message(:media_provider_not_configured),
+    do: "video uploads aren't configured on this server yet."
+
+  defp video_error_message({:exception, message}), do: message
+
+  defp video_error_message({:mux, %{"messages" => [_ | _] = messages}}),
+    do: "Mux rejected the request (#{Enum.join(messages, " ")})"
+
+  defp video_error_message({:mux, %{"type" => type}}), do: "Mux rejected the request (#{type})"
+
+  defp video_error_message({:mux, status, _body}) when is_integer(status),
+    do: "Mux returned an unexpected response (HTTP #{status})"
+
+  defp video_error_message({:mux_asset_errored, errors}) when is_list(errors) do
+    case errors |> Enum.flat_map(&Map.get(&1, "messages", [])) |> Enum.join(" ") do
+      "" -> "Mux could not process this video"
+      messages -> "Mux could not process this video (#{messages})"
+    end
+  end
+
+  defp video_error_message(:mux_asset_has_no_signed_playback_id),
+    do: "Mux processed the video but did not return a signed playback ID"
+
+  defp video_error_message({:mux_upload_errored, _error}),
+    do: "Mux reported that the upload failed — try selecting the file again"
+
+  defp video_error_message({:invalid_mux_signing_key, message}),
+    do:
+      "the Mux signing key isn't configured correctly (MUX_SIGNING_KEY_ID / MUX_SIGNING_PRIVATE_KEY): #{message}"
+
+  defp video_error_message(reason), do: inspect(reason)
+
+  defp upload_failure_message(status) when is_integer(status),
+    do: "The upload to Mux failed (HTTP #{status}). Remove it and try selecting the file again."
+
+  defp upload_failure_message(_status),
+    do:
+      "The upload to Mux failed because of a network error. Remove it and try selecting the file again."
+
+  defp normalize_filename(filename) when is_binary(filename) do
+    case String.trim(filename) do
+      "" -> nil
+      trimmed -> String.slice(trimmed, 0, 255)
+    end
+  end
+
+  defp normalize_filename(_filename), do: nil
+
+  defp normalize_size(size) when is_integer(size) and size >= 0, do: size
+  defp normalize_size(size) when is_float(size) and size >= 0, do: trunc(size)
+  defp normalize_size(_size), do: nil
+
+  defp format_file_size(size) when is_number(size) and size > 0 do
+    {value, unit} = scale_bytes(size / 1, ["B", "KB", "MB", "GB"])
+    precision = if unit == "B", do: 0, else: 1
+    :erlang.float_to_binary(value, decimals: precision) <> " " <> unit
+  end
+
+  defp format_file_size(_size), do: ""
+
+  defp scale_bytes(value, [unit]), do: {value, unit}
+  defp scale_bytes(value, [unit | _rest]) when value < 1024, do: {value, unit}
+  defp scale_bytes(value, [_unit | rest]), do: scale_bytes(value / 1024, rest)
+
+  defp put_video_fields(socket, params) do
+    params = Map.put(params, "video_provider", "mux")
+
+    case socket.assigns.video_ready do
+      %{video_asset_id: asset_id, duration_seconds: duration} ->
+        Map.merge(params, %{"video_asset_id" => asset_id, "duration_seconds" => duration})
+
+      nil ->
+        params
     end
   end
 
@@ -624,22 +879,11 @@ defmodule WasomiWeb.LectureLive.FormComponent do
   defp trim_param(value) when is_binary(value), do: String.trim(value)
   defp trim_param(_value), do: ""
 
-  defp save_disabled?(form, resources, questions, uploads) do
-    required = [
-      :title,
-      :description,
-      :video_provider,
-      :video_asset_id,
-      :duration_seconds,
-      :position
-    ]
+  defp save_disabled?(form, resources, questions, video_ready) do
+    required = [:title, :description, :position]
 
-    missing_video =
-      blank?(form[:video_asset_id].value) and
-        Map.get(uploads, :video, %{entries: []}).entries == []
-
-    Enum.any?(required -- [:video_asset_id], &blank?(form[&1].value)) or
-      missing_video or
+    Enum.any?(required, &blank?(form[&1].value)) or
+      is_nil(video_ready) or
       Enum.any?(resources, &(resource_status(&1) in [:uploading, :error])) or
       Enum.any?(resources, &(blank?(&1[:name]) or (&1[:kind] == :link and !valid_url?(&1[:url])))) or
       Enum.any?(questions, &(blank?(&1[:question]) or blank?(&1[:answer])))
@@ -712,10 +956,6 @@ defmodule WasomiWeb.LectureLive.FormComponent do
 
   defp upload_error(_),
     do: "R2 could not prepare that upload. Check the server log for the storage error."
-
-  defp upload_error_to_string(:too_large), do: "That video is larger than the 1 GB limit."
-  defp upload_error_to_string(:not_accepted), do: "Please choose an MP4, MOV or WebM file."
-  defp upload_error_to_string(_), do: "Could not accept that video."
 
   defp notify_parent(msg), do: send(self(), {__MODULE__, msg})
 end

@@ -63,3 +63,4 @@ The repo also contains generated CRUD LiveViews (`*_live/index.ex`, `form_compon
 1. Run `./scripts/check_linters.sh` and fix all failures.
 2. Include screenshots or recordings for UI changes (use `N/A` if none).
 3. Commit message format: `name/what-pr-does` (e.g. `michael/add-lab-order-filters`).
+4. Never add an AI co-author trailer (e.g. `Co-Authored-By: Claude ...`) to commit messages.

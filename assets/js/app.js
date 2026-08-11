@@ -428,29 +428,33 @@ Hooks.R2ResourceUpload = {
     request.send(file)
   }
 }
+function titleCaseFromFilename(filename) {
+  return filename
+    .replace(/\.[^/.]+$/, "")
+    .replace(/[-_]+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ")
+}
+
 Hooks.MuxUpload = {
   mounted() {
     this.fileInput = this.el.querySelector("[data-role='file']")
-    this.startButton = this.el.querySelector("[data-role='start']")
-    this.progress = this.el.querySelector("[data-role='progress']")
     // When the widget lives inside a LiveComponent (e.g. the lecture form
-    // modal) it sets data-target so events reach the component, not the view.
-    this.uploadTarget = this.el.getAttribute("data-target")
+    // modal) it sets phx-target so events reach the component, not the view.
+    this.uploadTarget = this.el.getAttribute("phx-target")
 
-    this.startButton.addEventListener("click", () => {
-      if (!this.fileInput.files[0]) {
-        this.fileInput.setCustomValidity("Choose a video file first.")
-        this.fileInput.reportValidity()
-        return
-      }
+    this.fileInput.addEventListener("change", () => {
+      if (this.fileInput.files[0]) this.selectFile(this.fileInput.files[0])
+    })
 
-      this.fileInput.setCustomValidity("")
-      this.startButton.disabled = true
-      this.pushUp("create-upload", {
-        filename: this.fileInput.files[0].name,
-        content_type: this.fileInput.files[0].type,
-        size: this.fileInput.files[0].size
-      })
+    this.el.addEventListener("dragover", event => event.preventDefault())
+    this.el.addEventListener("drop", event => {
+      event.preventDefault()
+      const file = event.dataTransfer.files && event.dataTransfer.files[0]
+      if (file) this.selectFile(file)
     })
 
     this.handleEvent("mux-upload-ready", ({url}) => this.upload(url))
@@ -458,11 +462,80 @@ Hooks.MuxUpload = {
       window.clearTimeout(this.statusTimer)
       this.statusTimer = window.setTimeout(() => this.pushUp("check-upload", {}), 3000)
     })
+    this.handleEvent("mux-reset", () => {
+      this.request?.abort()
+      window.clearTimeout(this.statusTimer)
+      this.selectedFile = null
+      if (this.fileInput) this.fileInput.value = ""
+    })
   },
 
   destroyed() {
     this.request?.abort()
     window.clearTimeout(this.statusTimer)
+  },
+
+  selectFile(file) {
+    this.selectedFile = file
+    this.fillTitle(file.name)
+    this.captureLocalPreview(file)
+
+    this.pushUp("create-upload", {
+      filename: file.name,
+      content_type: file.type,
+      size: file.size
+    })
+  },
+
+  // Mux can't generate a real thumbnail until the asset finishes processing
+  // server-side, but the browser already has the file — grab a frame from
+  // it locally so the picker feels instant while the real upload/processing
+  // continues in the background.
+  captureLocalPreview(file) {
+    const objectUrl = URL.createObjectURL(file)
+    const video = document.createElement("video")
+    video.muted = true
+    video.playsInline = true
+    video.preload = "metadata"
+    video.src = objectUrl
+
+    const cleanup = () => URL.revokeObjectURL(objectUrl)
+
+    video.addEventListener(
+      "loadeddata",
+      () => {
+        video.currentTime = Math.min(0.1, (video.duration || 1) / 2)
+      },
+      {once: true}
+    )
+
+    video.addEventListener(
+      "seeked",
+      () => {
+        const canvas = document.createElement("canvas")
+        canvas.width = 160
+        canvas.height = Math.round((video.videoHeight / video.videoWidth) * 160) || 90
+
+        const context = canvas.getContext("2d")
+        context.drawImage(video, 0, 0, canvas.width, canvas.height)
+        this.pushUp("local-preview", {data_url: canvas.toDataURL("image/jpeg", 0.7)})
+        cleanup()
+      },
+      {once: true}
+    )
+
+    video.addEventListener("error", cleanup, {once: true})
+  },
+
+  fillTitle(filename) {
+    const titleInput = this.el.closest("form")?.querySelector("[name='lecture[title]']")
+    if (!titleInput || titleInput.value.trim() !== "") return
+
+    const title = titleCaseFromFilename(filename)
+    if (!title) return
+
+    titleInput.value = title
+    titleInput.dispatchEvent(new Event("input", {bubbles: true}))
   },
 
   pushUp(event, payload) {
@@ -474,28 +547,32 @@ Hooks.MuxUpload = {
   },
 
   upload(url) {
-    const file = this.fileInput.files[0]
+    const file = this.selectedFile
+    if (!file) return
+    // The progress bar only exists once the server has rendered past the
+    // idle state, which has already happened by the time this fires.
+    const progress = this.el.querySelector("[data-role='progress']")
     const request = new XMLHttpRequest()
     this.request = request
 
     request.upload.addEventListener("progress", event => {
-      if (!event.lengthComputable) return
-      this.progress.style.width = `${Math.round((event.loaded / event.total) * 100)}%`
+      if (!event.lengthComputable || !progress) return
+      progress.style.width = `${Math.round((event.loaded / event.total) * 100)}%`
     })
 
     request.addEventListener("load", () => {
       if (request.status >= 200 && request.status < 300) {
-        this.progress.style.width = "100%"
+        if (progress) progress.style.width = "100%"
         this.pushUp("upload-complete", {})
       } else {
-        this.startButton.disabled = false
         console.error(`Mux upload failed (${request.status})`)
+        this.pushUp("upload-failed", {status: request.status})
       }
     })
 
     request.addEventListener("error", () => {
-      this.startButton.disabled = false
       console.error("Mux upload failed because of a network error")
+      this.pushUp("upload-failed", {})
     })
 
     request.open("PUT", url)

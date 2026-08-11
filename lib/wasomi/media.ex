@@ -20,6 +20,7 @@ defmodule Wasomi.Media do
   @callback upload_status(String.t()) :: {:ok, upload_status()} | {:error, term()}
   @callback playback_token(Lecture.t(), User.t(), pos_integer()) ::
               {:ok, String.t()} | {:error, term()}
+  @callback thumbnail_url(Lecture.t(), User.t()) :: {:ok, String.t()} | {:error, term()}
 
   def playback_token(user, lecture, ttl \\ 300, adapter \\ configured_adapter()) do
     with {:ok, lecture} <- Enrollments.authorize_lecture(user, lecture) do
@@ -78,6 +79,13 @@ defmodule Wasomi.Media do
 
   def upload_status(_user, _upload_id, _adapter), do: {:error, :forbidden}
 
+  def thumbnail_url(user, lecture, adapter \\ configured_adapter())
+
+  def thumbnail_url(%User{role: :admin} = user, %Lecture{} = lecture, adapter),
+    do: adapter.thumbnail_url(lecture, user)
+
+  def thumbnail_url(_user, _lecture, _adapter), do: {:error, :forbidden}
+
   def effective_ttl(%Lecture{duration_seconds: duration}, requested_ttl)
       when is_integer(duration) and duration > 0 do
     max(requested_ttl, duration + 60)
@@ -98,7 +106,11 @@ defmodule Wasomi.Media do
 
   defp protected_stream_url(%Lecture{video_provider: :mux, video_asset_id: playback_id}, token)
        when is_binary(playback_id) and playback_id != "" do
-    {:ok, "https://stream.mux.com/#{URI.encode(playback_id)}.m3u8?token=#{URI.encode(token)}"}
+    # playback_id is a path segment (URI.encode/1's default is exactly the
+    # right predicate for that); token is a query *value*, so it gets the
+    # form-encoding helper meant for that job instead.
+    {:ok,
+     "https://stream.mux.com/#{URI.encode(playback_id)}.m3u8?token=#{URI.encode_www_form(token)}"}
   end
 
   defp protected_stream_url(%Lecture{video_provider: provider}, _token),

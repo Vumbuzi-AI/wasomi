@@ -41,6 +41,14 @@ defmodule WasomiWeb.CoreComponents do
   attr :id, :string, required: true
   attr :show, :boolean, default: false
   attr :on_cancel, JS, default: %JS{}
+
+  attr :dismissable, :boolean,
+    default: true,
+    doc:
+      "when false, only the explicit close button dismisses the modal; " <>
+        "click-away and Escape are disabled so in-progress form content " <>
+        "can't be lost to a stray click or keypress"
+
   slot :inner_block, required: true
 
   def modal(assigns) do
@@ -65,9 +73,9 @@ defmodule WasomiWeb.CoreComponents do
           <div class="w-full max-w-3xl p-4 sm:p-6 lg:py-8">
             <.focus_wrap
               id={"#{@id}-container"}
-              phx-window-keydown={JS.exec("data-cancel", to: "##{@id}")}
-              phx-key="escape"
-              phx-click-away={JS.exec("data-cancel", to: "##{@id}")}
+              phx-window-keydown={if @dismissable, do: JS.exec("data-cancel", to: "##{@id}")}
+              phx-key={if @dismissable, do: "escape"}
+              phx-click-away={if @dismissable, do: JS.exec("data-cancel", to: "##{@id}")}
               class="shadow-zinc-700/10 ring-zinc-700/10 relative hidden rounded-2xl bg-white p-14 shadow-lg ring-1 transition"
             >
               <div class="absolute top-6 right-5">

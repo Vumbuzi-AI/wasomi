@@ -1,10 +1,72 @@
 defmodule Wasomi.MediaTest do
   use Wasomi.DataCase
 
+  import Mox
   import Wasomi.AccountsFixtures
   import Wasomi.CatalogFixtures
 
+  alias Wasomi.Media
   alias Wasomi.Media.Mux
+
+  setup :verify_on_exit!
+
+  describe "create_upload/4, upload_status/3, thumbnail_url/3 admin gating and forwarding" do
+    test "create_upload/4 forwards (lecture, opts) to the adapter for an admin, unchanged" do
+      lecture = lecture_fixture()
+      admin = admin_fixture()
+
+      expect(Wasomi.MediaProviderMock, :create_upload, fn ^lecture, [foo: :bar] ->
+        {:ok, %{id: "upload-1", url: "https://storage.mux.test/direct-upload"}}
+      end)
+
+      assert {:ok, %{id: "upload-1"}} =
+               Media.create_upload(admin, lecture, [foo: :bar], Wasomi.MediaProviderMock)
+    end
+
+    test "create_upload/4 never calls the adapter for a non-admin" do
+      lecture = lecture_fixture()
+      learner = user_fixture()
+
+      assert {:error, :forbidden} =
+               Media.create_upload(learner, lecture, [], Wasomi.MediaProviderMock)
+    end
+
+    test "upload_status/3 forwards the upload id to the adapter for an admin" do
+      admin = admin_fixture()
+
+      expect(Wasomi.MediaProviderMock, :upload_status, fn "upload-1" -> {:ok, :processing} end)
+
+      assert {:ok, :processing} =
+               Media.upload_status(admin, "upload-1", Wasomi.MediaProviderMock)
+    end
+
+    test "upload_status/3 never calls the adapter for a non-admin" do
+      learner = user_fixture()
+
+      assert {:error, :forbidden} =
+               Media.upload_status(learner, "upload-1", Wasomi.MediaProviderMock)
+    end
+
+    test "thumbnail_url/3 forwards (lecture, user) to the adapter for an admin" do
+      lecture = lecture_fixture()
+      admin = admin_fixture()
+
+      expect(Wasomi.MediaProviderMock, :thumbnail_url, fn ^lecture, ^admin ->
+        {:ok, "https://image.mux.test/thumbnail.jpg"}
+      end)
+
+      assert {:ok, "https://image.mux.test/thumbnail.jpg"} =
+               Media.thumbnail_url(admin, lecture, Wasomi.MediaProviderMock)
+    end
+
+    test "thumbnail_url/3 never calls the adapter for a non-admin" do
+      lecture = lecture_fixture()
+      learner = user_fixture()
+
+      assert {:error, :forbidden} =
+               Media.thumbnail_url(learner, lecture, Wasomi.MediaProviderMock)
+    end
+  end
 
   setup do
     private_key = :public_key.generate_key({:rsa, 1024, 65_537})
@@ -64,6 +126,31 @@ defmodule Wasomi.MediaTest do
            )
   end
 
+  test "thumbnail_url/2 builds a URL where the playback id and signed token round-trip intact" do
+    lecture =
+      lecture_fixture(video_provider: :mux, video_asset_id: "av1Ab2_XyZ-9", duration_seconds: 120)
+
+    user = user_fixture()
+
+    assert {:ok, url} = Mux.thumbnail_url(lecture, user)
+    assert String.starts_with?(url, "https://image.mux.com/av1Ab2_XyZ-9/thumbnail.jpg?token=")
+
+    token = url |> String.split("token=") |> List.last()
+    assert [_header, _claims, _signature] = String.split(token, ".")
+
+    # playback_id is a path segment (URI.encode/1), token is a query value
+    # (URI.encode_www_form/1) — assert each survives its actual encoder
+    # unmangled for a real generated JWT, rather than assuming it.
+    assert URI.encode_www_form(token) == token
+    refute token =~ "%"
+  end
+
   defp restore_env(key, nil), do: Application.delete_env(:wasomi, key)
   defp restore_env(key, value), do: Application.put_env(:wasomi, key, value)
+
+  defp admin_fixture do
+    user = user_fixture()
+    {:ok, admin} = Wasomi.Accounts.update_user_role(user, :admin)
+    admin
+  end
 end

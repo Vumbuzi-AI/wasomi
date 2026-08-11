@@ -632,7 +632,13 @@ defmodule WasomiWeb.AdminLive.CourseShow do
       </.modal>
 
       <%!-- Module modal --%>
-      <.modal :if={@modal == :module} id="module-modal" show on_cancel={JS.push("close_modal")}>
+      <.modal
+        :if={@modal == :module}
+        id="module-modal"
+        show
+        dismissable={false}
+        on_cancel={JS.push("close_modal")}
+      >
         <.live_component
           module={CourseModuleLive.FormComponent}
           id={@course_module.id || :new_module}
@@ -644,7 +650,13 @@ defmodule WasomiWeb.AdminLive.CourseShow do
       </.modal>
 
       <%!-- Lecture modal --%>
-      <.modal :if={@modal == :lecture} id="lecture-modal" show on_cancel={JS.push("close_modal")}>
+      <.modal
+        :if={@modal == :lecture}
+        id="lecture-modal"
+        show
+        dismissable={false}
+        on_cancel={JS.push("close_modal")}
+      >
         <.live_component
           module={LectureLive.FormComponent}
           id={@lecture.id || :new_lecture}

@@ -384,7 +384,7 @@ defmodule WasomiWeb.AdminLiveTest do
       render_hook(upload, "create-upload", %{})
       render_hook(upload, "upload-complete", %{})
       html = render_hook(upload, "check-upload", %{})
-      assert html =~ "Video is ready for protected playback."
+      assert html =~ "https://image.mux.test/signed-playback-456/thumbnail.jpg?token=abc"
 
       refute has_element?(view, "#lecture-form input[name='lecture[position]']")
 

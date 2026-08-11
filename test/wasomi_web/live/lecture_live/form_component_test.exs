@@ -45,7 +45,6 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
     render_hook(upload, "upload-complete", %{})
     html = render_hook(upload, "check-upload", %{})
 
-    assert html =~ "Video is ready for protected playback."
     assert html =~ "https://image.mux.test/signed-playback-456/thumbnail.jpg?token=abc"
 
     html =
@@ -71,6 +70,39 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
     assert lecture.duration_seconds == 612
   end
 
+  test "shows the client-captured local preview immediately, then the real Mux thumbnail once ready",
+       %{conn: conn} do
+    course = course_fixture()
+    course_module = course_module_fixture(course_id: course.id)
+
+    expect(Wasomi.MediaProviderMock, :create_upload, fn %Catalog.Lecture{}, [] ->
+      {:ok, %{id: "upload-123", url: "https://storage.mux.test/direct-upload"}}
+    end)
+
+    expect(Wasomi.MediaProviderMock, :upload_status, fn "upload-123" ->
+      {:ok, {:ready, "signed-playback-456", 612}}
+    end)
+
+    expect(Wasomi.MediaProviderMock, :thumbnail_url, fn %Catalog.Lecture{}, _user ->
+      {:ok, "https://image.mux.test/signed-playback-456/thumbnail.jpg?token=abc"}
+    end)
+
+    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.id}")
+    render_click(view, "new_lecture", %{"module-id" => to_string(course_module.id)})
+
+    upload = element(view, "#lecture-video-upload")
+    render_hook(upload, "create-upload", %{})
+    html = render_hook(upload, "local-preview", %{"data_url" => "data:image/jpeg;base64,abc123"})
+
+    assert html =~ "data:image/jpeg;base64,abc123"
+
+    render_hook(upload, "upload-complete", %{})
+    html = render_hook(upload, "check-upload", %{})
+
+    assert html =~ "https://image.mux.test/signed-playback-456/thumbnail.jpg?token=abc"
+    refute html =~ "data:image/jpeg;base64,abc123"
+  end
+
   test "surfaces an error and leaves the lecture unsaved when Mux cannot start the upload", %{
     conn: conn
   } do
@@ -87,6 +119,13 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
     {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.id}")
 
     render_click(view, "edit_lecture", %{"id" => to_string(lecture.id)})
+
+    # The dropzone is hidden while an existing Mux ID is present (only one
+    # video source is shown at a time); clear it to reveal the dropzone,
+    # mirroring an admin who wants to replace the current video.
+    view
+    |> form("#lecture-form", %{"lecture" => %{"video_asset_id" => ""}})
+    |> render_change()
 
     upload = element(view, "#lecture-video-upload")
     html = render_hook(upload, "create-upload", %{})

@@ -428,18 +428,6 @@ Hooks.R2ResourceUpload = {
     request.send(file)
   }
 }
-function formatFileSize(bytes) {
-  if (!Number.isFinite(bytes)) return ""
-  const units = ["B", "KB", "MB", "GB"]
-  let value = bytes
-  let unitIndex = 0
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024
-    unitIndex += 1
-  }
-  return `${value.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`
-}
-
 function titleCaseFromFilename(filename) {
   return filename
     .replace(/\.[^/.]+$/, "")
@@ -454,11 +442,6 @@ function titleCaseFromFilename(filename) {
 Hooks.MuxUpload = {
   mounted() {
     this.fileInput = this.el.querySelector("[data-role='file']")
-    this.idlePanel = this.el.querySelector("[data-role='idle']")
-    this.selectedPanel = this.el.querySelector("[data-role='selected']")
-    this.filenameLabel = this.el.querySelector("[data-role='filename']")
-    this.filesizeLabel = this.el.querySelector("[data-role='filesize']")
-    this.progress = this.el.querySelector("[data-role='progress']")
     // When the widget lives inside a LiveComponent (e.g. the lecture form
     // modal) it sets phx-target so events reach the component, not the view.
     this.uploadTarget = this.el.getAttribute("phx-target")
@@ -479,6 +462,12 @@ Hooks.MuxUpload = {
       window.clearTimeout(this.statusTimer)
       this.statusTimer = window.setTimeout(() => this.pushUp("check-upload", {}), 3000)
     })
+    this.handleEvent("mux-reset", () => {
+      this.request?.abort()
+      window.clearTimeout(this.statusTimer)
+      this.selectedFile = null
+      if (this.fileInput) this.fileInput.value = ""
+    })
   },
 
   destroyed() {
@@ -488,18 +477,54 @@ Hooks.MuxUpload = {
 
   selectFile(file) {
     this.selectedFile = file
-    this.filenameLabel.textContent = file.name
-    this.filesizeLabel.textContent = formatFileSize(file.size)
-    this.idlePanel.classList.add("hidden")
-    this.selectedPanel.classList.remove("hidden")
-    this.progress.style.width = "0%"
     this.fillTitle(file.name)
+    this.captureLocalPreview(file)
 
     this.pushUp("create-upload", {
       filename: file.name,
       content_type: file.type,
       size: file.size
     })
+  },
+
+  // Mux can't generate a real thumbnail until the asset finishes processing
+  // server-side, but the browser already has the file — grab a frame from
+  // it locally so the picker feels instant while the real upload/processing
+  // continues in the background.
+  captureLocalPreview(file) {
+    const objectUrl = URL.createObjectURL(file)
+    const video = document.createElement("video")
+    video.muted = true
+    video.playsInline = true
+    video.preload = "metadata"
+    video.src = objectUrl
+
+    const cleanup = () => URL.revokeObjectURL(objectUrl)
+
+    video.addEventListener(
+      "loadeddata",
+      () => {
+        video.currentTime = Math.min(0.1, (video.duration || 1) / 2)
+      },
+      {once: true}
+    )
+
+    video.addEventListener(
+      "seeked",
+      () => {
+        const canvas = document.createElement("canvas")
+        canvas.width = 160
+        canvas.height = Math.round((video.videoHeight / video.videoWidth) * 160) || 90
+
+        const context = canvas.getContext("2d")
+        context.drawImage(video, 0, 0, canvas.width, canvas.height)
+        this.pushUp("local-preview", {data_url: canvas.toDataURL("image/jpeg", 0.7)})
+        cleanup()
+      },
+      {once: true}
+    )
+
+    video.addEventListener("error", cleanup, {once: true})
   },
 
   fillTitle(filename) {
@@ -524,17 +549,20 @@ Hooks.MuxUpload = {
   upload(url) {
     const file = this.selectedFile
     if (!file) return
+    // The progress bar only exists once the server has rendered past the
+    // idle state, which has already happened by the time this fires.
+    const progress = this.el.querySelector("[data-role='progress']")
     const request = new XMLHttpRequest()
     this.request = request
 
     request.upload.addEventListener("progress", event => {
-      if (!event.lengthComputable) return
-      this.progress.style.width = `${Math.round((event.loaded / event.total) * 100)}%`
+      if (!event.lengthComputable || !progress) return
+      progress.style.width = `${Math.round((event.loaded / event.total) * 100)}%`
     })
 
     request.addEventListener("load", () => {
       if (request.status >= 200 && request.status < 300) {
-        this.progress.style.width = "100%"
+        if (progress) progress.style.width = "100%"
         this.pushUp("upload-complete", {})
       } else {
         console.error(`Mux upload failed (${request.status})`)

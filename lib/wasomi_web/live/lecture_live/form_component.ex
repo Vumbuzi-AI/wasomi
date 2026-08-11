@@ -38,41 +38,69 @@ defmodule WasomiWeb.LectureLive.FormComponent do
           </div>
 
           <div
+            :if={show_video_dropzone?(@form, @video_upload_state)}
             id="lecture-video-upload"
             phx-hook="MuxUpload"
             phx-target={@myself}
-            class="relative rounded-2xl border-2 border-dashed border-black/10 bg-white p-6 text-center transition hover:border-primary"
+            class="group relative rounded-2xl border-2 border-dashed border-black/10 bg-white p-6 text-center transition-colors hover:border-primary"
           >
             <input
               id="lecture-video-file"
               data-role="file"
               type="file"
               accept="video/*"
-              class="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+              class={[
+                "absolute inset-0 h-full w-full cursor-pointer opacity-0",
+                @video_upload_state != :idle && "pointer-events-none"
+              ]}
             />
 
-            <div data-role="idle" class="space-y-2">
+            <div :if={@video_upload_state == :idle} class="space-y-2">
               <.icon name="hero-arrow-up-tray" class="mx-auto h-6 w-6 text-muted" />
               <p class="text-sm font-medium text-dark">Drop a video here, or click to choose one</p>
               <p class="text-xs text-muted">MP4, MOV or WebM</p>
             </div>
 
-            <div data-role="selected" class="hidden space-y-3">
+            <div :if={@video_upload_state != :idle} class="space-y-3">
+              <button
+                type="button"
+                phx-click="remove-video"
+                phx-target={@myself}
+                aria-label="Remove selected video"
+                class="pointer-events-auto absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full bg-dark text-white opacity-0 transition-[opacity,transform] duration-150 ease-out hover:bg-rose-600 group-hover:opacity-100 active:scale-[0.96]"
+              >
+                <.icon name="hero-x-mark" class="h-4 w-4" />
+              </button>
+
               <div class="flex items-center justify-center gap-3">
-                <img
-                  :if={@video_thumbnail_url}
-                  data-role="thumbnail"
-                  src={@video_thumbnail_url}
-                  class="h-16 w-28 rounded-lg bg-black object-cover"
-                />
+                <div class="relative h-16 w-28 shrink-0 overflow-hidden rounded-lg bg-black">
+                  <img
+                    :if={@video_thumbnail_url || @video_local_preview_url}
+                    data-role="thumbnail"
+                    src={@video_thumbnail_url || @video_local_preview_url}
+                    class="animate-fade-in h-full w-full object-cover outline outline-1 -outline-offset-1 outline-black/10"
+                  />
+                  <div
+                    :if={
+                      is_nil(@video_thumbnail_url) and is_nil(@video_local_preview_url) and
+                        @video_upload_state in [:uploading, :processing]
+                    }
+                    class="absolute inset-0 flex animate-pulse items-center justify-center bg-white/10"
+                  >
+                    <.icon name="hero-arrow-path" class="h-5 w-5 animate-spin text-muted" />
+                  </div>
+                </div>
                 <div class="text-left">
-                  <p data-role="filename" class="text-sm font-medium text-dark"></p>
-                  <p data-role="filesize" class="text-xs text-muted"></p>
+                  <p class="text-sm font-medium text-dark">{@video_filename}</p>
+                  <p class="text-xs text-muted">{format_file_size(@video_size)}</p>
                 </div>
               </div>
 
               <div class="h-2 overflow-hidden rounded-full bg-soft">
-                <div data-role="progress" class="h-full w-0 rounded-full bg-primary transition-all">
+                <div
+                  data-role="progress"
+                  class="h-full w-0 rounded-full bg-primary transition-[width] duration-150 ease-out"
+                >
                 </div>
               </div>
             </div>
@@ -90,9 +118,15 @@ defmodule WasomiWeb.LectureLive.FormComponent do
             {@video_upload_message}
           </p>
 
-          <details class="rounded-xl border border-black/5 bg-white p-3 text-sm">
+          <details
+            :if={show_advanced_video_fallback?(@video_upload_state)}
+            open={video_asset_id_present?(@form)}
+            class="rounded-xl border border-black/5 bg-white p-3 text-sm"
+          >
             <summary class="cursor-pointer font-medium text-dark">
-              Advanced: use an existing Mux playback ID
+              {if video_asset_id_present?(@form),
+                do: "Current video (Mux playback ID)",
+                else: "Advanced: use an existing Mux playback ID"}
             </summary>
             <div class="mt-3 grid gap-4 sm:grid-cols-2">
               <.input field={@form[:video_asset_id]} type="text" label="Video playback ID" />
@@ -337,6 +371,9 @@ defmodule WasomiWeb.LectureLive.FormComponent do
       |> assign_new(:video_upload_message, fn -> nil end)
       |> assign_new(:video_ready, fn -> nil end)
       |> assign_new(:video_thumbnail_url, fn -> nil end)
+      |> assign_new(:video_local_preview_url, fn -> nil end)
+      |> assign_new(:video_filename, fn -> nil end)
+      |> assign_new(:video_size, fn -> nil end)
 
     socket =
       if Map.has_key?(socket.assigns, :uploads) and
@@ -482,7 +519,12 @@ defmodule WasomiWeb.LectureLive.FormComponent do
     {:noreply, assign(socket, question_rows: remove_at(socket.assigns.question_rows, index))}
   end
 
-  def handle_event("create-upload", _params, socket) do
+  def handle_event("create-upload", params, socket) do
+    socket =
+      socket
+      |> assign(:video_filename, params["filename"])
+      |> assign(:video_size, params["size"])
+
     case safe_media_call(fn ->
            Media.create_upload(socket.assigns.current_user, socket.assigns.lecture, [])
          end) do
@@ -513,6 +555,24 @@ defmodule WasomiWeb.LectureLive.FormComponent do
      |> push_event("mux-check-upload", %{})}
   end
 
+  def handle_event("remove-video", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:video_upload, nil)
+     |> assign(:video_upload_state, :idle)
+     |> assign(:video_upload_message, nil)
+     |> assign(:video_ready, nil)
+     |> assign(:video_thumbnail_url, nil)
+     |> assign(:video_local_preview_url, nil)
+     |> assign(:video_filename, nil)
+     |> assign(:video_size, nil)
+     |> push_event("mux-reset", %{})}
+  end
+
+  def handle_event("local-preview", %{"data_url" => data_url}, socket) do
+    {:noreply, assign(socket, :video_local_preview_url, data_url)}
+  end
+
   def handle_event(
         "check-upload",
         _params,
@@ -529,7 +589,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
          })
          |> assign(:video_thumbnail_url, thumbnail_url(socket, playback_id))
          |> assign(:video_upload_state, :ready)
-         |> assign(:video_upload_message, "Video is ready for protected playback.")}
+         |> assign(:video_upload_message, nil)}
 
       {:ok, status} when status in [:waiting, :processing] ->
         {:noreply,
@@ -671,6 +731,18 @@ defmodule WasomiWeb.LectureLive.FormComponent do
 
   defp video_error_message(reason), do: inspect(reason)
 
+  defp format_file_size(size) when is_number(size) and size > 0 do
+    {value, unit} = scale_bytes(size / 1, ["B", "KB", "MB", "GB"])
+    precision = if unit == "B", do: 0, else: 1
+    :erlang.float_to_binary(value, decimals: precision) <> " " <> unit
+  end
+
+  defp format_file_size(_size), do: ""
+
+  defp scale_bytes(value, [unit]), do: {value, unit}
+  defp scale_bytes(value, [unit | _rest]) when value < 1024, do: {value, unit}
+  defp scale_bytes(value, [_unit | rest]), do: scale_bytes(value / 1024, rest)
+
   defp put_video_fields(socket, params) do
     params = Map.put(params, "video_provider", "mux")
 
@@ -780,6 +852,13 @@ defmodule WasomiWeb.LectureLive.FormComponent do
   end
 
   defp blank?(value), do: is_nil(value) or value == ""
+
+  defp video_asset_id_present?(form), do: not blank?(form[:video_asset_id].value)
+
+  defp show_video_dropzone?(form, video_upload_state),
+    do: video_upload_state != :idle or not video_asset_id_present?(form)
+
+  defp show_advanced_video_fallback?(video_upload_state), do: video_upload_state == :idle
 
   defp valid_url?(url) when is_binary(url) do
     case URI.parse(url) do

@@ -126,6 +126,26 @@ defmodule Wasomi.MediaTest do
            )
   end
 
+  test "thumbnail_url/2 builds a URL where the signed token survives URI encoding intact" do
+    lecture =
+      lecture_fixture(video_provider: :mux, video_asset_id: "av1Ab2_XyZ-9", duration_seconds: 120)
+
+    user = user_fixture()
+
+    assert {:ok, url} = Mux.thumbnail_url(lecture, user)
+    assert String.starts_with?(url, "https://image.mux.com/av1Ab2_XyZ-9/thumbnail.jpg?token=")
+
+    token = url |> String.split("token=") |> List.last()
+    assert [_header, _claims, _signature] = String.split(token, ".")
+
+    # A base64url JWT (produced via Base.url_encode64(padding: false)) is
+    # entirely RFC 3986 "unreserved", so URI.encode/1 must be a no-op for
+    # it — this is the same encoding call already used, unmodified, by
+    # the production .m3u8 stream URL in Media.protected_stream_url/2.
+    assert URI.encode(token) == token
+    refute token =~ "%"
+  end
+
   defp restore_env(key, nil), do: Application.delete_env(:wasomi, key)
   defp restore_env(key, value), do: Application.put_env(:wasomi, key, value)
 

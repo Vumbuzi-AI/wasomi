@@ -368,12 +368,16 @@ defmodule WasomiWeb.AdminLiveTest do
       html = render_click(view, "new_module", %{})
       assert html =~ ~s(id="module-modal")
       refute html =~ "phx-click-away"
+      refute html =~ "phx-window-keydown"
+      refute html =~ ~s(phx-key="escape")
 
       render_click(view, "close_modal", %{})
 
       html = render_click(view, "new_lecture", %{"module-id" => to_string(module.id)})
       assert html =~ ~s(id="lecture-modal")
       refute html =~ "phx-click-away"
+      refute html =~ "phx-window-keydown"
+      refute html =~ ~s(phx-key="escape")
     end
 
     test "uploads a lecture video via Mux and deletes the lecture", %{conn: conn} do

@@ -578,7 +578,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                 </div>
               <% else %>
                 <%= if @current_lecture do %>
-                  <div class="p-3">
+                  <div class="flex justify-center p-3">
                     <div
                       id={"protected-player-#{@current_lecture.id}"}
                       phx-hook="ProtectedVideo"
@@ -588,7 +588,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                       data-viewer-id={@current_user.id}
                       data-lecture-id={@current_lecture.id}
                       data-start-position={progress_position(@progress, @current_lecture.id)}
-                      class="relative aspect-video overflow-hidden rounded-2xl bg-black"
+                      class="relative aspect-video w-full overflow-hidden rounded-2xl bg-black"
                       oncontextmenu="return false"
                     >
                       <div

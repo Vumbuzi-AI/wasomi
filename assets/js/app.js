@@ -175,6 +175,9 @@ Hooks.ProtectedVideo = {
     this.abortController = new AbortController()
 
     this.el.addEventListener("contextmenu", event => event.preventDefault())
+    // Resize is applied once real metadata loads (see applyAspectRatio); transition
+    // keeps that resize from feeling like a jump once the 16:9 placeholder is replaced.
+    this.el.style.transition = "aspect-ratio 300ms ease-out, width 300ms ease-out, height 300ms ease-out"
     this.loadPlayer()
     this.moveWatermark()
     this.watermarkTimer = window.setInterval(() => this.moveWatermark(), 8000)
@@ -223,6 +226,8 @@ Hooks.ProtectedVideo = {
         if (startPosition > 0 && startPosition < player.duration) {
           player.currentTime = startPosition
         }
+
+        this.applyAspectRatio(player.videoWidth, player.videoHeight)
       })
 
       player.addEventListener("timeupdate", () => {
@@ -256,6 +261,27 @@ Hooks.ProtectedVideo = {
       if (error.name === "AbortError") return
       this.playerHost.textContent = "This protected video is temporarily unavailable."
       console.error(error)
+    }
+  },
+
+  // Sizes the container to the video's real aspect ratio instead of the
+  // hardcoded 16:9 placeholder. Landscape/square sources keep filling the
+  // full width (unchanged look for standard 16:9 lectures); portrait sources
+  // are capped by height instead, so a tall video doesn't blow out the page,
+  // and their width is derived from that height via the same ratio.
+  applyAspectRatio(width, height) {
+    if (!width || !height) return
+
+    this.el.style.aspectRatio = `${width} / ${height}`
+
+    if (width < height) {
+      this.el.style.width = "auto"
+      this.el.style.maxWidth = "100%"
+      this.el.style.height = "min(75vh, 640px)"
+    } else {
+      this.el.style.width = "100%"
+      this.el.style.maxWidth = ""
+      this.el.style.height = "auto"
     }
   },
 

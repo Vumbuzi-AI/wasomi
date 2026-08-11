@@ -1,6 +1,8 @@
 defmodule WasomiWeb.LectureLive.FormComponent do
   use WasomiWeb, :live_component
 
+  require Logger
+
   alias Wasomi.{Catalog, Media, Storage}
   alias WasomiWeb.AdminLive.Components.ResourceUploader
 
@@ -700,7 +702,13 @@ defmodule WasomiWeb.LectureLive.FormComponent do
   defp safe_media_call(fun) do
     fun.()
   rescue
-    error -> {:error, {:exception, Exception.message(error)}}
+    error ->
+      Logger.error(
+        "Media call raised #{inspect(error.__struct__)}: #{Exception.message(error)}\n" <>
+          Exception.format_stacktrace(__STACKTRACE__)
+      )
+
+      {:error, {:exception, Exception.message(error)}}
   end
 
   defp video_error_message(:forbidden),

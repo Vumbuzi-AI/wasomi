@@ -1,6 +1,7 @@
 defmodule WasomiWeb.LectureLive.FormComponentTest do
   use WasomiWeb.ConnCase
 
+  import ExUnit.CaptureLog
   import Mox
   import Phoenix.LiveViewTest
   import Wasomi.CatalogFixtures
@@ -142,6 +143,26 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
     html = render_hook(upload, "upload-failed", %{"status" => 500})
 
     assert html =~ "The upload to Mux failed (HTTP 500)"
+  end
+
+  test "logs and surfaces a friendly message when the Mux adapter call raises", %{conn: conn} do
+    course = course_fixture()
+    course_module = course_module_fixture(course_id: course.id)
+
+    expect(Wasomi.MediaProviderMock, :create_upload, fn %Catalog.Lecture{}, [] ->
+      raise "MUX_TOKEN_ID is not configured"
+    end)
+
+    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.id}")
+    render_click(view, "new_lecture", %{"module-id" => to_string(course_module.id)})
+
+    upload = element(view, "#lecture-video-upload")
+
+    {html, log} = with_log(fn -> render_hook(upload, "create-upload", %{}) end)
+
+    assert html =~ "Could not start upload: MUX_TOKEN_ID is not configured"
+    assert log =~ "Media call raised"
+    assert log =~ "MUX_TOKEN_ID is not configured"
   end
 
   test "the confirmed Mux upload always wins over stray video_asset_id/duration_seconds params",

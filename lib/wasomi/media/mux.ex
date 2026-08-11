@@ -80,6 +80,11 @@ defmodule Wasomi.Media.Mux do
     }
 
     with {:ok, token} <- sign_jwt(claims) do
+      # Mirrors the same URI.encode/1 used for the .m3u8 stream URL in
+      # Media.protected_stream_url/2. Both playback_id and this base64url
+      # JWT (Base.url_encode64(padding: false), dot-separated) are already
+      # entirely RFC 3986 "unreserved", so encoding is a verified no-op —
+      # see the round-trip assertion in test/wasomi/media_test.exs.
       {:ok,
        "https://image.mux.com/#{URI.encode(playback_id)}/thumbnail.jpg?token=#{URI.encode(token)}"}
     end

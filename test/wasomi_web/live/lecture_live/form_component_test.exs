@@ -211,6 +211,36 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
     assert lecture.duration_seconds == 612
   end
 
+  test "editing a lecture with an existing video shows its thumbnail, never a raw Mux ID, and lets you remove it",
+       %{conn: conn} do
+    lecture =
+      lecture_fixture(video_asset_id: "existing-playback-id", duration_seconds: 300)
+
+    expect(Wasomi.MediaProviderMock, :thumbnail_url, fn %Catalog.Lecture{
+                                                          video_asset_id: "existing-playback-id"
+                                                        },
+                                                        _user ->
+      {:ok, "https://image.mux.test/existing-playback-id/thumbnail.jpg?token=abc"}
+    end)
+
+    course_module = Catalog.get_course_module!(lecture.module_id)
+    course = Catalog.get_course_with_outline!(course_module.course_id)
+
+    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
+
+    html = render_click(view, "edit_lecture", %{"id" => to_string(lecture.id)})
+
+    assert html =~ "https://image.mux.test/existing-playback-id/thumbnail.jpg?token=abc"
+    assert html =~ "Current video"
+    refute html =~ ~s(name="lecture[video_asset_id]")
+    refute html =~ ~s(name="lecture[duration_seconds]")
+
+    html = render_click(element(view, "[aria-label='Remove selected video']"))
+
+    refute html =~ "https://image.mux.test/existing-playback-id/thumbnail.jpg?token=abc"
+    assert html =~ "Drop a video here, or click to choose one"
+  end
+
   test "surfaces an error and leaves the lecture unsaved when Mux cannot start the upload", %{
     conn: conn
   } do
@@ -221,6 +251,13 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
       {:error, :mux_unreachable}
     end)
 
+    expect(Wasomi.MediaProviderMock, :thumbnail_url, fn %Catalog.Lecture{
+                                                          video_asset_id: "old-playback-id"
+                                                        },
+                                                        _user ->
+      {:ok, "https://image.mux.test/old-playback-id/thumbnail.jpg?token=abc"}
+    end)
+
     course_module = Catalog.get_course_module!(lecture.module_id)
     course = Catalog.get_course_with_outline!(course_module.course_id)
 
@@ -228,13 +265,8 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
 
     render_click(view, "edit_lecture", %{"id" => to_string(lecture.id)})
 
-    # The dropzone is hidden while an existing Mux ID is present (only one
-    # video source is shown at a time); clear it to reveal the dropzone,
-    # mirroring an admin who wants to replace the current video.
-    view
-    |> form("#lecture-form", %{"lecture" => %{"video_asset_id" => ""}})
-    |> render_change()
-
+    # Editing an existing video shows its thumbnail directly, with no raw
+    # Mux ID ever exposed — the dropzone is always available to replace it.
     upload = element(view, "#lecture-video-upload")
     html = render_hook(upload, "create-upload", %{})
 

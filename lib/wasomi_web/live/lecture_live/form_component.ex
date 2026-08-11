@@ -40,7 +40,6 @@ defmodule WasomiWeb.LectureLive.FormComponent do
           </div>
 
           <div
-            :if={show_video_dropzone?(@form, @video_upload_state)}
             id="lecture-video-upload"
             phx-hook="MuxUpload"
             phx-target={@myself}
@@ -98,7 +97,10 @@ defmodule WasomiWeb.LectureLive.FormComponent do
                 </div>
               </div>
 
-              <div class="h-2 overflow-hidden rounded-full bg-soft">
+              <div
+                :if={@video_upload_state != :ready}
+                class="h-2 overflow-hidden rounded-full bg-soft"
+              >
                 <div
                   data-role="progress"
                   class="h-full w-0 rounded-full bg-primary transition-[width] duration-150 ease-out"
@@ -119,27 +121,6 @@ defmodule WasomiWeb.LectureLive.FormComponent do
           >
             {@video_upload_message}
           </p>
-
-          <details
-            :if={show_advanced_video_fallback?(@video_upload_state)}
-            open={video_asset_id_present?(@form)}
-            class="rounded-xl border border-black/5 bg-white p-3 text-sm"
-          >
-            <summary class="cursor-pointer font-medium text-dark">
-              {if video_asset_id_present?(@form),
-                do: "Current video (Mux playback ID)",
-                else: "Advanced: use an existing Mux playback ID"}
-            </summary>
-            <div class="mt-3 grid gap-4 sm:grid-cols-2">
-              <.input field={@form[:video_asset_id]} type="text" label="Video playback ID" />
-              <.input
-                field={@form[:duration_seconds]}
-                type="number"
-                label="Duration (seconds)"
-                min="1"
-              />
-            </div>
-          </details>
         </section>
 
         <section
@@ -314,8 +295,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
             :if={save_disabled?(@form, @resource_rows, @question_rows, @video_ready)}
             class="text-sm text-amber-700"
           >
-            Upload a video (or provide an existing Mux playback ID and duration), and finish all
-            resource uploads before saving.
+            Upload a video and finish all resource uploads before saving.
           </p>
           <.button
             disabled={save_disabled?(@form, @resource_rows, @question_rows, @video_ready)}
@@ -360,6 +340,8 @@ defmodule WasomiWeb.LectureLive.FormComponent do
     lecture =
       if lecture.id, do: preload_content(lecture), else: %{lecture | resources: [], questions: []}
 
+    existing_video_ready = existing_video_ready(lecture)
+
     socket =
       socket
       |> assign(assigns)
@@ -369,12 +351,22 @@ defmodule WasomiWeb.LectureLive.FormComponent do
       |> assign_new(:question_rows, fn -> Enum.map(lecture.questions || [], &question_attrs/1) end)
       |> assign_new(:resource_error, fn -> nil end)
       |> assign_new(:video_upload, fn -> nil end)
-      |> assign_new(:video_upload_state, fn -> :idle end)
+      |> assign_new(:video_upload_state, fn ->
+        if existing_video_ready, do: :ready, else: :idle
+      end)
       |> assign_new(:video_upload_message, fn -> nil end)
-      |> assign_new(:video_ready, fn -> nil end)
-      |> assign_new(:video_thumbnail_url, fn -> nil end)
+      |> assign_new(:video_ready, fn -> existing_video_ready end)
+      |> assign_new(:video_thumbnail_url, fn ->
+        case existing_video_ready do
+          %{video_asset_id: playback_id} ->
+            resolve_thumbnail_url(assigns.current_user, playback_id)
+
+          nil ->
+            nil
+        end
+      end)
       |> assign_new(:video_local_preview_url, fn -> nil end)
-      |> assign_new(:video_filename, fn -> nil end)
+      |> assign_new(:video_filename, fn -> existing_video_ready && "Current video" end)
       |> assign_new(:video_size, fn -> nil end)
 
     socket =
@@ -690,14 +682,29 @@ defmodule WasomiWeb.LectureLive.FormComponent do
 
   defp sort_by_position(records), do: Enum.sort_by(records, & &1.position)
 
-  defp thumbnail_url(socket, playback_id) do
+  defp thumbnail_url(socket, playback_id),
+    do: resolve_thumbnail_url(socket.assigns.current_user, playback_id)
+
+  defp resolve_thumbnail_url(current_user, playback_id) do
     lecture = %Catalog.Lecture{video_provider: :mux, video_asset_id: playback_id}
 
-    case safe_media_call(fn -> Media.thumbnail_url(socket.assigns.current_user, lecture) end) do
+    case safe_media_call(fn -> Media.thumbnail_url(current_user, lecture) end) do
       {:ok, url} -> url
       {:error, _reason} -> nil
     end
   end
+
+  defp existing_video_ready(%Catalog.Lecture{
+         id: id,
+         video_provider: :mux,
+         video_asset_id: asset_id,
+         duration_seconds: duration
+       })
+       when not is_nil(id) and is_binary(asset_id) and asset_id != "" do
+    %{video_provider: :mux, video_asset_id: asset_id, duration_seconds: duration}
+  end
+
+  defp existing_video_ready(_lecture), do: nil
 
   defp safe_media_call(fun) do
     fun.()
@@ -875,25 +882,14 @@ defmodule WasomiWeb.LectureLive.FormComponent do
   defp save_disabled?(form, resources, questions, video_ready) do
     required = [:title, :description, :position]
 
-    missing_video =
-      is_nil(video_ready) and
-        (blank?(form[:video_asset_id].value) or blank?(form[:duration_seconds].value))
-
     Enum.any?(required, &blank?(form[&1].value)) or
-      missing_video or
+      is_nil(video_ready) or
       Enum.any?(resources, &(resource_status(&1) in [:uploading, :error])) or
       Enum.any?(resources, &(blank?(&1[:name]) or (&1[:kind] == :link and !valid_url?(&1[:url])))) or
       Enum.any?(questions, &(blank?(&1[:question]) or blank?(&1[:answer])))
   end
 
   defp blank?(value), do: is_nil(value) or value == ""
-
-  defp video_asset_id_present?(form), do: not blank?(form[:video_asset_id].value)
-
-  defp show_video_dropzone?(form, video_upload_state),
-    do: video_upload_state != :idle or not video_asset_id_present?(form)
-
-  defp show_advanced_video_fallback?(video_upload_state), do: video_upload_state == :idle
 
   defp valid_url?(url) when is_binary(url) do
     case URI.parse(url) do

@@ -436,6 +436,8 @@ defmodule WasomiWeb.AdminLiveTest do
     test "editing a lecture has no position field and leaves its position untouched", %{
       conn: conn
     } do
+      import Mox
+
       course = course_fixture()
       module = course_module_fixture(course_id: course.id)
 
@@ -446,6 +448,10 @@ defmodule WasomiWeb.AdminLiveTest do
           position: 2,
           video_asset_id: "abc123"
         )
+
+      stub(Wasomi.MediaProviderMock, :thumbnail_url, fn %Wasomi.Catalog.Lecture{}, _user ->
+        {:ok, "https://image.mux.test/abc123/thumbnail.jpg?token=abc"}
+      end)
 
       {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
 

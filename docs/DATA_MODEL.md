@@ -37,7 +37,7 @@ erDiagram
 
 `courses`
 
-- `slug`, `title`, `subtitle`, `description`, `thumbnail_key`, `price_minor`, `currency`, `status`, `position`.
+- `slug`, `title`, `description`, `thumbnail_key`, `price_minor`, `currency`, `status`, `position`.
 - Unique `slug`; status is `draft` or `published`.
 
 `modules`

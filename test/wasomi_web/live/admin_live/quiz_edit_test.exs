@@ -21,7 +21,8 @@ defmodule WasomiWeb.AdminLive.QuizEditTest do
 
   defp edit_path(quiz) do
     course_id = Assessments.get_quiz_with_questions!(quiz.id).module.course_id
-    ~p"/admin/courses/#{course_id}/quizzes/#{quiz.id}/edit"
+    course_slug = Wasomi.Catalog.get_course!(course_id).slug
+    ~p"/admin/courses/#{course_slug}/quizzes/#{quiz.id}/edit"
   end
 
   setup %{conn: conn} do
@@ -192,6 +193,13 @@ defmodule WasomiWeb.AdminLive.QuizEditTest do
     |> element("#question-#{first.id} button", "Remove")
     |> render_click()
 
+    assert has_element?(view, "#delete-question-modal")
+
+    view
+    |> element("#delete-question-modal button", "Remove")
+    |> render_click()
+
+    refute has_element?(view, "#delete-question-modal")
     refute has_element?(view, "#question-#{first.id}")
     assert length(Assessments.get_quiz_with_questions!(quiz.id).questions) == 2
   end
@@ -684,7 +692,7 @@ defmodule WasomiWeb.AdminLive.QuizEditTest do
     other_course = course_fixture()
 
     assert_raise Ecto.NoResultsError, fn ->
-      live(conn, ~p"/admin/courses/#{other_course.id}/quizzes/#{quiz.id}/edit")
+      live(conn, ~p"/admin/courses/#{other_course.slug}/quizzes/#{quiz.id}/edit")
     end
   end
 

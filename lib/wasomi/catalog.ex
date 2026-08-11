@@ -16,7 +16,9 @@ defmodule Wasomi.Catalog do
   }
 
   @doc """
-  Returns the list of courses.
+  Returns all courses, newest first. `position` is just an auto-incrementing
+  creation counter (courses have no manual reordering UI, unlike modules
+  and lectures), so sorting by it buried new courses at the bottom.
 
   ## Examples
 
@@ -26,7 +28,7 @@ defmodule Wasomi.Catalog do
   """
   def list_courses do
     Course
-    |> order_by([course], asc: course.position, asc: course.title)
+    |> order_by([course], desc: course.inserted_at, desc: course.id)
     |> Repo.all()
   end
 
@@ -262,37 +264,15 @@ defmodule Wasomi.Catalog do
   """
   def update_course(%Course{} = course, attrs) do
     course
-    |> Course.changeset(reject_direct_publish(attrs))
+    |> Course.changeset(reject_guarded_statuses(attrs))
     |> Repo.update()
   end
 
-  # :published is reachable only through publish_course/1, which always runs
-  # PublishGuard first — silently dropping a caller-supplied :published here
-  # (rather than raising) keeps update_course/2 a safe, generic entry point
-  # for every other status/field change.
-  defp reject_direct_publish(attrs) do
-    attrs = Map.new(attrs)
-
-    case Map.get(attrs, :status) || Map.get(attrs, "status") do
-      status when status in [:published, "published"] -> Map.drop(attrs, [:status, "status"])
-      _ -> attrs
-    end
-  end
-
-  @doc """
-  Deletes a course.
-
-  ## Examples
-
-      iex> delete_course(course)
-      {:ok, %Course{}}
-
-      iex> delete_course(course)
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def delete_course(%Course{} = course) do
-    Repo.delete(course)
+  # Status is only reachable via its own dedicated function (publish_course/1,
+  # unpublish_course/1, archive_course/1) — silently dropped here rather than
+  # raised, since the edit form never submits :status itself.
+  defp reject_guarded_statuses(attrs) do
+    Map.drop(Map.new(attrs), [:status, "status"])
   end
 
   @doc """
@@ -325,37 +305,66 @@ defmodule Wasomi.Catalog do
   end
 
   @doc """
-  Moves a course from `:draft` into `:in_review` — a free transition with no
-  checklist, since it only signals "ready for a publish attempt," not that
-  the course actually is ready.
+  The only path that flips a course's status to `:published`.
+
+  Row-locks the course and re-checks it inside a transaction, so two
+  concurrent publish attempts can't both slip through between check and
+  write. Re-fetches with the current outline (never trusts a stale
+  in-memory struct), then runs `PublishGuard` and `Course.publish_changeset/1`
+  as an independent second check. On failure, status is left unchanged and
+  `{:error, issues}` lists everything missing.
   """
-  def submit_course_for_review(%Course{} = course) do
-    update_course(course, %{status: :in_review})
+  def publish_course(%Course{} = course) do
+    Repo.transaction(fn ->
+      course =
+        Course
+        |> Repo.get!(course.id, lock: "FOR UPDATE")
+        |> preload_outline()
+
+      case PublishGuard.check(course) do
+        :ok ->
+          case course |> Course.publish_changeset() |> Repo.update() do
+            {:ok, updated} -> updated
+            {:error, changeset} -> Repo.rollback(changeset)
+          end
+
+        {:error, issues} ->
+          Repo.rollback(issues)
+      end
+    end)
   end
 
   @doc """
-  The only path that flips a course's status to `:published`.
+  The only path that moves a published course back to `:draft`.
 
-  Always re-fetches the course with its current outline before checking —
-  never trusts a possibly-stale in-memory struct — and runs it through
-  `Wasomi.Catalog.PublishGuard`. On success the course is updated to
-  `:published`, making it visible in the public catalog. On failure the
-  course's status is left exactly as it was (a course attempted from
-  `:draft` stays `:draft`) and `{:error, issues}` is returned with the full
-  checklist of what's missing, for the admin UI to render.
+  For pulling a live course back for revision without retiring it (a
+  correction, a pricing fix, a compliance hold) — the course is coming
+  back, unlike `archive_course/1`. Unconditional: no checklist, and
+  enrolled learners keep their normal access regardless of status.
+  Re-publishing goes through `publish_course/1` again, so the readiness
+  checklist re-applies.
   """
-  def publish_course(%Course{} = course) do
-    course = get_course_with_outline!(course.id)
+  def unpublish_course(%Course{} = course) do
+    course
+    |> Course.changeset(%{status: :draft})
+    |> Repo.update()
+  end
 
-    case PublishGuard.check(course) do
-      :ok ->
-        course
-        |> Course.changeset(%{status: :published})
-        |> Repo.update()
+  @doc """
+  The only path that flips a course's status to `:archived`.
 
-      {:error, issues} ->
-        {:error, issues}
-    end
+  Unconditional — no checklist, and it doesn't check for learners still in
+  progress. `Enrollments.can_access_course?/2` is gated purely by
+  enrollment, never by `Course.status`, so already-enrolled learners keep
+  their access; archiving only removes the course from public browsing and
+  blocks new enrollments. Callers that want to warn an admin about
+  in-progress learners should query `Learning.count_incomplete_enrollees/1`
+  separately rather than have this block or fail on it.
+  """
+  def archive_course(%Course{} = course) do
+    course
+    |> Course.changeset(%{status: :archived})
+    |> Repo.update()
   end
 
   @doc """

@@ -10,12 +10,30 @@ defmodule Wasomi.CatalogFixtures do
   """
   def unique_course_slug, do: "course-#{System.unique_integer([:positive])}"
 
+  @certificate_keys [
+    :certificate_enabled,
+    :certificate_issuer_name,
+    :certificate_signatory_name,
+    :certificate_signatory_title,
+    :certificate_signature_key
+  ]
+
   @doc """
   Generate a course.
+
+  `Course.changeset/2` doesn't cast certificate fields (they go through the
+  dedicated `certificate_changeset/2`), so any `certificate_*` keys in
+  `attrs` are applied as a second step. Defaults to `certificate_enabled:
+  false` — publishing is the common case in tests, and `certificate_enabled`
+  defaults to `true` on the schema with no signatory details, which would
+  otherwise fail every publish-flow test's `PublishGuard` check.
   """
   def course_fixture(attrs \\ %{}) do
+    attrs = Enum.into(attrs, %{})
+    {certificate_attrs, course_attrs} = Map.split(attrs, @certificate_keys)
+
     {:ok, course} =
-      attrs
+      course_attrs
       |> Enum.into(%{
         currency: "KES",
         description: "some description",
@@ -23,11 +41,16 @@ defmodule Wasomi.CatalogFixtures do
         price_minor: 42,
         slug: unique_course_slug(),
         status: :draft,
-        subtitle: "some subtitle",
         thumbnail_key: "some thumbnail_key",
         title: "some title"
       })
       |> Wasomi.Catalog.create_course()
+
+    {:ok, course} =
+      Wasomi.Catalog.update_course_certificate(
+        course,
+        Enum.into(certificate_attrs, %{certificate_enabled: false})
+      )
 
     course
   end
@@ -45,7 +68,7 @@ defmodule Wasomi.CatalogFixtures do
       |> Enum.into(%{
         description: "some description",
         position: 42,
-        title: "some title"
+        title: "some title #{System.unique_integer([:positive])}"
       })
       |> Wasomi.Catalog.create_course_module()
 
@@ -66,7 +89,7 @@ defmodule Wasomi.CatalogFixtures do
         description: "some description",
         duration_seconds: 42,
         position: 42,
-        title: "some title",
+        title: "some title #{System.unique_integer([:positive])}",
         video_asset_id: "some video_asset_id",
         video_provider: :mux
       })

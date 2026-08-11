@@ -31,8 +31,8 @@ defmodule WasomiWeb.AdminLive.StudentShowTest do
   describe "Grant access modal" do
     test "only offers courses the learner isn't already actively enrolled in", %{conn: conn} do
       learner = user_fixture()
-      already_enrolled = course_fixture(title: "Already enrolled course")
-      grantable = course_fixture(title: "Grantable course")
+      already_enrolled = course_fixture(title: "Already enrolled course", status: :published)
+      grantable = course_fixture(title: "Grantable course", status: :published)
       enrollment_fixture(user_id: learner.id, course_id: already_enrolled.id, status: :active)
 
       {:ok, view, _html} = live(conn, ~p"/admin/students/#{learner.id}")
@@ -50,7 +50,7 @@ defmodule WasomiWeb.AdminLive.StudentShowTest do
       conn = log_in_user(conn, admin)
 
       learner = user_fixture()
-      course = course_fixture(title: "Applied Negotiation")
+      course = course_fixture(title: "Applied Negotiation", status: :published)
 
       {:ok, view, _html} = live(conn, ~p"/admin/students/#{learner.id}")
 
@@ -85,7 +85,7 @@ defmodule WasomiWeb.AdminLive.StudentShowTest do
       conn: conn
     } do
       learner = user_fixture()
-      course = course_fixture()
+      course = course_fixture(status: :published)
 
       {:ok, view, _html} = live(conn, ~p"/admin/students/#{learner.id}")
 
@@ -105,7 +105,7 @@ defmodule WasomiWeb.AdminLive.StudentShowTest do
 
     test "disables the Grant access button once every course is already active", %{conn: conn} do
       learner = user_fixture()
-      course = course_fixture()
+      course = course_fixture(status: :published)
       enrollment_fixture(user_id: learner.id, course_id: course.id, status: :active)
 
       {:ok, view, _html} = live(conn, ~p"/admin/students/#{learner.id}")

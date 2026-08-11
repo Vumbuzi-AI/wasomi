@@ -356,6 +356,19 @@ defmodule Wasomi.Learning do
     completion_counts(user.id, lectures)
   end
 
+  @doc """
+  Counts active enrollees on a course who haven't completed it yet.
+
+  Purely informational — used by the admin UI to warn "N learners are still
+  in progress" when archiving a course, not to block or gate the archive
+  transition itself (`Wasomi.Catalog.archive_course/1` is unconditional).
+  """
+  def count_incomplete_enrollees(%Course{} = course) do
+    course.id
+    |> Enrollments.list_active_for_course()
+    |> Enum.count(&(not course_complete?(&1.user, course)))
+  end
+
   defp completion_counts(user_id, lectures_query) do
     lecture_ids = from(lecture in lectures_query, select: lecture.id)
     total = Repo.aggregate(lectures_query, :count)

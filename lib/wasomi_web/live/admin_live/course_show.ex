@@ -3,11 +3,12 @@ defmodule WasomiWeb.AdminLive.CourseShow do
 
   alias Wasomi.{Assessments, Catalog, Enrollments, Payments}
   alias Wasomi.Catalog.{CourseModule, Lecture}
+  alias WasomiWeb.CourseLive
   alias WasomiWeb.CourseModuleLive
   alias WasomiWeb.LectureLive
 
   @impl true
-  def mount(%{"id" => id}, _session, socket) do
+  def mount(%{"slug" => slug}, _session, socket) do
     {:ok,
      socket
      |> assign(:modal, nil)
@@ -16,17 +17,26 @@ defmodule WasomiWeb.AdminLive.CourseShow do
      |> assign(:form_title, nil)
      |> assign(:active_tab, :curriculum)
      |> assign(:deleting_quiz, nil)
-     |> load_course(id)}
+     |> assign(:deleting_module, nil)
+     |> assign(:deleting_lecture, nil)
+     |> load_course(slug)}
   end
 
   # push_patch from the module/lecture form components lands here; reload and
   # close any open modal.
   @impl true
-  def handle_params(%{"id" => id}, _url, socket) do
-    {:noreply, socket |> load_course(id) |> close_modal()}
+  def handle_params(%{"slug" => slug}, _url, socket) do
+    {:noreply, socket |> load_course(slug) |> close_modal()}
   end
 
   @impl true
+  def handle_event("edit_course", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:modal, :course)
+     |> assign(:form_title, "Edit course")}
+  end
+
   def handle_event("new_module", _params, socket) do
     course = socket.assigns.course
 
@@ -91,10 +101,10 @@ defmodule WasomiWeb.AdminLive.CourseShow do
 
     case quiz do
       %Assessments.Quiz{id: quiz_id} ->
-        course_id = socket.assigns.course.id
+        course_slug = socket.assigns.course.slug
 
         {:noreply,
-         push_navigate(socket, to: ~p"/admin/courses/#{course_id}/quizzes/#{quiz_id}/edit")}
+         push_navigate(socket, to: ~p"/admin/courses/#{course_slug}/quizzes/#{quiz_id}/edit")}
 
       _ ->
         {:noreply, put_flash(socket, :error, "Could not create a quiz for this module.")}
@@ -117,7 +127,15 @@ defmodule WasomiWeb.AdminLive.CourseShow do
      socket
      |> put_flash(:info, "Quiz deleted.")
      |> assign(:deleting_quiz, nil)
-     |> load_course(socket.assigns.course.id)}
+     |> load_course(socket.assigns.course.slug)}
+  end
+
+  def handle_event("confirm_delete_module", %{"id" => id}, socket) do
+    {:noreply, assign(socket, :deleting_module, Catalog.get_course_module!(id))}
+  end
+
+  def handle_event("cancel_delete_module", _params, socket) do
+    {:noreply, assign(socket, :deleting_module, nil)}
   end
 
   def handle_event("delete_module", %{"id" => id}, socket) do
@@ -127,7 +145,16 @@ defmodule WasomiWeb.AdminLive.CourseShow do
     {:noreply,
      socket
      |> put_flash(:info, "Module deleted.")
-     |> load_course(socket.assigns.course.id)}
+     |> assign(:deleting_module, nil)
+     |> load_course(socket.assigns.course.slug)}
+  end
+
+  def handle_event("confirm_delete_lecture", %{"id" => id}, socket) do
+    {:noreply, assign(socket, :deleting_lecture, Catalog.get_lecture!(id))}
+  end
+
+  def handle_event("cancel_delete_lecture", _params, socket) do
+    {:noreply, assign(socket, :deleting_lecture, nil)}
   end
 
   def handle_event("delete_lecture", %{"id" => id}, socket) do
@@ -137,13 +164,14 @@ defmodule WasomiWeb.AdminLive.CourseShow do
     {:noreply,
      socket
      |> put_flash(:info, "Lecture deleted.")
-     |> load_course(socket.assigns.course.id)}
+     |> assign(:deleting_lecture, nil)
+     |> load_course(socket.assigns.course.slug)}
   end
 
   def handle_event("reorder_modules", %{"module_ids" => module_ids}, socket) do
     case Catalog.reorder_course_modules(socket.assigns.course.id, module_ids) do
       {:ok, _} ->
-        {:noreply, load_course(socket, socket.assigns.course.id)}
+        {:noreply, load_course(socket, socket.assigns.course.slug)}
 
       {:error, _reason} ->
         {:noreply, put_flash(socket, :error, "Could not reorder modules. Refresh and try again.")}
@@ -157,7 +185,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
       ) do
     case Catalog.reorder_module_lectures(module_id, lecture_ids) do
       {:ok, _} ->
-        {:noreply, load_course(socket, socket.assigns.course.id)}
+        {:noreply, load_course(socket, socket.assigns.course.slug)}
 
       {:error, _reason} ->
         {:noreply,
@@ -167,16 +195,20 @@ defmodule WasomiWeb.AdminLive.CourseShow do
 
   @impl true
   def handle_info({mod, {:saved, _record}}, socket)
-      when mod in [CourseModuleLive.FormComponent, LectureLive.FormComponent] do
-    {:noreply, socket |> load_course(socket.assigns.course.id) |> close_modal()}
+      when mod in [
+             CourseLive.FormComponent,
+             CourseModuleLive.FormComponent,
+             LectureLive.FormComponent
+           ] do
+    {:noreply, socket |> load_course(socket.assigns.course.slug) |> close_modal()}
   end
 
   defp close_modal(socket) do
     assign(socket, modal: nil, course_module: nil, lecture: nil, form_title: nil)
   end
 
-  defp load_course(socket, id) do
-    course = Catalog.get_course_with_outline!(id)
+  defp load_course(socket, slug) do
+    course = Catalog.get_course_by_slug!(slug)
     enrollments = Enrollments.list_active_for_course(course.id)
     payments = Payments.list_payments_for_course(course.id)
 
@@ -232,21 +264,23 @@ defmodule WasomiWeb.AdminLive.CourseShow do
               <h1 class="mt-4 text-3xl font-semibold leading-tight text-dark sm:text-4xl">
                 {@course.title}
               </h1>
-              <p class="mt-3 text-lg text-body">{@course.subtitle}</p>
               <p class="mt-4 max-w-xl text-body">{@course.description}</p>
 
               <div class="mt-6 flex flex-wrap items-center gap-3">
-                <.link
-                  navigate={~p"/admin/courses/#{@course.id}/edit"}
+                <button
+                  type="button"
+                  phx-click={JS.push("edit_course")}
                   class="group inline-flex items-center gap-2 rounded-full bg-dark py-1.5 pl-6 pr-1.5 font-medium text-white transition hover:bg-primary"
                 >
                   Edit course
                   <span class="grid h-9 w-9 place-items-center rounded-full bg-primary text-white transition group-hover:bg-dark">
                     <.icon name="hero-pencil-square" class="h-4 w-4" />
                   </span>
-                </.link>
+                </button>
                 <.link
-                  navigate={~p"/courses/#{@course.slug}"}
+                  :if={@course.status == :published}
+                  href={~p"/courses/#{@course.slug}"}
+                  target="_blank"
                   class="inline-flex items-center gap-2 rounded-full border border-dark px-5 py-2.5 text-sm font-medium text-dark transition hover:bg-dark hover:text-white"
                 >
                   <.icon name="hero-arrow-top-right-on-square" class="h-4 w-4" /> View public page
@@ -258,7 +292,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                   <.icon name="hero-eye" class="h-4 w-4" /> Preview course
                 </.link>
                 <.link
-                  navigate={~p"/admin/courses/#{@course.id}/certificate"}
+                  navigate={~p"/admin/courses/#{@course.slug}/certificate"}
                   class="inline-flex items-center gap-2 rounded-full border border-dark px-5 py-2.5 text-sm font-medium text-dark transition hover:bg-dark hover:text-white"
                 >
                   <.icon name="hero-academic-cap" class="h-4 w-4" /> Certificate
@@ -399,8 +433,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                       </button>
                       <button
                         type="button"
-                        phx-click={JS.push("delete_module", value: %{id: module.id})}
-                        data-confirm={"Delete \"#{module.title}\" and all its lectures?"}
+                        phx-click={JS.push("confirm_delete_module", value: %{id: module.id})}
                         class="grid h-8 w-8 place-items-center rounded-full border border-black/10 bg-white text-muted transition hover:border-red-400 hover:text-red-500"
                         title="Delete module"
                       >
@@ -458,8 +491,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                         </button>
                         <button
                           type="button"
-                          phx-click={JS.push("delete_lecture", value: %{id: lecture.id})}
-                          data-confirm={"Delete lecture \"#{lecture.title}\"?"}
+                          phx-click={JS.push("confirm_delete_lecture", value: %{id: lecture.id})}
                           class="grid h-8 w-8 place-items-center rounded-full text-muted transition hover:bg-red-50 hover:text-red-500"
                           title="Delete lecture"
                         >
@@ -492,7 +524,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                     </span>
                     <span class="flex shrink-0 items-center gap-1.5">
                       <.link
-                        navigate={~p"/admin/courses/#{@course.id}/quizzes/#{quiz.id}/edit"}
+                        navigate={~p"/admin/courses/#{@course.slug}/quizzes/#{quiz.id}/edit"}
                         class="grid h-8 w-8 place-items-center rounded-full text-muted transition hover:bg-mint hover:text-primary"
                         title="Manage quiz"
                       >
@@ -587,6 +619,18 @@ defmodule WasomiWeb.AdminLive.CourseShow do
         </section>
       </div>
 
+      <%!-- Course modal --%>
+      <.modal :if={@modal == :course} id="course-modal" show on_cancel={JS.push("close_modal")}>
+        <.live_component
+          module={CourseLive.FormComponent}
+          id={@course.id}
+          title={@form_title}
+          action={:edit}
+          course={@course}
+          patch={fn course -> ~p"/admin/courses/#{course.slug}" end}
+        />
+      </.modal>
+
       <%!-- Module modal --%>
       <.modal :if={@modal == :module} id="module-modal" show on_cancel={JS.push("close_modal")}>
         <.live_component
@@ -595,7 +639,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
           title={@form_title}
           action={if @course_module.id, do: :edit, else: :new}
           course_module={@course_module}
-          patch={~p"/admin/courses/#{@course.id}"}
+          patch={~p"/admin/courses/#{@course.slug}"}
         />
       </.modal>
 
@@ -608,37 +652,45 @@ defmodule WasomiWeb.AdminLive.CourseShow do
           action={if @lecture.id, do: :edit, else: :new}
           lecture={@lecture}
           current_user={@current_user}
-          patch={~p"/admin/courses/#{@course.id}"}
+          patch={~p"/admin/courses/#{@course.slug}"}
         />
       </.modal>
 
       <%!-- Delete quiz confirmation --%>
-      <.modal
+      <.confirm_modal
         :if={@deleting_quiz}
         id="delete-quiz-modal"
-        show
-        on_cancel={JS.push("cancel_delete_quiz")}
+        title={"Delete \"#{@deleting_quiz.title}\"?"}
+        confirm_label="Delete quiz"
+        confirm={JS.push("delete_quiz", value: %{id: @deleting_quiz.id})}
+        cancel={JS.push("cancel_delete_quiz")}
       >
-        <h2 class="text-lg font-semibold text-dark">Delete "{@deleting_quiz.title}"?</h2>
-        <p class="mt-2 text-sm text-body">
-          This can't be undone. All of its questions and options will be permanently removed.
-        </p>
-        <div class="mt-6 flex items-center gap-4">
-          <button
-            phx-click="delete_quiz"
-            phx-value-id={@deleting_quiz.id}
-            class="rounded-full bg-red-600 px-5 py-2 text-sm font-medium text-white transition hover:bg-red-700"
-          >
-            Delete quiz
-          </button>
-          <button
-            phx-click="cancel_delete_quiz"
-            class="text-sm font-medium text-muted hover:text-dark"
-          >
-            Cancel
-          </button>
-        </div>
-      </.modal>
+        This can't be undone. All of its questions and options will be permanently removed.
+      </.confirm_modal>
+
+      <%!-- Delete module confirmation --%>
+      <.confirm_modal
+        :if={@deleting_module}
+        id="delete-module-modal"
+        title={"Delete \"#{@deleting_module.title}\" and all its lectures?"}
+        confirm_label="Delete module"
+        confirm={JS.push("delete_module", value: %{id: @deleting_module.id})}
+        cancel={JS.push("cancel_delete_module")}
+      >
+        This can't be undone. All of its lectures will be permanently removed.
+      </.confirm_modal>
+
+      <%!-- Delete lecture confirmation --%>
+      <.confirm_modal
+        :if={@deleting_lecture}
+        id="delete-lecture-modal"
+        title={"Delete lecture \"#{@deleting_lecture.title}\"?"}
+        confirm_label="Delete lecture"
+        confirm={JS.push("delete_lecture", value: %{id: @deleting_lecture.id})}
+        cancel={JS.push("cancel_delete_lecture")}
+      >
+        This can't be undone.
+      </.confirm_modal>
     </.admin_layout>
     """
   end

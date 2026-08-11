@@ -92,6 +92,66 @@ defmodule WasomiWeb.CoreComponents do
   end
 
   @doc """
+  Renders a confirmation modal for an action gated behind an explicit "are
+  you sure?" step (deleting a record, discarding drafts, etc.), replacing
+  the browser's native `data-confirm` dialog with markup consistent with the
+  rest of the admin UI.
+
+  `:confirm` and `:cancel` are `Phoenix.LiveView.JS` commands, so the caller
+  decides what actually happens — typically `JS.push("delete_x", value: ...)`
+  and `JS.push("cancel_delete_x")` backed by a `deleting_x` assign that
+  gates the modal with `:if`.
+
+  ## Examples
+
+      <.confirm_modal
+        :if={@deleting_module}
+        id="delete-module-modal"
+        title={"Delete \"\#{@deleting_module.title}\"?"}
+        confirm={JS.push("delete_module", value: %{id: @deleting_module.id})}
+        cancel={JS.push("cancel_delete_module")}
+      >
+        This also removes all of its lectures. This can't be undone.
+      </.confirm_modal>
+  """
+  attr :id, :string, required: true
+  attr :title, :string, required: true
+  attr :confirm, JS, required: true
+  attr :cancel, JS, default: %JS{}
+  attr :confirm_label, :string, default: "Delete"
+  attr :variant, :atom, values: [:danger, :primary], default: :danger
+  slot :inner_block, required: true
+
+  def confirm_modal(assigns) do
+    ~H"""
+    <.modal id={@id} show on_cancel={@cancel}>
+      <h2 class="text-lg font-semibold text-dark">{@title}</h2>
+      <p class="mt-2 text-sm text-body">{render_slot(@inner_block)}</p>
+      <div class="mt-6 flex items-center gap-4">
+        <button
+          type="button"
+          phx-click={@confirm}
+          class={[
+            "rounded-full px-5 py-2 text-sm font-medium text-white transition",
+            @variant == :danger && "bg-red-600 hover:bg-red-700",
+            @variant == :primary && "bg-primary hover:bg-dark"
+          ]}
+        >
+          {@confirm_label}
+        </button>
+        <button
+          type="button"
+          phx-click={@cancel}
+          class="text-sm font-medium text-muted hover:text-dark"
+        >
+          Cancel
+        </button>
+      </div>
+    </.modal>
+    """
+  end
+
+  @doc """
   Renders flash notices.
 
   ## Examples

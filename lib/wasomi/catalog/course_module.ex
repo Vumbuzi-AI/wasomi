@@ -29,6 +29,10 @@ defmodule Wasomi.Catalog.CourseModule do
       name: :modules_course_id_position_index,
       message: "has already been used in this course"
     )
+    |> unique_constraint(:title,
+      name: :modules_course_id_title_index,
+      message: "is already used by another module in this course"
+    )
     |> check_constraint(:position, name: :modules_position_must_be_positive)
   end
 end

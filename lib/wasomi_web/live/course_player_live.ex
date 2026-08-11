@@ -34,7 +34,9 @@ defmodule WasomiWeb.CoursePlayerLive do
   @impl true
   def mount(%{"slug" => slug}, _session, socket) do
     preview? = socket.assigns.live_action == :preview
-    course = fetch_course(slug, preview?)
+    # Status-agnostic on purpose — access is gated by enrollment below, not
+    # status, so an archived course's enrolled learners keep working.
+    course = Catalog.get_course_by_slug!(slug)
 
     authorization =
       if preview?,
@@ -63,16 +65,19 @@ defmodule WasomiWeb.CoursePlayerLive do
          |> assign(:preview_progress, %{})
          |> refresh_progress()}
 
-      {:error, :forbidden} ->
+      {:error, :forbidden} when course.status == :published ->
         {:ok,
          socket
          |> put_flash(:error, "Complete enrollment to access course content.")
          |> redirect(to: ~p"/courses/#{course.slug}/checkout")}
+
+      {:error, :forbidden} ->
+        {:ok,
+         socket
+         |> put_flash(:error, "This course isn't available.")
+         |> redirect(to: ~p"/courses")}
     end
   end
-
-  defp fetch_course(slug, true), do: Catalog.get_course_by_slug!(slug)
-  defp fetch_course(slug, false), do: Catalog.get_published_course_by_slug!(slug)
 
   defp preview_page_title(course, true), do: "Preview · #{course.title}"
   defp preview_page_title(course, false), do: course.title
@@ -112,7 +117,7 @@ defmodule WasomiWeb.CoursePlayerLive do
 
         quiz ->
           cond do
-            not module_quiz_unlocked?(module, socket.assigns.progress) ->
+            not module_quiz_unlocked?(module, socket.assigns.progress, socket.assigns.preview?) ->
               {:noreply,
                put_flash(socket, :error, "Complete this module's lectures to unlock its quiz.")}
 
@@ -368,7 +373,7 @@ defmodule WasomiWeb.CoursePlayerLive do
               </p>
             </div>
             <.link
-              navigate={~p"/admin/courses/#{@course.id}"}
+              navigate={~p"/admin/courses/#{@course.slug}"}
               class="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/20 bg-white/10 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-white hover:text-dark"
             >
               <.icon name="hero-x-mark" class="h-4 w-4" /> Exit Preview
@@ -382,10 +387,10 @@ defmodule WasomiWeb.CoursePlayerLive do
               </span>
               <.link
                 :if={!@preview?}
-                navigate={~p"/courses/#{@course.slug}"}
+                navigate={~p"/courses-taken"}
                 class="inline-flex items-center gap-1.5 text-sm font-medium text-muted transition hover:text-primary"
               >
-                <.icon name="hero-arrow-left" class="h-4 w-4" /> Course overview
+                <.icon name="hero-arrow-left" class="h-4 w-4" /> My courses
               </.link>
             </div>
 
@@ -496,7 +501,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                         </div>
                       </div>
 
-                      <div class="rounded-2xl border border-black/5 p-6">
+                      <div class="min-h-[480px] rounded-2xl border border-black/5 p-6">
                         <p class="text-xs font-semibold uppercase tracking-wider text-primary">
                           Question {@current_question_index + 1} of {total}
                         </p>
@@ -726,7 +731,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                       </span>
                     </button>
 
-                    <% quiz_unlocked? = module_quiz_unlocked?(module, @progress) %>
+                    <% quiz_unlocked? = module_quiz_unlocked?(module, @progress, @preview?) %>
                     <button
                       :if={module_quiz = Map.get(@quizzes_by_module, module.id)}
                       type="button"
@@ -832,16 +837,17 @@ defmodule WasomiWeb.CoursePlayerLive do
   defp refresh_progress(socket) do
     course = socket.assigns.course
     lectures = course_lectures(course)
+    preview? = socket.assigns.preview?
 
     progress =
-      if socket.assigns.preview? do
+      if preview? do
         socket.assigns.preview_progress
       else
         Learning.progress_for_course(socket.assigns.current_user, course)
       end
 
     course_progress = Learning.summarize_progress(course, progress)
-    unlocked_lecture_ids = unlocked_lecture_ids(lectures, progress)
+    unlocked_lecture_ids = unlocked_lecture_ids(lectures, progress, preview?)
     current_lecture = pick_current_lecture(socket, lectures, progress)
 
     socket
@@ -891,7 +897,14 @@ defmodule WasomiWeb.CoursePlayerLive do
 
   defp course_lectures(course), do: Enum.flat_map(course.modules, & &1.lectures)
 
-  defp unlocked_lecture_ids(lectures, progress) do
+  # Admins previewing content just want to sanity-check it, not re-earn
+  # access to it lecture by lecture — every lecture and quiz is unlocked
+  # unconditionally in preview mode, independent of (unpersisted) preview
+  # progress. Real learners keep the sequential gate untouched below.
+  defp unlocked_lecture_ids(lectures, _progress, true = _preview?),
+    do: MapSet.new(lectures, & &1.id)
+
+  defp unlocked_lecture_ids(lectures, progress, false = _preview?) do
     Enum.reduce_while(lectures, MapSet.new(), fn lecture, unlocked ->
       unlocked = MapSet.put(unlocked, lecture.id)
 
@@ -906,7 +919,9 @@ defmodule WasomiWeb.CoursePlayerLive do
   defp lecture_unlocked?(unlocked_lecture_ids, lecture_id),
     do: MapSet.member?(unlocked_lecture_ids, lecture_id)
 
-  defp module_quiz_unlocked?(module, progress) do
+  defp module_quiz_unlocked?(_module, _progress, true = _preview?), do: true
+
+  defp module_quiz_unlocked?(module, progress, false = _preview?) do
     module.lectures != [] and
       Enum.all?(module.lectures, &(progress_status(progress, &1.id) == :completed))
   end

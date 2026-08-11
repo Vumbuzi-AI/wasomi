@@ -23,7 +23,7 @@ defmodule Wasomi.Repo.Migrations.HardenAccountsAndCatalog do
     create constraint(:courses, :courses_position_must_be_positive, check: "position > 0")
 
     create constraint(:courses, :courses_status_must_be_valid,
-             check: "status IN ('draft', 'published')"
+             check: "status IN ('draft', 'published', 'archived')"
            )
 
     alter table(:modules) do

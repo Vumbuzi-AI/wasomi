@@ -8,8 +8,8 @@ defmodule WasomiWeb.AdminLive.CourseCertificate do
   @sample_serial_number "SAMPLE-0000"
 
   @impl true
-  def mount(%{"id" => id}, _session, socket) do
-    course = Catalog.get_course!(id)
+  def mount(%{"slug" => slug}, _session, socket) do
+    course = Catalog.get_course_by_slug!(slug)
 
     {:ok,
      socket
@@ -128,7 +128,7 @@ defmodule WasomiWeb.AdminLive.CourseCertificate do
         phx-hook="PdfDownload"
       >
         <.link
-          navigate={~p"/admin/courses/#{@course.id}"}
+          navigate={~p"/admin/courses/#{@course.slug}"}
           class="inline-flex items-center gap-1.5 text-sm font-medium text-muted hover:text-primary"
         >
           <.icon name="hero-arrow-left-mini" class="h-4 w-4" /> Back to {@course.title}

@@ -4,12 +4,11 @@ defmodule Wasomi.Catalog.Course do
 
   schema "courses" do
     field :position, :integer, default: 1
-    field :status, Ecto.Enum, values: [:draft, :in_review, :published], default: :draft
+    field :status, Ecto.Enum, values: [:draft, :published, :archived], default: :draft
     field :description, :string
     field :title, :string
     field :currency, :string, default: "KES"
     field :slug, :string
-    field :subtitle, :string
     field :thumbnail_key, :string
     field :price_minor, :integer
 
@@ -32,7 +31,6 @@ defmodule Wasomi.Catalog.Course do
     |> cast(attrs, [
       :slug,
       :title,
-      :subtitle,
       :description,
       :thumbnail_key,
       :price_minor,
@@ -43,7 +41,6 @@ defmodule Wasomi.Catalog.Course do
     |> validate_required([
       :slug,
       :title,
-      :subtitle,
       :description,
       :price_minor,
       :currency,
@@ -57,7 +54,6 @@ defmodule Wasomi.Catalog.Course do
       message: "must contain lowercase letters, numbers, and hyphens only"
     )
     |> validate_length(:title, min: 3, max: 160)
-    |> validate_length(:subtitle, max: 240)
     |> validate_number(:price_minor, greater_than_or_equal_to: 0)
     |> validate_number(:position, greater_than: 0)
     |> validate_format(:currency, ~r/^[A-Z]{3}$/, message: "must be a 3-letter currency code")
@@ -65,6 +61,40 @@ defmodule Wasomi.Catalog.Course do
     |> check_constraint(:price_minor, name: :courses_price_must_be_non_negative)
     |> check_constraint(:position, name: :courses_position_must_be_positive)
     |> check_constraint(:status, name: :courses_status_must_be_valid)
+  end
+
+  @doc """
+  The dedicated changeset for the `:published` transition.
+
+  A second line of defense alongside `PublishGuard`, independent of it, so
+  a future direct `Repo.update` bypassing `Catalog.publish_course/1` still
+  can't produce a published-but-empty course. Expects `course.modules`
+  (and each module's `.lectures`) already preloaded.
+  """
+  def publish_changeset(course) do
+    course
+    |> change(status: :published)
+    |> check_constraint(:status, name: :courses_status_must_be_valid)
+    |> validate_publishable_content()
+  end
+
+  defp validate_publishable_content(changeset) do
+    modules = changeset.data.modules || []
+
+    cond do
+      modules == [] ->
+        add_error(changeset, :status, "cannot publish a course with no modules")
+
+      Enum.any?(modules, &(&1.lectures == [])) ->
+        add_error(
+          changeset,
+          :status,
+          "cannot publish a course with a module that has no lectures"
+        )
+
+      true ->
+        changeset
+    end
   end
 
   @doc false

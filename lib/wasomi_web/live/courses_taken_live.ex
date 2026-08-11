@@ -34,7 +34,7 @@ defmodule WasomiWeb.CoursesTakenLive do
             <h1 class="mt-2 text-3xl font-semibold text-dark">Courses you're taking.</h1>
           </div>
           <span :if={@course_cards != []} class="text-sm text-muted">
-            {length(@course_cards)} {pluralize(length(@course_cards), "course")}
+            {pluralize(length(@course_cards), "course")}
           </span>
         </div>
 
@@ -107,7 +107,4 @@ defmodule WasomiWeb.CoursesTakenLive do
       end
     end) || List.last(lectures)
   end
-
-  defp pluralize(1, word), do: word
-  defp pluralize(_count, word), do: word <> "s"
 end

@@ -199,7 +199,7 @@ defmodule WasomiWeb.AdminLive.Dashboard do
             <div :if={@top_courses != []} class="mt-5 divide-y divide-black/5">
               <.link
                 :for={row <- @top_courses}
-                navigate={~p"/admin/courses/#{row.course.id}"}
+                navigate={~p"/admin/courses/#{row.course.slug}"}
                 class="flex items-center justify-between gap-4 py-4 first:pt-0 last:pb-0 transition hover:opacity-80"
               >
                 <div class="min-w-0">

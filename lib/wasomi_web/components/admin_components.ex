@@ -177,6 +177,96 @@ defmodule WasomiWeb.AdminComponents do
   end
 
   @doc """
+  Body copy for the "archive this course?" confirm dialog, shared by the
+  admin courses list and the course edit modal so the two surfaces can't
+  drift apart in wording. `incomplete_enrollee_count` comes from
+  `Wasomi.Learning.count_incomplete_enrollees/1` — purely informational,
+  archiving itself is never blocked by it.
+  """
+  def archive_confirmation_copy(0) do
+    "This removes it from the public catalog immediately. No enrolled learners are affected."
+  end
+
+  def archive_confirmation_copy(incomplete_enrollee_count) do
+    "This removes it from the public catalog immediately. " <>
+      pluralize(incomplete_enrollee_count, "learner") <>
+      " " <>
+      if(incomplete_enrollee_count == 1, do: "hasn't", else: "haven't") <>
+      " finished yet — they'll keep their access."
+  end
+
+  @doc ~s|Formats a count with its unit, pluralizing past 1 (`"1 learner"`, `"2 learners"`).|
+  def pluralize(1, unit), do: "1 #{unit}"
+  def pluralize(count, unit), do: "#{count} #{unit}s"
+
+  @doc """
+  The full pre-publish checklist — every stage shown, not just failures, so
+  an admin sees what's ready alongside what's blocking. Expects
+  `PublishGuard.checklist/1`'s shape: `%{stage:, status:, reasons:}`, where
+  `status` is `:passed`, `:failed`, or `:not_applicable` (nothing to check
+  yet, e.g. no lectures — shown as neutral, not a misleading checkmark).
+
+  Rows stagger in (`animate-checklist-in`, `tailwind.config.js`) purely for
+  visual polish — the check itself is instant, kept short so it's never a
+  real delay for an admin re-checking after each fix.
+  """
+  attr :stages, :list, required: true
+
+  def publish_checklist(assigns) do
+    ~H"""
+    <div class="mt-4 space-y-2">
+      <div
+        :for={{stage, index} <- Enum.with_index(@stages)}
+        style={"animation-delay: #{min(index, 6) * 60}ms"}
+        class={[
+          "flex items-start gap-3 rounded-xl border p-3 opacity-0 animate-checklist-in",
+          stage.status == :passed && "border-emerald-200 bg-emerald-50",
+          stage.status == :failed && "border-amber-200 bg-amber-50",
+          stage.status == :not_applicable && "border-black/10 bg-soft"
+        ]}
+      >
+        <span class={[
+          "mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full text-white",
+          stage.status == :passed && "bg-emerald-500",
+          stage.status == :failed && "bg-amber-500",
+          stage.status == :not_applicable && "bg-muted"
+        ]}>
+          <.icon
+            name={
+              case stage.status do
+                :passed -> "hero-check-mini"
+                :failed -> "hero-x-mark-mini"
+                :not_applicable -> "hero-minus-mini"
+              end
+            }
+            class="h-3.5 w-3.5"
+          />
+        </span>
+        <div class="min-w-0">
+          <p class={[
+            "text-sm font-medium",
+            stage.status == :passed && "text-emerald-900",
+            stage.status == :failed && "text-amber-900",
+            stage.status == :not_applicable && "text-muted"
+          ]}>
+            {stage.stage}
+            <span :if={stage.status == :not_applicable} class="font-normal">
+              — nothing to check yet
+            </span>
+          </p>
+          <ul
+            :if={stage.status == :failed and stage.reasons != []}
+            class="mt-1 list-inside list-disc space-y-0.5 text-xs text-amber-800"
+          >
+            <li :for={reason <- stage.reasons}>{reason}</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  @doc """
   Horizontal bar chart on a fixed `:max` scale (0-100 by default) — used
   for percentages like completion rate, quiz score, or drop-off.
 
@@ -404,7 +494,6 @@ defmodule WasomiWeb.AdminComponents do
   defp status_classes(status) when status in [:draft, :pending],
     do: "bg-amber-50 text-amber-700"
 
-  defp status_classes(:in_review), do: "bg-blue-50 text-blue-700"
   defp status_classes(:failed), do: "bg-red-50 text-red-600"
   defp status_classes(_status), do: "bg-soft text-body"
 

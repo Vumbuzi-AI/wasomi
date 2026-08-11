@@ -37,7 +37,6 @@ courses = [
     attrs: %{
       slug: "the-human-stack",
       title: "The Human Stack by Alvas",
-      subtitle: "Communication and presentation skills for technology professionals",
       description:
         "Turn complex technical thinking into clear messages, persuasive presentations, and productive workplace conversations.",
       thumbnail_key: "/images/human-stack-course.svg",
@@ -95,7 +94,6 @@ courses = [
     attrs: %{
       slug: "practical-data-analytics",
       title: "Practical Data Analytics",
-      subtitle: "Use spreadsheets, SQL, and dashboards to turn raw data into decisions",
       description:
         "Learn the everyday analytics workflow: clean data, ask sharper questions, query datasets, and present reliable insights.",
       thumbnail_key:
@@ -130,7 +128,6 @@ courses = [
     attrs: %{
       slug: "ux-product-design-lab",
       title: "UX Product Design Lab",
-      subtitle: "Research, prototype, and test digital products people can actually use",
       description:
         "Move from user insight to polished product flows with practical research, wireframing, prototyping, and usability testing.",
       thumbnail_key:
@@ -166,7 +163,6 @@ courses = [
     attrs: %{
       slug: "digital-marketing-growth",
       title: "Digital Marketing Growth",
-      subtitle: "Build campaigns across content, email, search, and paid channels",
       description:
         "Create a practical growth engine with positioning, content planning, conversion funnels, email campaigns, and performance reporting.",
       thumbnail_key:
@@ -201,7 +197,6 @@ courses = [
     attrs: %{
       slug: "project-management-for-digital-teams",
       title: "Project Management for Digital Teams",
-      subtitle: "Plan, ship, and communicate digital work without losing momentum",
       description:
         "Learn lightweight project management methods for software, design, marketing, and operations teams.",
       thumbnail_key:
@@ -236,7 +231,6 @@ courses = [
     attrs: %{
       slug: "financial-skills-for-entrepreneurs",
       title: "Financial Skills for Entrepreneurs",
-      subtitle: "Understand cash flow, pricing, budgets, and reports for better decisions",
       description:
         "Build the financial confidence to price offers, track cash, read reports, and make disciplined business decisions.",
       thumbnail_key:

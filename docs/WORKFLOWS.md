@@ -35,7 +35,7 @@
 
 1. An admin logs in and is redirected to `/admin`.
 2. `/admin/courses` lists courses and supports create/edit actions through `AdminLive.Courses`.
-3. `/admin/courses/:id` shows course detail, modules, lectures, enrollments, and payment data.
+3. `/admin/courses/:slug` shows course detail, modules, lectures, enrollments, and payment data.
 4. Admin content actions call `Wasomi.Catalog` CRUD/reorder functions.
 5. `/admin/lectures/:id/video` calls `Wasomi.Media.create_upload/4` and `upload_status/3`; these require an admin user.
 

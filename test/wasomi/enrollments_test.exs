@@ -135,7 +135,7 @@ defmodule Wasomi.EnrollmentsTest do
     test "activates the course, writes a permanent audit entry, and notifies the learner" do
       learner = user_fixture()
       admin = admin_fixture()
-      course = course_fixture(title: "Negotiation Mastery")
+      course = course_fixture(title: "Negotiation Mastery", status: :published)
 
       assert {:ok, enrollment} =
                Enrollments.grant_access(learner, admin, %{
@@ -188,7 +188,7 @@ defmodule Wasomi.EnrollmentsTest do
     test "refuses to grant access the learner already actively has" do
       learner = user_fixture()
       admin = admin_fixture()
-      course = course_fixture()
+      course = course_fixture(status: :published)
 
       {:ok, pending} = Enrollments.create_pending_enrollment(learner, course)
       {:ok, _active} = Enrollments.activate_enrollment(pending)
@@ -200,6 +200,24 @@ defmodule Wasomi.EnrollmentsTest do
                })
 
       assert %{course_id: ["learner already has active access"]} = errors_on(changeset)
+    end
+
+    test "refuses to grant access to a draft or archived course" do
+      learner = user_fixture()
+      admin = admin_fixture()
+      draft = course_fixture(status: :draft)
+      archived = course_fixture(status: :archived)
+
+      for course <- [draft, archived] do
+        assert {:error, changeset} =
+                 Enrollments.grant_access(learner, admin, %{
+                   "course_id" => course.id,
+                   "reason" => "Manual enrollment for a partner scholarship"
+                 })
+
+        assert %{course_id: ["is not published"]} = errors_on(changeset)
+        refute Enrollments.can_access_course?(learner, course)
+      end
     end
 
     test "refuses to grant access when the performing user is not an admin" do

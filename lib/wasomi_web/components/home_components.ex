@@ -403,7 +403,7 @@ defmodule WasomiWeb.HomeComponents do
           </div>
         </div>
         <h3 class="mt-4 text-lg font-medium text-dark">{@course.title}</h3>
-        <p class="mt-3 line-clamp-2 text-sm leading-6 text-body">{@course.subtitle}</p>
+        <p class="mt-3 line-clamp-2 text-sm leading-6 text-body">{@course.description}</p>
         <div class="mt-5 flex flex-wrap items-center gap-5 text-sm text-body">
           <span class="flex items-center gap-2">
             <svg

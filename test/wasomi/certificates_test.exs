@@ -16,7 +16,16 @@ defmodule Wasomi.CertificatesTest do
 
   setup do
     user = user_fixture()
-    course = course_fixture(status: :published)
+
+    course =
+      course_fixture(
+        status: :published,
+        certificate_enabled: true,
+        certificate_issuer_name: "Wasomi Academy",
+        certificate_signatory_name: "Jane Doe",
+        certificate_signatory_title: "Head of Learning"
+      )
+
     module = course_module_fixture(course_id: course.id, position: 1)
     lecture = lecture_fixture(module_id: module.id, position: 1, duration_seconds: 100)
     enrollment_fixture(user_id: user.id, course_id: course.id, status: :active)

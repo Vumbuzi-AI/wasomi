@@ -31,7 +31,7 @@ defmodule WasomiWeb.AdminLive.CourseCertificateTest do
         "certificate_signatory_title" => "Country Manager"
       })
 
-    {:ok, _view, html} = live(conn, ~p"/admin/courses/#{course.id}/certificate")
+    {:ok, _view, html} = live(conn, ~p"/admin/courses/#{course.slug}/certificate")
 
     assert html =~ "GS1 Kenya"
     assert html =~ "Jane Doe"
@@ -40,7 +40,7 @@ defmodule WasomiWeb.AdminLive.CourseCertificateTest do
 
   test "the live preview updates as issuer/signatory fields change", %{conn: conn} do
     course = course_fixture()
-    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.id}/certificate")
+    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}/certificate")
 
     html =
       view
@@ -54,7 +54,7 @@ defmodule WasomiWeb.AdminLive.CourseCertificateTest do
 
   test "toggling issuance on requires issuer and signatory fields", %{conn: conn} do
     course = course_fixture()
-    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.id}/certificate")
+    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}/certificate")
 
     html =
       view
@@ -66,7 +66,7 @@ defmodule WasomiWeb.AdminLive.CourseCertificateTest do
 
   test "saves a full certificate configuration", %{conn: conn} do
     course = course_fixture()
-    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.id}/certificate")
+    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}/certificate")
 
     view
     |> form("#certificate-form", %{
@@ -102,7 +102,7 @@ defmodule WasomiWeb.AdminLive.CourseCertificateTest do
     Application.put_env(:wasomi, :r2_public_url, "https://cdn.example.test")
 
     course = course_fixture()
-    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.id}/certificate")
+    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}/certificate")
 
     signature =
       file_input(view, "#certificate-form", :signature, [
@@ -136,7 +136,7 @@ defmodule WasomiWeb.AdminLive.CourseCertificateTest do
     Application.put_env(:wasomi, :storage_provider, __MODULE__.NoPublicUrlStorageMock)
 
     course = course_fixture()
-    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.id}/certificate")
+    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}/certificate")
 
     signature =
       file_input(view, "#certificate-form", :signature, [
@@ -158,7 +158,7 @@ defmodule WasomiWeb.AdminLive.CourseCertificateTest do
     conn: conn
   } do
     course = course_fixture()
-    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.id}/certificate")
+    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}/certificate")
 
     expect(Wasomi.CertificateRendererMock, :render, fn assigns ->
       assert assigns.learner_name == "Jane Sample"

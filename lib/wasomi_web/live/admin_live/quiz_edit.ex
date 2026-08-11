@@ -5,19 +5,20 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
   alias Wasomi.Assessments.Question
   alias Wasomi.Assessments.QuizGeneration
   alias Wasomi.Assessments.Workers.GenerateQuizFromPDFWorker
+  alias Wasomi.Catalog
 
   @max_pdf_bytes 25_000_000
 
   @impl true
-  def mount(%{"course_id" => course_id, "id" => quiz_id}, _session, socket) do
-    quiz = load_quiz!(quiz_id, course_id)
+  def mount(%{"course_slug" => course_slug, "id" => quiz_id}, _session, socket) do
+    quiz = load_quiz!(quiz_id, course_slug)
 
     if connected?(socket), do: Assessments.subscribe_to_generation(quiz)
 
     {:ok,
      socket
      |> assign(:page_title, "Edit quiz")
-     |> assign(:course_id, course_id)
+     |> assign(:course_slug, course_slug)
      |> assign(:publish_errors, [])
      |> assign(:new_question_form, nil)
      |> assign(:editing_title?, false)
@@ -26,6 +27,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
      |> assign(:discarding_generation_id, nil)
      |> assign(:confirming_delete_all?, false)
      |> assign(:confirming_publish_all?, false)
+     |> assign(:deleting_question_id, nil)
      |> allow_upload(:source_pdf,
        accept: ~w(.pdf),
        max_entries: 1,
@@ -233,6 +235,14 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
     end
   end
 
+  def handle_event("confirm_delete_question", %{"id" => id}, socket) do
+    {:noreply, assign(socket, :deleting_question_id, id)}
+  end
+
+  def handle_event("cancel_delete_question", _params, socket) do
+    {:noreply, assign(socket, :deleting_question_id, nil)}
+  end
+
   def handle_event("delete_question", %{"id" => id}, socket) do
     question = find_question!(socket.assigns.quiz, id)
     {:ok, _question} = Assessments.delete_question(question)
@@ -241,6 +251,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
      socket
      |> put_flash(:info, "Question removed.")
      |> assign(:publish_errors, [])
+     |> assign(:deleting_question_id, nil)
      |> reload_quiz()}
   end
 
@@ -408,7 +419,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
       <div class="mx-auto max-w-4xl space-y-8 px-5 py-10 lg:px-8">
         <div class="flex flex-wrap items-center justify-between gap-4">
           <.link
-            navigate={~p"/admin/courses/#{@course_id}"}
+            navigate={~p"/admin/courses/#{@course_slug}"}
             class="inline-flex items-center gap-1.5 text-sm font-medium text-muted hover:text-primary"
           >
             <.icon name="hero-arrow-left-mini" class="h-4 w-4" /> Back to course
@@ -722,9 +733,8 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
                 </button>
                 <button
                   type="button"
-                  phx-click="delete_question"
+                  phx-click="confirm_delete_question"
                   phx-value-id={question.id}
-                  data-confirm="Remove this question?"
                   class="inline-flex items-center gap-1.5 text-sm font-medium text-red-500 hover:text-red-700"
                 >
                   <.icon name="hero-trash" class="h-4 w-4" /> Remove
@@ -816,87 +826,52 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
         </div>
       </div>
 
-      <.modal
+      <.confirm_modal
+        :if={@deleting_question_id}
+        id="delete-question-modal"
+        title="Remove this question?"
+        confirm_label="Remove"
+        confirm={JS.push("delete_question", value: %{id: @deleting_question_id})}
+        cancel={JS.push("cancel_delete_question")}
+      >
+        This can't be undone.
+      </.confirm_modal>
+
+      <.confirm_modal
         :if={@discarding_generation_id}
         id="discard-generation-modal"
-        show
-        on_cancel={JS.push("cancel_discard_generation")}
+        title="Discard this batch's draft questions?"
+        confirm_label="Discard drafts"
+        confirm={JS.push("discard_generation_drafts", value: %{id: @discarding_generation_id})}
+        cancel={JS.push("cancel_discard_generation")}
       >
-        <h2 class="text-lg font-semibold text-dark">Discard this batch's draft questions?</h2>
-        <p class="mt-2 text-sm text-body">
-          This can't be undone. Only unpublished drafts from this specific generation are
-          removed — published questions and other batches are untouched.
-        </p>
-        <div class="mt-6 flex items-center gap-4">
-          <button
-            phx-click="discard_generation_drafts"
-            phx-value-id={@discarding_generation_id}
-            class="rounded-full bg-red-600 px-5 py-2 text-sm font-medium text-white transition hover:bg-red-700"
-          >
-            Discard drafts
-          </button>
-          <button
-            phx-click="cancel_discard_generation"
-            class="text-sm font-medium text-muted hover:text-dark"
-          >
-            Cancel
-          </button>
-        </div>
-      </.modal>
+        This can't be undone. Only unpublished drafts from this specific generation are
+        removed — published questions and other batches are untouched.
+      </.confirm_modal>
 
-      <.modal
+      <.confirm_modal
         :if={@confirming_delete_all?}
         id="delete-all-drafts-modal"
-        show
-        on_cancel={JS.push("cancel_delete_all_drafts")}
+        title="Delete all draft questions?"
+        confirm_label="Delete all"
+        confirm={JS.push("delete_all_drafts")}
+        cancel={JS.push("cancel_delete_all_drafts")}
       >
-        <h2 class="text-lg font-semibold text-dark">Delete all draft questions?</h2>
-        <p class="mt-2 text-sm text-body">
-          This can't be undone. Every unpublished draft on this quiz — from any generation
-          batch, or added manually — will be permanently removed.
-        </p>
-        <div class="mt-6 flex items-center gap-4">
-          <button
-            phx-click="delete_all_drafts"
-            class="rounded-full bg-red-600 px-5 py-2 text-sm font-medium text-white transition hover:bg-red-700"
-          >
-            Delete all
-          </button>
-          <button
-            phx-click="cancel_delete_all_drafts"
-            class="text-sm font-medium text-muted hover:text-dark"
-          >
-            Cancel
-          </button>
-        </div>
-      </.modal>
+        This can't be undone. All {pluralize(length(draft_questions(@quiz)), "draft question")} will be deleted.
+      </.confirm_modal>
 
-      <.modal
+      <.confirm_modal
         :if={@confirming_publish_all?}
         id="publish-all-drafts-modal"
-        show
-        on_cancel={JS.push("cancel_publish_all_drafts")}
+        title="Publish all draft questions?"
+        variant={:primary}
+        confirm_label="Publish all"
+        confirm={JS.push("publish_all_drafts")}
+        cancel={JS.push("cancel_publish_all_drafts")}
       >
-        <h2 class="text-lg font-semibold text-dark">Publish all draft questions?</h2>
-        <p class="mt-2 text-sm text-body">
-          Every draft on this quiz will become visible to learners immediately. Make sure
-          you've reviewed all of them first.
-        </p>
-        <div class="mt-6 flex items-center gap-4">
-          <button
-            phx-click="publish_all_drafts"
-            class="rounded-full bg-primary px-5 py-2 text-sm font-medium text-white transition hover:bg-dark"
-          >
-            Publish all
-          </button>
-          <button
-            phx-click="cancel_publish_all_drafts"
-            class="text-sm font-medium text-muted hover:text-dark"
-          >
-            Cancel
-          </button>
-        </div>
-      </.modal>
+        Every draft on this quiz will become visible to learners immediately. Make sure
+        you've reviewed all of them first.
+      </.confirm_modal>
     </.admin_layout>
     """
   end
@@ -1024,10 +999,11 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
     """
   end
 
-  defp load_quiz!(quiz_id, course_id) do
+  defp load_quiz!(quiz_id, course_slug) do
     quiz = Assessments.get_quiz_with_questions!(quiz_id)
+    course = Catalog.get_course_by_slug!(course_slug)
 
-    if to_string(quiz.module.course_id) == to_string(course_id) do
+    if quiz.module.course_id == course.id do
       quiz
     else
       raise Ecto.NoResultsError, queryable: Assessments.Quiz
@@ -1055,7 +1031,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
   end
 
   defp reload_quiz(socket) do
-    quiz = load_quiz!(socket.assigns.quiz.id, socket.assigns.course_id)
+    quiz = load_quiz!(socket.assigns.quiz.id, socket.assigns.course_slug)
     assign_quiz(socket, quiz)
   end
 
@@ -1130,9 +1106,6 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
       true -> Calendar.strftime(datetime, "%b %-d, %Y")
     end
   end
-
-  defp pluralize(1, unit), do: "1 #{unit}"
-  defp pluralize(count, unit), do: "#{count} #{unit}s"
 
   defp draft_count_for_generation(quiz, generation_id) do
     Enum.count(quiz.questions, &(&1.status == :draft and &1.quiz_generation_id == generation_id))

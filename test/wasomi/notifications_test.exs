@@ -17,7 +17,7 @@ defmodule Wasomi.NotificationsTest do
     test "returns the notification when it belongs to the given user" do
       learner = user_fixture()
       admin = admin_fixture()
-      course = course_fixture()
+      course = course_fixture(status: :published)
 
       {:ok, _enrollment} =
         Enrollments.grant_access(learner, admin, %{
@@ -37,7 +37,7 @@ defmodule Wasomi.NotificationsTest do
       learner = user_fixture()
       stranger = user_fixture()
       admin = admin_fixture()
-      course = course_fixture()
+      course = course_fixture(status: :published)
 
       {:ok, _enrollment} =
         Enrollments.grant_access(learner, admin, %{

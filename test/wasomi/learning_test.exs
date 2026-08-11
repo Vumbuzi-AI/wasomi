@@ -242,6 +242,46 @@ defmodule Wasomi.LearningTest do
     end
   end
 
+  describe "count_incomplete_enrollees/1" do
+    test "is zero when the course has no active enrollees" do
+      course = course_fixture(status: :published)
+      course_module = course_module_fixture(course_id: course.id, position: 1)
+      lecture_fixture(module_id: course_module.id, position: 1, duration_seconds: 100)
+
+      assert Learning.count_incomplete_enrollees(course) == 0
+    end
+
+    test "is zero when every active enrollee has completed the course" do
+      user = user_fixture()
+      course = course_fixture(status: :published)
+      course_module = course_module_fixture(course_id: course.id, position: 1)
+      lecture = lecture_fixture(module_id: course_module.id, position: 1, duration_seconds: 100)
+      enrollment_fixture(user_id: user.id, course_id: course.id, status: :active)
+
+      complete_lecture_via_progress!(user, lecture)
+
+      assert Learning.count_incomplete_enrollees(course) == 0
+    end
+
+    test "counts active enrollees who haven't finished, ignoring pending enrollments" do
+      finished = user_fixture()
+      in_progress = user_fixture()
+      still_pending = user_fixture()
+
+      course = course_fixture(status: :published)
+      course_module = course_module_fixture(course_id: course.id, position: 1)
+      lecture = lecture_fixture(module_id: course_module.id, position: 1, duration_seconds: 100)
+
+      enrollment_fixture(user_id: finished.id, course_id: course.id, status: :active)
+      enrollment_fixture(user_id: in_progress.id, course_id: course.id, status: :active)
+      enrollment_fixture(user_id: still_pending.id, course_id: course.id, status: :pending)
+
+      complete_lecture_via_progress!(finished, lecture)
+
+      assert Learning.count_incomplete_enrollees(course) == 1
+    end
+  end
+
   # Seeds a small first save and backdates it, so a later big jump reads as
   # plausible instead of getting clamped.
   defp seed_and_backdate_save!(user, lecture, seconds_ago) do

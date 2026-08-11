@@ -44,6 +44,40 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
     assert has_element?(view, "#mark-lecture-complete")
   end
 
+  test "an already-enrolled learner keeps access after the course is archived", %{
+    conn: conn,
+    user: user
+  } do
+    course = course_fixture(status: :published)
+    module = course_module_fixture(course_id: course.id)
+    lecture = lecture_fixture(module_id: module.id, title: "Still-watchable lecture")
+    {:ok, pending} = Enrollments.create_pending_enrollment(user, course)
+    {:ok, _active} = Enrollments.activate_enrollment(pending)
+
+    assert {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
+    assert has_element?(view, "a[href='#{~p"/courses-taken"}']", "My courses")
+
+    assert {:ok, archived} = Wasomi.Catalog.archive_course(course)
+
+    # "My courses" (not the public course page, which no longer exists for
+    # this course) is always a valid destination regardless of status.
+    assert {:ok, view, html} = live(conn, ~p"/learn/courses/#{archived.slug}")
+    assert html =~ lecture.title
+    assert has_element?(view, "a[href='#{~p"/courses-taken"}']", "My courses")
+  end
+
+  test "a non-enrolled visitor to an archived course is redirected to the catalog, not checkout",
+       %{conn: conn} do
+    course = course_fixture(status: :published)
+    assert {:ok, archived} = Wasomi.Catalog.archive_course(course)
+
+    assert {:error, {:redirect, %{to: path, flash: flash}}} =
+             live(conn, ~p"/learn/courses/#{archived.slug}")
+
+    assert path == ~p"/courses"
+    assert flash["error"] == "This course isn't available."
+  end
+
   test "time updates save progress and unlock the next lecture after completion", %{
     conn: conn,
     user: user
@@ -330,7 +364,9 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
 
       {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}/preview")
 
-      assert has_element?(view, "button[data-lecture-id='#{second.id}'][data-locked='true']")
+      # Unlike a real learner, an admin previewing content isn't sequentially
+      # gated — the second lecture is reachable from the start.
+      assert has_element?(view, "button[data-lecture-id='#{second.id}'][data-locked='false']")
 
       render_hook(view, "video-progress", %{"lecture_id" => first.id, "position_seconds" => 90})
 
@@ -364,6 +400,37 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
 
       # Nothing persisted, same guarantee as the other preview-mode tests.
       assert Wasomi.Learning.list_lecture_progress() == []
+    end
+
+    test "an admin can jump straight to a later, not-yet-completed lecture in preview mode" do
+      conn = build_conn() |> log_in_user(admin_fixture())
+      course = course_fixture(status: :draft)
+      module = course_module_fixture(course_id: course.id, position: 1)
+      lecture_fixture(module_id: module.id, position: 1, title: "First lecture")
+      second = lecture_fixture(module_id: module.id, position: 2, title: "Second lecture")
+
+      {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}/preview")
+
+      html = view |> element("button[data-lecture-id='#{second.id}']") |> render_click()
+
+      assert html =~ "Second lecture"
+      refute html =~ "Complete the previous lecture"
+    end
+
+    test "an admin can reach a module quiz in preview mode without completing any lectures" do
+      conn = build_conn() |> log_in_user(admin_fixture())
+      course = course_fixture(status: :draft)
+      module = course_module_fixture(course_id: course.id, position: 1)
+      lecture_fixture(module_id: module.id, position: 1)
+      quiz = Wasomi.AssessmentsFixtures.quiz_fixture(%{module: module})
+      Wasomi.AssessmentsFixtures.question_fixture(%{quiz: quiz})
+
+      {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}/preview")
+
+      html = view |> element("button", "Module 1 Quiz") |> render_click()
+
+      assert html =~ "Question 1 of 1"
+      refute html =~ "Complete this module&#39;s lectures"
     end
 
     test "submitting a quiz in preview mode does not persist a submission" do

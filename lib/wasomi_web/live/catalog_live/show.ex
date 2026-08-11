@@ -33,7 +33,6 @@ defmodule WasomiWeb.CatalogLive.Show do
               <h1 class="mt-6 text-4xl font-semibold leading-[1.1] text-dark sm:text-5xl lg:text-6xl">
                 {@course.title}
               </h1>
-              <p class="mt-5 text-xl text-body">{@course.subtitle}</p>
               <p class="mt-6 max-w-xl text-body">{@course.description}</p>
 
               <div class="mt-7 flex flex-wrap gap-3 text-sm font-medium text-dark">

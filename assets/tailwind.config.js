@@ -26,6 +26,15 @@ module.exports = {
         sans: ["Outfit", "ui-sans-serif", "system-ui", "sans-serif"],
       },
       maxWidth: { container: "1240px" },
+      keyframes: {
+        "checklist-in": {
+          "0%": { opacity: "0", transform: "translateY(4px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
+        },
+      },
+      animation: {
+        "checklist-in": "checklist-in 0.25s ease-out forwards",
+      },
     },
   },
   plugins: [

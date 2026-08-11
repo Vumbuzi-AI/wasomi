@@ -70,7 +70,9 @@ defmodule WasomiWeb.AdminLive.StudentShow do
     enrolled_course_ids = MapSet.new(enrollments, & &1.course_id)
 
     grantable_courses =
-      Enum.reject(Catalog.list_courses(), &MapSet.member?(enrolled_course_ids, &1.id))
+      Catalog.list_courses()
+      |> Enum.filter(&(&1.status == :published))
+      |> Enum.reject(&MapSet.member?(enrolled_course_ids, &1.id))
 
     socket
     |> assign(:enrollments, enrollments)
@@ -145,7 +147,7 @@ defmodule WasomiWeb.AdminLive.StudentShow do
             <div :if={@enrollments != []} class="mt-5 divide-y divide-black/5">
               <.link
                 :for={enrollment <- @enrollments}
-                navigate={~p"/admin/courses/#{enrollment.course_id}"}
+                navigate={~p"/admin/courses/#{enrollment.course.slug}"}
                 class="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0 transition hover:opacity-80"
               >
                 <div class="min-w-0">

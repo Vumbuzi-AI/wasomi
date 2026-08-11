@@ -22,10 +22,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
         phx-change="validate"
         phx-submit="save"
       >
-        <div class="grid gap-4 sm:grid-cols-2">
-          <.input field={@form[:title]} type="text" label="Title" required />
-          <.input field={@form[:position]} type="number" label="Position" min="1" required />
-        </div>
+        <.input field={@form[:title]} type="text" label="Title" required />
         <.input field={@form[:description]} type="textarea" label="Description" rows="4" required />
 
         <section
@@ -472,7 +469,9 @@ defmodule WasomiWeb.LectureLive.FormComponent do
         result =
           if socket.assigns.action == :new do
             lecture_params =
-              Map.put(lecture_params, "module_id", socket.assigns.lecture.module_id)
+              lecture_params
+              |> Map.put("module_id", socket.assigns.lecture.module_id)
+              |> Map.put("position", socket.assigns.lecture.position)
 
             Catalog.create_lecture_content(
               lecture_params,

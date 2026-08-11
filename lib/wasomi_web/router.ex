@@ -103,9 +103,9 @@ defmodule WasomiWeb.Router do
 
       live "/courses", AdminLive.Courses, :index
       live "/courses/new", AdminLive.Courses, :new
-      live "/courses/:id/edit", AdminLive.Courses, :edit
-      live "/courses/:id", AdminLive.CourseShow, :show
-      live "/courses/:id/certificate", AdminLive.CourseCertificate, :edit
+      live "/courses/:slug/edit", AdminLive.Courses, :edit
+      live "/courses/:slug", AdminLive.CourseShow, :show
+      live "/courses/:slug/certificate", AdminLive.CourseCertificate, :edit
 
       live "/students", AdminLive.Students, :index
       live "/students/:id", AdminLive.StudentShow, :show
@@ -114,8 +114,8 @@ defmodule WasomiWeb.Router do
 
       live "/lectures/:id/video", AdminLectureVideoLive, :edit
 
-      live "/courses/:course_id/quizzes/:id/edit", AdminLive.QuizEdit, :edit
-      live "/courses/:course_id/quizzes/:quiz_id", AdminLive.QuizShow, :show
+      live "/courses/:course_slug/quizzes/:id/edit", AdminLive.QuizEdit, :edit
+      live "/courses/:course_slug/quizzes/:quiz_id", AdminLive.QuizShow, :show
       live "/courses/:slug/preview", CoursePlayerLive, :preview
     end
   end

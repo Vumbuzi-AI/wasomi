@@ -62,7 +62,6 @@ defmodule WasomiWeb.CatalogLive.Index do
                     </span>
                   </div>
                   <h2 class="mt-5 text-xl font-semibold text-dark">{course.title}</h2>
-                  <p class="mt-3 text-body">{course.subtitle}</p>
                   <span class="mt-6 inline-flex items-center gap-2 font-medium text-primary">
                     View course <.icon name="hero-arrow-right-mini" class="h-4 w-4" />
                   </span>

@@ -56,8 +56,12 @@ Routes:
 - `/admin` - `AdminLive.Dashboard`
 - `/admin/courses` - `AdminLive.Courses`
 - `/admin/courses/new` - `AdminLive.Courses`
-- `/admin/courses/:id/edit` - `AdminLive.Courses`
-- `/admin/courses/:id` - `AdminLive.CourseShow`
+- `/admin/courses/:slug/edit` - `AdminLive.Courses`
+- `/admin/courses/:slug` - `AdminLive.CourseShow`
+- `/admin/courses/:slug/certificate` - `AdminLive.CourseCertificate`
+- `/admin/courses/:slug/preview` - `CoursePlayerLive` (admin "view as learner" mode)
+- `/admin/courses/:course_slug/quizzes/:id/edit` - `AdminLive.QuizEdit`
+- `/admin/courses/:course_slug/quizzes/:quiz_id` - `AdminLive.QuizShow` (redirect shim to the edit route)
 - `/admin/students` - `AdminLive.Students`
 - `/admin/students/:id` - `AdminLive.StudentShow`
 - `/admin/payments` - `AdminLive.Payments`

@@ -20,8 +20,7 @@ defmodule WasomiWeb.CourseModuleLive.FormComponent do
         phx-submit="save"
       >
         <.input field={@form[:title]} type="text" label="Title" />
-        <.input field={@form[:description]} type="text" label="Description" />
-        <.input field={@form[:position]} type="number" label="Position" />
+        <.input field={@form[:description]} type="textarea" label="Description" rows="4" />
         <:actions>
           <.button phx-disable-with="Saving...">Save Course module</.button>
         </:actions>
@@ -67,7 +66,9 @@ defmodule WasomiWeb.CourseModuleLive.FormComponent do
 
   defp save_course_module(socket, :new, course_module_params) do
     course_module_params =
-      Map.put(course_module_params, "course_id", socket.assigns.course_module.course_id)
+      course_module_params
+      |> Map.put("course_id", socket.assigns.course_module.course_id)
+      |> Map.put("position", socket.assigns.course_module.position)
 
     case Catalog.create_course_module(course_module_params) do
       {:ok, course_module} ->

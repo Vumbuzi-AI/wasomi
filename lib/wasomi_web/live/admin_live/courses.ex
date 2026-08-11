@@ -1,18 +1,28 @@
 defmodule WasomiWeb.AdminLive.Courses do
   use WasomiWeb, :live_view
 
-  alias Wasomi.{Catalog, Enrollments, Payments}
-  alias Wasomi.Catalog.Course
+  alias Wasomi.{Catalog, Enrollments, Learning, Payments}
+  alias Wasomi.Catalog.{Course, PublishGuard}
   alias WasomiWeb.CourseLive.FormComponent
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, assign(socket, :page_title, "Courses")}
+    {:ok,
+     socket
+     |> assign(:page_title, "Courses")
+     |> assign(:archiving_course, nil)
+     |> assign(:incomplete_enrollee_count, 0)
+     |> assign(:publish_checklist_course, nil)
+     |> assign(:publish_checklist, nil)}
   end
 
   @impl true
   def handle_params(params, _url, socket) do
-    {:noreply, socket |> apply_action(socket.assigns.live_action, params) |> load_courses()}
+    {:noreply,
+     socket
+     |> assign(publish_checklist_course: nil, publish_checklist: nil)
+     |> apply_action(socket.assigns.live_action, params)
+     |> load_courses()}
   end
 
   defp apply_action(socket, :index, _params) do
@@ -25,9 +35,9 @@ defmodule WasomiWeb.AdminLive.Courses do
     |> assign(:form_title, "New course")
   end
 
-  defp apply_action(socket, :edit, %{"id" => id}) do
+  defp apply_action(socket, :edit, %{"slug" => slug}) do
     socket
-    |> assign(:course, Catalog.get_course!(id))
+    |> assign(:course, Catalog.get_course_by_slug!(slug))
     |> assign(:form_title, "Edit course")
   end
 
@@ -39,21 +49,51 @@ defmodule WasomiWeb.AdminLive.Courses do
   end
 
   @impl true
-  def handle_event("delete", %{"id" => id}, socket) do
+  def handle_event("publish_course", %{"id" => id}, socket) do
     course = Catalog.get_course!(id)
 
-    case Catalog.delete_course(course) do
-      {:ok, _} ->
-        {:noreply, socket |> put_flash(:info, "Course deleted.") |> load_courses()}
-
-      {:error, _changeset} ->
+    case Catalog.publish_course(course) do
+      {:ok, _course} ->
         {:noreply,
-         put_flash(
-           socket,
-           :error,
-           "Could not delete this course. It may still have enrollments or payments attached."
-         )}
+         socket
+         |> put_flash(:info, "Course published — it's now visible in the public catalog.")
+         |> load_courses()}
+
+      {:error, issues} when is_list(issues) ->
+        checklist = course.id |> Catalog.get_course_with_outline!() |> PublishGuard.checklist()
+
+        {:noreply,
+         socket
+         |> assign(:publish_checklist_course, course)
+         |> assign(:publish_checklist, checklist)}
     end
+  end
+
+  def handle_event("close_publish_checklist", _params, socket) do
+    {:noreply, assign(socket, publish_checklist_course: nil, publish_checklist: nil)}
+  end
+
+  def handle_event("confirm_archive_course", %{"id" => id}, socket) do
+    course = Catalog.get_course!(id)
+
+    {:noreply,
+     socket
+     |> assign(:archiving_course, course)
+     |> assign(:incomplete_enrollee_count, Learning.count_incomplete_enrollees(course))}
+  end
+
+  def handle_event("cancel_archive_course", _params, socket) do
+    {:noreply, assign(socket, :archiving_course, nil)}
+  end
+
+  def handle_event("archive_course", %{"id" => id}, socket) do
+    {:ok, _course} = Catalog.archive_course(Catalog.get_course!(id))
+
+    {:noreply,
+     socket
+     |> put_flash(:info, "Course archived — it's no longer visible in the public catalog.")
+     |> assign(:archiving_course, nil)
+     |> load_courses()}
   end
 
   defp load_courses(socket) do
@@ -112,34 +152,41 @@ defmodule WasomiWeb.AdminLive.Courses do
               </span>
               <div class="absolute right-4 top-4 z-10 flex items-center gap-2">
                 <.link
-                  patch={~p"/admin/courses/#{row.course.id}/edit"}
+                  patch={~p"/admin/courses/#{row.course.slug}/edit"}
                   class="grid h-9 w-9 place-items-center rounded-full bg-white/95 text-dark shadow-sm backdrop-blur transition hover:bg-white hover:text-primary"
                   title="Edit course"
                 >
                   <.icon name="hero-pencil-square" class="h-4 w-4" />
                 </.link>
-                <.link
-                  phx-click={JS.push("delete", value: %{id: row.course.id})}
-                  data-confirm={"Delete \"#{row.course.title}\"? This cannot be undone."}
-                  class="grid h-9 w-9 place-items-center rounded-full bg-white/95 text-dark shadow-sm backdrop-blur transition hover:bg-white hover:text-red-500"
-                  title="Delete course"
+                <button
+                  :if={row.course.status == :draft}
+                  type="button"
+                  phx-click={JS.push("publish_course", value: %{id: row.course.id})}
+                  class="grid h-9 w-9 place-items-center rounded-full bg-white/95 text-dark shadow-sm backdrop-blur transition hover:bg-white hover:text-primary"
+                  title="Publish course"
                 >
-                  <.icon name="hero-trash" class="h-4 w-4" />
-                </.link>
+                  <.icon name="hero-paper-airplane" class="h-4 w-4" />
+                </button>
+                <button
+                  :if={row.course.status == :published}
+                  type="button"
+                  phx-click={JS.push("confirm_archive_course", value: %{id: row.course.id})}
+                  class="grid h-9 w-9 place-items-center rounded-full bg-white/95 text-dark shadow-sm backdrop-blur transition hover:bg-white hover:text-red-500"
+                  title="Archive course"
+                >
+                  <.icon name="hero-archive-box" class="h-4 w-4" />
+                </button>
               </div>
             </div>
 
             <div class="flex flex-1 flex-col p-6">
               <.link
-                navigate={~p"/admin/courses/#{row.course.id}"}
+                navigate={~p"/admin/courses/#{row.course.slug}"}
                 class="text-lg font-semibold leading-snug text-dark after:absolute after:inset-0 group-hover:text-primary"
               >
                 {row.course.title}
               </.link>
               <p class="mt-1 text-sm text-muted">/{row.course.slug}</p>
-              <p :if={row.course.subtitle} class="mt-3 line-clamp-2 text-sm text-body">
-                {row.course.subtitle}
-              </p>
 
               <dl class=" mt-4 divide-y divide-black/5 rounded-2xl bg-soft px-4">
                 <.metric label="Price" value={Catalog.format_price(row.course)} />
@@ -183,8 +230,47 @@ defmodule WasomiWeb.AdminLive.Courses do
           title={@form_title}
           action={@live_action}
           course={@course}
-          patch={~p"/admin/courses"}
+          patch={fn _course -> ~p"/admin/courses" end}
         />
+      </.modal>
+
+      <.confirm_modal
+        :if={@archiving_course}
+        id="archive-course-modal"
+        title={"Archive \"#{@archiving_course.title}\"?"}
+        confirm_label="Archive"
+        confirm={JS.push("archive_course", value: %{id: @archiving_course.id})}
+        cancel={JS.push("cancel_archive_course")}
+      >
+        {archive_confirmation_copy(@incomplete_enrollee_count)}
+      </.confirm_modal>
+
+      <.modal
+        :if={@publish_checklist_course}
+        id="publish-checklist-modal"
+        show
+        on_cancel={JS.push("close_publish_checklist")}
+      >
+        <h2 class="text-lg font-semibold text-dark">
+          "{@publish_checklist_course.title}" isn't ready to publish yet
+        </h2>
+        <p class="mt-1 text-sm text-body">Here's what's blocking it.</p>
+        <.publish_checklist stages={@publish_checklist} />
+        <div class="mt-6 flex items-center gap-4">
+          <.link
+            patch={~p"/admin/courses/#{@publish_checklist_course.slug}/edit"}
+            class="rounded-full bg-dark px-5 py-2 text-sm font-medium text-white transition hover:bg-primary"
+          >
+            Edit course
+          </.link>
+          <button
+            type="button"
+            phx-click="close_publish_checklist"
+            class="text-sm font-medium text-muted hover:text-dark"
+          >
+            Close
+          </button>
+        </div>
       </.modal>
     </.admin_layout>
     """

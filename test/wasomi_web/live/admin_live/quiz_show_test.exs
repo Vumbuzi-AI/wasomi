@@ -16,7 +16,8 @@ defmodule WasomiWeb.AdminLive.QuizShowTest do
 
   defp quiz_path(quiz) do
     course_id = Assessments.get_quiz_with_questions!(quiz.id).module.course_id
-    ~p"/admin/courses/#{course_id}/quizzes/#{quiz.id}"
+    course_slug = Wasomi.Catalog.get_course!(course_id).slug
+    ~p"/admin/courses/#{course_slug}/quizzes/#{quiz.id}"
   end
 
   setup %{conn: conn} do
@@ -26,17 +27,18 @@ defmodule WasomiWeb.AdminLive.QuizShowTest do
   test "redirects to the edit page", %{conn: conn} do
     quiz = quiz_fixture()
     course_id = Assessments.get_quiz_with_questions!(quiz.id).module.course_id
+    course_slug = Wasomi.Catalog.get_course!(course_id).slug
 
     assert {:error, {:live_redirect, %{to: to}}} = live(conn, quiz_path(quiz))
-    assert to == ~p"/admin/courses/#{course_id}/quizzes/#{quiz.id}/edit"
+    assert to == ~p"/admin/courses/#{course_slug}/quizzes/#{quiz.id}/edit"
   end
 
-  test "a course_id mismatch still raises", %{conn: conn} do
+  test "a course_slug mismatch still raises", %{conn: conn} do
     quiz = quiz_fixture()
     other_course = course_fixture()
 
     assert_raise Ecto.NoResultsError, fn ->
-      live(conn, ~p"/admin/courses/#{other_course.id}/quizzes/#{quiz.id}")
+      live(conn, ~p"/admin/courses/#{other_course.slug}/quizzes/#{quiz.id}")
     end
   end
 end

@@ -15,7 +15,6 @@ defmodule Wasomi.CatalogTest do
       title: nil,
       currency: nil,
       slug: nil,
-      subtitle: nil,
       thumbnail_key: nil,
       price_minor: nil
     }
@@ -23,6 +22,14 @@ defmodule Wasomi.CatalogTest do
     test "list_courses/0 returns all courses" do
       course = course_fixture()
       assert Catalog.list_courses() == [course]
+    end
+
+    test "list_courses/0 orders newest first, so a just-created course leads the list" do
+      first = course_fixture(slug: "first-course")
+      second = course_fixture(slug: "second-course")
+      third = course_fixture(slug: "third-course")
+
+      assert Enum.map(Catalog.list_courses(), & &1.id) == [third.id, second.id, first.id]
     end
 
     test "get_course!/1 returns the course with given id" do
@@ -38,7 +45,6 @@ defmodule Wasomi.CatalogTest do
         title: "some title",
         currency: "kes",
         slug: "Some Course",
-        subtitle: "some subtitle",
         thumbnail_key: "some thumbnail_key",
         price_minor: 42
       }
@@ -50,7 +56,6 @@ defmodule Wasomi.CatalogTest do
       assert course.title == "some title"
       assert course.currency == "KES"
       assert course.slug == "some-course"
-      assert course.subtitle == "some subtitle"
       assert course.thumbnail_key == "some thumbnail_key"
       assert course.price_minor == 42
     end
@@ -62,7 +67,6 @@ defmodule Wasomi.CatalogTest do
                Catalog.create_course(%{
                  title: "Second Course",
                  description: "desc",
-                 subtitle: "sub",
                  thumbnail_key: "key",
                  price_minor: 100
                })
@@ -77,24 +81,20 @@ defmodule Wasomi.CatalogTest do
 
       update_attrs = %{
         position: 43,
-        status: :in_review,
         description: "some updated description",
         title: "some updated title",
         currency: "usd",
         slug: "Some Updated Slug",
-        subtitle: "some updated subtitle",
         thumbnail_key: "some updated thumbnail_key",
         price_minor: 43
       }
 
       assert {:ok, %Course{} = course} = Catalog.update_course(course, update_attrs)
       assert course.position == 43
-      assert course.status == :in_review
       assert course.description == "some updated description"
       assert course.title == "some updated title"
       assert course.currency == "USD"
       assert course.slug == "some-updated-slug"
-      assert course.subtitle == "some updated subtitle"
       assert course.thumbnail_key == "some updated thumbnail_key"
       assert course.price_minor == 43
     end
@@ -113,12 +113,6 @@ defmodule Wasomi.CatalogTest do
       course = course_fixture()
       assert {:error, %Ecto.Changeset{}} = Catalog.update_course(course, @invalid_attrs)
       assert course == Catalog.get_course!(course.id)
-    end
-
-    test "delete_course/1 deletes the course" do
-      course = course_fixture()
-      assert {:ok, %Course{}} = Catalog.delete_course(course)
-      assert_raise Ecto.NoResultsError, fn -> Catalog.get_course!(course.id) end
     end
 
     test "change_course/1 returns a course changeset" do
@@ -177,6 +171,35 @@ defmodule Wasomi.CatalogTest do
 
     test "create_course_module/1 with invalid data returns error changeset" do
       assert {:error, %Ecto.Changeset{}} = Catalog.create_course_module(@invalid_attrs)
+    end
+
+    test "create_course_module/1 rejects a duplicate title (case-insensitive) within the same course" do
+      course = course_fixture()
+      course_module_fixture(course_id: course.id, position: 1, title: "Getting Started")
+
+      assert {:error, changeset} =
+               Catalog.create_course_module(%{
+                 course_id: course.id,
+                 position: 2,
+                 description: "some description",
+                 title: "GETTING STARTED"
+               })
+
+      assert %{title: ["is already used by another module in this course"]} =
+               errors_on(changeset)
+    end
+
+    test "create_course_module/1 allows the same title in a different course" do
+      course_module_fixture(title: "Getting Started")
+      other_course = course_fixture()
+
+      assert {:ok, _module} =
+               Catalog.create_course_module(%{
+                 course_id: other_course.id,
+                 position: 1,
+                 description: "some description",
+                 title: "Getting Started"
+               })
     end
 
     test "update_course_module/2 with valid data updates the course_module" do
@@ -278,6 +301,41 @@ defmodule Wasomi.CatalogTest do
 
     test "create_lecture/1 with invalid data returns error changeset" do
       assert {:error, %Ecto.Changeset{}} = Catalog.create_lecture(@invalid_attrs)
+    end
+
+    test "create_lecture/1 rejects a duplicate title (case-insensitive) within the same module" do
+      course_module = course_module_fixture()
+      lecture_fixture(module_id: course_module.id, position: 1, title: "Welcome")
+
+      assert {:error, changeset} =
+               Catalog.create_lecture(%{
+                 module_id: course_module.id,
+                 position: 2,
+                 description: "some description",
+                 title: "WELCOME",
+                 video_provider: :mux,
+                 video_asset_id: "some video_asset_id",
+                 duration_seconds: 42
+               })
+
+      assert %{title: ["is already used by another lecture in this module"]} =
+               errors_on(changeset)
+    end
+
+    test "create_lecture/1 allows the same title in a different module" do
+      lecture_fixture(title: "Welcome")
+      other_module = course_module_fixture()
+
+      assert {:ok, _lecture} =
+               Catalog.create_lecture(%{
+                 module_id: other_module.id,
+                 position: 1,
+                 description: "some description",
+                 title: "Welcome",
+                 video_provider: :mux,
+                 video_asset_id: "some video_asset_id",
+                 duration_seconds: 42
+               })
     end
 
     test "update_lecture/2 with valid data updates the lecture" do
@@ -409,14 +467,7 @@ defmodule Wasomi.CatalogTest do
   describe "publish lifecycle" do
     import Wasomi.CatalogFixtures
 
-    alias Wasomi.Catalog.PublishGuard
-
-    test "submit_course_for_review/1 moves a draft course to in_review" do
-      course = course_fixture(status: :draft)
-
-      assert {:ok, updated} = Catalog.submit_course_for_review(course)
-      assert updated.status == :in_review
-    end
+    alias Wasomi.Catalog.{Course, CourseModule, Lecture, PublishGuard}
 
     test "PublishGuard.check/1 lists every missing requirement for a bare course" do
       # price_minor is required (and NOT NULL) at both the changeset and DB
@@ -491,6 +542,70 @@ defmodule Wasomi.CatalogTest do
       assert PublishGuard.check(Catalog.get_course_with_outline!(course.id)) == :ok
     end
 
+    test "PublishGuard.checklist/1 always returns every stage, passing or failing" do
+      course = course_fixture(thumbnail_key: "")
+
+      stages = PublishGuard.checklist(Catalog.get_course_with_outline!(course.id))
+
+      assert Enum.map(stages, & &1.stage) == [
+               "Curriculum",
+               "Lecture content",
+               "Pricing",
+               "Thumbnail",
+               "Quizzes",
+               "Certificate details"
+             ]
+
+      by_stage = Map.new(stages, &{&1.stage, &1})
+      assert by_stage["Curriculum"].status == :failed
+      assert by_stage["Curriculum"].reasons == ["Add at least one module."]
+      assert by_stage["Thumbnail"].status == :failed
+      assert by_stage["Thumbnail"].reasons == ["Attach a course thumbnail."]
+      # Nothing to check yet for a course with no lectures/modules at all —
+      # :not_applicable (neutral), not a checkmark, since nothing was
+      # actually verified.
+      assert by_stage["Lecture content"].status == :not_applicable
+      assert by_stage["Lecture content"].reasons == []
+      assert by_stage["Quizzes"].status == :not_applicable
+      # certificate_enabled defaults to false on the fixture, so nothing to
+      # check there either.
+      assert by_stage["Certificate details"].status == :not_applicable
+      # price_minor has a fixture default (not nil), so Pricing passes here.
+      assert by_stage["Pricing"].status == :passed
+    end
+
+    test "PublishGuard.checklist/1 shows every stage passing for a fully-prepared course" do
+      course =
+        course_fixture(
+          price_minor: 150_000,
+          thumbnail_key: "cover.jpg",
+          certificate_enabled: true,
+          certificate_issuer_name: "Wasomi Academy",
+          certificate_signatory_name: "Jane Doe",
+          certificate_signatory_title: "Head of Learning"
+        )
+
+      course_module = course_module_fixture(course_id: course.id, position: 1)
+      lecture_fixture(module_id: course_module.id, position: 1, video_asset_id: "abc123")
+      Wasomi.AssessmentsFixtures.quiz_fixture(%{module: course_module, active: true})
+
+      stages = PublishGuard.checklist(Catalog.get_course_with_outline!(course.id))
+
+      assert Enum.all?(stages, &(&1.status == :passed))
+      assert Enum.all?(stages, &(&1.reasons == []))
+    end
+
+    test "PublishGuard.checklist/1 shows quizzes as not applicable when no module has one yet" do
+      course = course_fixture(price_minor: 150_000, thumbnail_key: "cover.jpg")
+      course_module = course_module_fixture(course_id: course.id, position: 1)
+      lecture_fixture(module_id: course_module.id, position: 1, video_asset_id: "abc123")
+
+      stages = PublishGuard.checklist(Catalog.get_course_with_outline!(course.id))
+      quizzes_stage = Enum.find(stages, &(&1.stage == "Quizzes"))
+
+      assert quizzes_stage.status == :not_applicable
+    end
+
     test "PublishGuard.check/1 does not require a quiz on modules that have none" do
       course = course_fixture(price_minor: 150_000, thumbnail_key: "cover.jpg")
       course_module = course_module_fixture(course_id: course.id, position: 1)
@@ -520,9 +635,96 @@ defmodule Wasomi.CatalogTest do
       assert PublishGuard.check(Catalog.get_course_with_outline!(course.id)) == :ok
     end
 
+    test "PublishGuard.check/1 flags a ready course with certificates enabled but no signatory details" do
+      # `Course.certificate_changeset/2` already refuses to persist
+      # `certificate_enabled: true` with blank signatory fields, so a real
+      # course can never actually reach the guard in this state today —
+      # build the struct directly to unit-test the guard's own logic in
+      # isolation (same defense-in-depth reasoning as the missing-video
+      # check above).
+      course = %Course{
+        certificate_enabled: true,
+        modules: [
+          %CourseModule{
+            lectures: [%Lecture{video_asset_id: "abc123"}]
+          }
+        ],
+        price_minor: 150_000,
+        thumbnail_key: "cover.jpg"
+      }
+
+      assert {:error, issues} = PublishGuard.check(course)
+
+      assert "Add certificate issuer and signatory details, or disable certificates for this course." in issues
+    end
+
+    test "PublishGuard.check/1 passes a ready course with certificates enabled and full signatory details" do
+      course =
+        course_fixture(
+          price_minor: 150_000,
+          thumbnail_key: "cover.jpg",
+          certificate_enabled: true,
+          certificate_issuer_name: "Wasomi Academy",
+          certificate_signatory_name: "Jane Doe",
+          certificate_signatory_title: "Head of Learning"
+        )
+
+      course_module = course_module_fixture(course_id: course.id, position: 1)
+      lecture_fixture(module_id: course_module.id, position: 1, video_asset_id: "abc123")
+
+      assert PublishGuard.check(Catalog.get_course_with_outline!(course.id)) == :ok
+    end
+
+    test "publish_course/1 rejects a ready course with certificates enabled but no signatory details" do
+      course =
+        course_fixture(status: :draft, price_minor: 150_000, thumbnail_key: "cover.jpg")
+
+      course_module = course_module_fixture(course_id: course.id, position: 1)
+      lecture_fixture(module_id: course_module.id, position: 1, video_asset_id: "abc123")
+
+      # certificate_changeset/2 already prevents this combination from ever
+      # being saved through the normal admin-facing path — bypass it
+      # directly here to simulate the database somehow already being in
+      # this state, which is exactly the scenario this second check exists
+      # to defend against.
+      course = course |> Ecto.Changeset.change(certificate_enabled: true) |> Repo.update!()
+
+      assert {:error, issues} = Catalog.publish_course(course)
+
+      assert "Add certificate issuer and signatory details, or disable certificates for this course." in issues
+
+      assert Catalog.get_course!(course.id).status == :draft
+    end
+
+    test "Course.publish_changeset/1 independently rejects a course with no modules, even if PublishGuard is bypassed" do
+      course = %Course{modules: []}
+
+      changeset = Course.publish_changeset(course)
+
+      refute changeset.valid?
+      assert %{status: ["cannot publish a course with no modules"]} = errors_on(changeset)
+    end
+
+    test "Course.publish_changeset/1 independently rejects a course with a lectureless module" do
+      course = %Course{modules: [%CourseModule{lectures: []}]}
+
+      changeset = Course.publish_changeset(course)
+
+      refute changeset.valid?
+
+      assert %{status: ["cannot publish a course with a module that has no lectures"]} =
+               errors_on(changeset)
+    end
+
+    test "Course.publish_changeset/1 accepts a course with content" do
+      course = %Course{modules: [%CourseModule{lectures: [%Lecture{}]}]}
+
+      assert Course.publish_changeset(course).valid?
+    end
+
     test "publish_course/1 publishes a ready course and it appears in the public catalog" do
       course =
-        course_fixture(status: :in_review, price_minor: 150_000, thumbnail_key: "cover.jpg")
+        course_fixture(status: :draft, price_minor: 150_000, thumbnail_key: "cover.jpg")
 
       course_module = course_module_fixture(course_id: course.id, position: 1)
       lecture_fixture(module_id: course_module.id, position: 1, video_asset_id: "abc123")
@@ -540,15 +742,63 @@ defmodule Wasomi.CatalogTest do
       assert Catalog.get_course!(course.id).status == :draft
     end
 
-    test "publish_course/1 succeeds directly from :draft — :in_review is not a required step" do
-      course =
-        course_fixture(status: :draft, price_minor: 150_000, thumbnail_key: "cover.jpg")
+    test "archive_course/1 moves a published course to archived and hides it from the public catalog" do
+      course = course_fixture(status: :published)
 
+      assert {:ok, archived} = Catalog.archive_course(course)
+      assert archived.status == :archived
+      refute Enum.any?(Catalog.list_published_courses(), &(&1.id == course.id))
+    end
+
+    test "archive_course/1 is unconditional — it does not check for enrolled learners" do
+      import Wasomi.{AccountsFixtures, EnrollmentsFixtures}
+
+      course = course_fixture(status: :published)
       course_module = course_module_fixture(course_id: course.id, position: 1)
       lecture_fixture(module_id: course_module.id, position: 1, video_asset_id: "abc123")
+      learner = user_fixture()
+      enrollment_fixture(user_id: learner.id, course_id: course.id, status: :active)
 
-      assert {:ok, published} = Catalog.publish_course(course)
-      assert published.status == :published
+      assert {:ok, %{status: :archived}} = Catalog.archive_course(course)
+    end
+
+    test "update_course/2 silently ignores an attempt to set status: :archived directly" do
+      course = course_fixture(status: :published)
+
+      assert {:ok, %Wasomi.Catalog.Course{} = updated} =
+               Catalog.update_course(course, %{status: :archived, title: "Still published"})
+
+      assert updated.status == :published
+      assert updated.title == "Still published"
+    end
+
+    test "update_course/2 silently ignores an attempt to set status: :draft directly" do
+      course = course_fixture(status: :published)
+
+      assert {:ok, %Wasomi.Catalog.Course{} = updated} =
+               Catalog.update_course(course, %{status: :draft, title: "Still published"})
+
+      assert updated.status == :published
+      assert updated.title == "Still published"
+    end
+
+    test "unpublish_course/1 moves a published course back to draft and hides it from the public catalog" do
+      course = course_fixture(status: :published)
+
+      assert {:ok, unpublished} = Catalog.unpublish_course(course)
+      assert unpublished.status == :draft
+      refute Enum.any?(Catalog.list_published_courses(), &(&1.id == course.id))
+    end
+
+    test "unpublish_course/1 is unconditional — it does not check for enrolled learners" do
+      import Wasomi.{AccountsFixtures, EnrollmentsFixtures}
+
+      course = course_fixture(status: :published)
+      learner = user_fixture()
+      enrollment_fixture(user_id: learner.id, course_id: course.id, status: :active)
+
+      assert {:ok, %{status: :draft}} = Catalog.unpublish_course(course)
+      assert Wasomi.Enrollments.can_access_course?(learner, course)
     end
   end
 

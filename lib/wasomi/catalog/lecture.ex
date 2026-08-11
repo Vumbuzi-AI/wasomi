@@ -47,6 +47,10 @@ defmodule Wasomi.Catalog.Lecture do
       name: :lectures_module_id_position_index,
       message: "has already been used in this module"
     )
+    |> unique_constraint(:title,
+      name: :lectures_module_id_title_index,
+      message: "is already used by another lecture in this module"
+    )
     |> check_constraint(:duration_seconds, name: :lectures_duration_must_be_positive)
     |> check_constraint(:position, name: :lectures_position_must_be_positive)
     |> check_constraint(:video_provider, name: :lectures_video_provider_must_be_valid)

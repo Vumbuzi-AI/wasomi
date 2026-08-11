@@ -29,6 +29,13 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
       {:ok, {:ready, "signed-playback-456", 612}}
     end)
 
+    expect(Wasomi.MediaProviderMock, :thumbnail_url, fn %Catalog.Lecture{
+                                                          video_asset_id: "signed-playback-456"
+                                                        },
+                                                        _user ->
+      {:ok, "https://image.mux.test/signed-playback-456/thumbnail.jpg?token=abc"}
+    end)
+
     {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.id}")
 
     render_click(view, "new_lecture", %{"module-id" => to_string(course_module.id)})
@@ -39,6 +46,7 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
     html = render_hook(upload, "check-upload", %{})
 
     assert html =~ "Video is ready for protected playback."
+    assert html =~ "https://image.mux.test/signed-playback-456/thumbnail.jpg?token=abc"
 
     html =
       view

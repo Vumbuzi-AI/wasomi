@@ -65,6 +65,29 @@ defmodule Wasomi.Media.Mux do
   def playback_token(%Lecture{video_provider: provider}, _user, _ttl),
     do: {:error, {:unsupported_video_provider, provider}}
 
+  @impl true
+  def thumbnail_url(
+        %Lecture{video_provider: :mux, video_asset_id: playback_id},
+        %User{} = user
+      )
+      when is_binary(playback_id) and playback_id != "" do
+    claims = %{
+      "sub" => playback_id,
+      "aud" => "t",
+      "exp" => System.system_time(:second) + 300,
+      "kid" => signing_key_id(),
+      "viewer_id" => viewer_id(user)
+    }
+
+    with {:ok, token} <- sign_jwt(claims) do
+      {:ok,
+       "https://image.mux.com/#{URI.encode(playback_id)}/thumbnail.jpg?token=#{URI.encode(token)}"}
+    end
+  end
+
+  def thumbnail_url(%Lecture{video_provider: provider}, _user),
+    do: {:error, {:unsupported_video_provider, provider}}
+
   defp resolve_upload(%{"asset_id" => asset_id}) when is_binary(asset_id) do
     with {:ok, asset} <- request(:get, "/assets/#{URI.encode(asset_id)}") do
       case asset do

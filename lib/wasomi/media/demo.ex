@@ -20,4 +20,7 @@ defmodule Wasomi.Media.Demo do
 
   @impl true
   def playback_token(%Lecture{}, %User{}, _ttl), do: {:ok, ""}
+
+  @impl true
+  def thumbnail_url(%Lecture{}, %User{}), do: {:error, :demo_provider_does_not_support_thumbnails}
 end

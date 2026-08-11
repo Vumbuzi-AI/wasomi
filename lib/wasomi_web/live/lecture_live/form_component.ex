@@ -37,31 +37,45 @@ defmodule WasomiWeb.LectureLive.FormComponent do
             </p>
           </div>
 
-          <div id="lecture-video-upload" phx-hook="MuxUpload" phx-target={@myself}>
-            <label class="block text-sm font-medium text-dark" for="lecture-video-file">
-              Video file
-            </label>
+          <div
+            id="lecture-video-upload"
+            phx-hook="MuxUpload"
+            phx-target={@myself}
+            class="relative rounded-2xl border-2 border-dashed border-black/10 bg-white p-6 text-center transition hover:border-primary"
+          >
             <input
               id="lecture-video-file"
               data-role="file"
               type="file"
               accept="video/*"
-              class="mt-2 block w-full rounded-2xl border border-black/10 bg-white text-sm text-body file:mr-4 file:rounded-full file:border-0 file:bg-mint file:px-4 file:py-2 file:font-medium file:text-primary"
+              class="absolute inset-0 h-full w-full cursor-pointer opacity-0"
             />
 
-            <div class="mt-4 h-2 overflow-hidden rounded-full bg-soft">
-              <div data-role="progress" class="h-full w-0 rounded-full bg-primary transition-all">
-              </div>
+            <div data-role="idle" class="space-y-2">
+              <.icon name="hero-arrow-up-tray" class="mx-auto h-6 w-6 text-muted" />
+              <p class="text-sm font-medium text-dark">Drop a video here, or click to choose one</p>
+              <p class="text-xs text-muted">MP4, MOV or WebM</p>
             </div>
 
-            <button
-              data-role="start"
-              type="button"
-              disabled={@video_upload_state in [:uploading, :processing]}
-              class="mt-4 inline-flex items-center gap-2 rounded-full bg-dark px-4 py-2.5 text-sm font-medium text-white transition hover:bg-primary disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <.icon name="hero-arrow-up-tray" class="h-4 w-4" /> Upload to Mux
-            </button>
+            <div data-role="selected" class="hidden space-y-3">
+              <div class="flex items-center justify-center gap-3">
+                <img
+                  :if={@video_thumbnail_url}
+                  data-role="thumbnail"
+                  src={@video_thumbnail_url}
+                  class="h-16 w-28 rounded-lg bg-black object-cover"
+                />
+                <div class="text-left">
+                  <p data-role="filename" class="text-sm font-medium text-dark"></p>
+                  <p data-role="filesize" class="text-xs text-muted"></p>
+                </div>
+              </div>
+
+              <div class="h-2 overflow-hidden rounded-full bg-soft">
+                <div data-role="progress" class="h-full w-0 rounded-full bg-primary transition-all">
+                </div>
+              </div>
+            </div>
           </div>
 
           <p
@@ -322,6 +336,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
       |> assign_new(:video_upload_state, fn -> :idle end)
       |> assign_new(:video_upload_message, fn -> nil end)
       |> assign_new(:video_ready, fn -> nil end)
+      |> assign_new(:video_thumbnail_url, fn -> nil end)
 
     socket =
       if Map.has_key?(socket.assigns, :uploads) and
@@ -468,7 +483,9 @@ defmodule WasomiWeb.LectureLive.FormComponent do
   end
 
   def handle_event("create-upload", _params, socket) do
-    case Media.create_upload(socket.assigns.current_user, socket.assigns.lecture, []) do
+    case safe_media_call(fn ->
+           Media.create_upload(socket.assigns.current_user, socket.assigns.lecture, [])
+         end) do
       {:ok, upload} ->
         {:noreply,
          socket
@@ -481,7 +498,10 @@ defmodule WasomiWeb.LectureLive.FormComponent do
         {:noreply,
          socket
          |> assign(:video_upload_state, :error)
-         |> assign(:video_upload_message, "Could not start upload: #{inspect(reason)}")}
+         |> assign(
+           :video_upload_message,
+           "Could not start upload: #{video_error_message(reason)}"
+         )}
     end
   end
 
@@ -498,7 +518,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
         _params,
         %{assigns: %{video_upload: %{id: upload_id}}} = socket
       ) do
-    case Media.upload_status(socket.assigns.current_user, upload_id) do
+    case safe_media_call(fn -> Media.upload_status(socket.assigns.current_user, upload_id) end) do
       {:ok, {:ready, playback_id, duration_seconds}} ->
         {:noreply,
          socket
@@ -507,6 +527,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
            video_asset_id: playback_id,
            duration_seconds: duration_seconds
          })
+         |> assign(:video_thumbnail_url, thumbnail_url(socket, playback_id))
          |> assign(:video_upload_state, :ready)
          |> assign(:video_upload_message, "Video is ready for protected playback.")}
 
@@ -521,7 +542,10 @@ defmodule WasomiWeb.LectureLive.FormComponent do
         {:noreply,
          socket
          |> assign(:video_upload_state, :error)
-         |> assign(:video_upload_message, "Mux could not process this upload: #{inspect(reason)}")}
+         |> assign(
+           :video_upload_message,
+           "Mux could not process this upload: #{video_error_message(reason)}"
+         )}
     end
   end
 
@@ -596,6 +620,56 @@ defmodule WasomiWeb.LectureLive.FormComponent do
   defp preload_content(lecture), do: Catalog.preload_lecture_content(lecture)
 
   defp sort_by_position(records), do: Enum.sort_by(records, & &1.position)
+
+  defp thumbnail_url(socket, playback_id) do
+    lecture = %Catalog.Lecture{video_provider: :mux, video_asset_id: playback_id}
+
+    case safe_media_call(fn -> Media.thumbnail_url(socket.assigns.current_user, lecture) end) do
+      {:ok, url} -> url
+      {:error, _reason} -> nil
+    end
+  end
+
+  defp safe_media_call(fun) do
+    fun.()
+  rescue
+    error -> {:error, {:exception, Exception.message(error)}}
+  end
+
+  defp video_error_message(:forbidden),
+    do: "you don't have permission to upload lecture videos."
+
+  defp video_error_message(:media_provider_not_configured),
+    do: "video uploads aren't configured on this server yet."
+
+  defp video_error_message({:exception, message}), do: message
+
+  defp video_error_message({:mux, %{"messages" => [_ | _] = messages}}),
+    do: "Mux rejected the request (#{Enum.join(messages, " ")})"
+
+  defp video_error_message({:mux, %{"type" => type}}), do: "Mux rejected the request (#{type})"
+
+  defp video_error_message({:mux, status, _body}) when is_integer(status),
+    do: "Mux returned an unexpected response (HTTP #{status})"
+
+  defp video_error_message({:mux_asset_errored, errors}) when is_list(errors) do
+    case errors |> Enum.flat_map(&Map.get(&1, "messages", [])) |> Enum.join(" ") do
+      "" -> "Mux could not process this video"
+      messages -> "Mux could not process this video (#{messages})"
+    end
+  end
+
+  defp video_error_message(:mux_asset_has_no_signed_playback_id),
+    do: "Mux processed the video but did not return a signed playback ID"
+
+  defp video_error_message({:mux_upload_errored, _error}),
+    do: "Mux reported that the upload failed — try selecting the file again"
+
+  defp video_error_message({:invalid_mux_signing_key, message}),
+    do:
+      "the Mux signing key isn't configured correctly (MUX_SIGNING_KEY_ID / MUX_SIGNING_PRIVATE_KEY): #{message}"
+
+  defp video_error_message(reason), do: inspect(reason)
 
   defp put_video_fields(socket, params) do
     params = Map.put(params, "video_provider", "mux")

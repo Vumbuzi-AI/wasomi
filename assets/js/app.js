@@ -428,29 +428,50 @@ Hooks.R2ResourceUpload = {
     request.send(file)
   }
 }
+function formatFileSize(bytes) {
+  if (!Number.isFinite(bytes)) return ""
+  const units = ["B", "KB", "MB", "GB"]
+  let value = bytes
+  let unitIndex = 0
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024
+    unitIndex += 1
+  }
+  return `${value.toFixed(unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`
+}
+
+function titleCaseFromFilename(filename) {
+  return filename
+    .replace(/\.[^/.]+$/, "")
+    .replace(/[-_]+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ")
+}
+
 Hooks.MuxUpload = {
   mounted() {
     this.fileInput = this.el.querySelector("[data-role='file']")
-    this.startButton = this.el.querySelector("[data-role='start']")
+    this.idlePanel = this.el.querySelector("[data-role='idle']")
+    this.selectedPanel = this.el.querySelector("[data-role='selected']")
+    this.filenameLabel = this.el.querySelector("[data-role='filename']")
+    this.filesizeLabel = this.el.querySelector("[data-role='filesize']")
     this.progress = this.el.querySelector("[data-role='progress']")
     // When the widget lives inside a LiveComponent (e.g. the lecture form
     // modal) it sets phx-target so events reach the component, not the view.
     this.uploadTarget = this.el.getAttribute("phx-target")
 
-    this.startButton.addEventListener("click", () => {
-      if (!this.fileInput.files[0]) {
-        this.fileInput.setCustomValidity("Choose a video file first.")
-        this.fileInput.reportValidity()
-        return
-      }
+    this.fileInput.addEventListener("change", () => {
+      if (this.fileInput.files[0]) this.selectFile(this.fileInput.files[0])
+    })
 
-      this.fileInput.setCustomValidity("")
-      this.startButton.disabled = true
-      this.pushUp("create-upload", {
-        filename: this.fileInput.files[0].name,
-        content_type: this.fileInput.files[0].type,
-        size: this.fileInput.files[0].size
-      })
+    this.el.addEventListener("dragover", event => event.preventDefault())
+    this.el.addEventListener("drop", event => {
+      event.preventDefault()
+      const file = event.dataTransfer.files && event.dataTransfer.files[0]
+      if (file) this.selectFile(file)
     })
 
     this.handleEvent("mux-upload-ready", ({url}) => this.upload(url))
@@ -465,6 +486,33 @@ Hooks.MuxUpload = {
     window.clearTimeout(this.statusTimer)
   },
 
+  selectFile(file) {
+    this.selectedFile = file
+    this.filenameLabel.textContent = file.name
+    this.filesizeLabel.textContent = formatFileSize(file.size)
+    this.idlePanel.classList.add("hidden")
+    this.selectedPanel.classList.remove("hidden")
+    this.progress.style.width = "0%"
+    this.fillTitle(file.name)
+
+    this.pushUp("create-upload", {
+      filename: file.name,
+      content_type: file.type,
+      size: file.size
+    })
+  },
+
+  fillTitle(filename) {
+    const titleInput = this.el.closest("form")?.querySelector("[name='lecture[title]']")
+    if (!titleInput || titleInput.value.trim() !== "") return
+
+    const title = titleCaseFromFilename(filename)
+    if (!title) return
+
+    titleInput.value = title
+    titleInput.dispatchEvent(new Event("input", {bubbles: true}))
+  },
+
   pushUp(event, payload) {
     if (this.uploadTarget) {
       this.pushEventTo(this.uploadTarget, event, payload)
@@ -474,7 +522,8 @@ Hooks.MuxUpload = {
   },
 
   upload(url) {
-    const file = this.fileInput.files[0]
+    const file = this.selectedFile
+    if (!file) return
     const request = new XMLHttpRequest()
     this.request = request
 
@@ -488,13 +537,11 @@ Hooks.MuxUpload = {
         this.progress.style.width = "100%"
         this.pushUp("upload-complete", {})
       } else {
-        this.startButton.disabled = false
         console.error(`Mux upload failed (${request.status})`)
       }
     })
 
     request.addEventListener("error", () => {
-      this.startButton.disabled = false
       console.error("Mux upload failed because of a network error")
     })
 

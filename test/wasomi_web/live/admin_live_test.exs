@@ -376,6 +376,10 @@ defmodule WasomiWeb.AdminLiveTest do
         {:ok, {:ready, "signed-playback-456", 120}}
       end)
 
+      expect(Wasomi.MediaProviderMock, :thumbnail_url, fn %Wasomi.Catalog.Lecture{}, _user ->
+        {:ok, "https://image.mux.test/signed-playback-456/thumbnail.jpg?token=abc"}
+      end)
+
       upload = element(view, "#lecture-video-upload")
       render_hook(upload, "create-upload", %{})
       render_hook(upload, "upload-complete", %{})

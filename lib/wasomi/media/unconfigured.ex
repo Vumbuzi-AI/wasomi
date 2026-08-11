@@ -9,4 +9,7 @@ defmodule Wasomi.Media.Unconfigured do
 
   @impl true
   def playback_token(_lecture, _user, _ttl), do: {:error, :media_provider_not_configured}
+
+  @impl true
+  def thumbnail_url(_lecture, _user), do: {:error, :media_provider_not_configured}
 end

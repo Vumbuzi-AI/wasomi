@@ -1,7 +1,7 @@
 defmodule WasomiWeb.LectureLive.FormComponent do
   use WasomiWeb, :live_component
 
-  alias Wasomi.{Catalog, Storage}
+  alias Wasomi.{Catalog, Media, Storage}
   alias WasomiWeb.AdminLive.Components.ResourceUploader
 
   @impl true
@@ -27,56 +27,69 @@ defmodule WasomiWeb.LectureLive.FormComponent do
 
         <section
           id="lecture-video"
-          phx-hook="VideoPreview"
           class="space-y-4 rounded-2xl border border-black/5 bg-soft/40 p-4 sm:p-5"
         >
           <div>
             <h3 class="font-semibold text-dark">Lecture video</h3>
             <p class="mt-1 text-sm text-muted">
-              The primary video remains used for learner playback.
+              The file uploads directly to Mux. Wasomi stores only the signed playback ID once
+              processing is complete.
             </p>
           </div>
-          <video
-            data-role="preview"
-            controls
-            class="hidden w-full rounded-xl border border-black/10 bg-black"
-          >
-          </video>
-          <.input
-            field={@form[:video_asset_id]}
-            type="text"
-            label="Video asset or playback ID"
-            required
-          />
-          <label class="inline-flex cursor-pointer items-center gap-2 rounded-full bg-dark px-4 py-2.5 text-sm font-medium text-white transition hover:bg-primary">
-            <.icon name="hero-arrow-up-tray" class="h-4 w-4" /> Choose primary video
-            <.live_file_input upload={@uploads.video} class="sr-only" />
-          </label>
-          <p class="text-xs text-muted">MP4, MOV or WebM. The duration is detected automatically.</p>
-          <div :for={entry <- @uploads.video.entries} class="space-y-1">
-            <div class="h-2 overflow-hidden rounded-full bg-soft">
-              <div class="h-full rounded-full bg-primary" style={"width: #{entry.progress}%"}></div>
+
+          <div id="lecture-video-upload" phx-hook="MuxUpload" phx-target={@myself}>
+            <label class="block text-sm font-medium text-dark" for="lecture-video-file">
+              Video file
+            </label>
+            <input
+              id="lecture-video-file"
+              data-role="file"
+              type="file"
+              accept="video/*"
+              class="mt-2 block w-full rounded-2xl border border-black/10 bg-white text-sm text-body file:mr-4 file:rounded-full file:border-0 file:bg-mint file:px-4 file:py-2 file:font-medium file:text-primary"
+            />
+
+            <div class="mt-4 h-2 overflow-hidden rounded-full bg-soft">
+              <div data-role="progress" class="h-full w-0 rounded-full bg-primary transition-all">
+              </div>
             </div>
-            <p :for={error <- upload_errors(@uploads.video, entry)} class="text-sm text-rose-600">
-              {upload_error_to_string(error)}
-            </p>
+
+            <button
+              data-role="start"
+              type="button"
+              disabled={@video_upload_state in [:uploading, :processing]}
+              class="mt-4 inline-flex items-center gap-2 rounded-full bg-dark px-4 py-2.5 text-sm font-medium text-white transition hover:bg-primary disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <.icon name="hero-arrow-up-tray" class="h-4 w-4" /> Upload to Mux
+            </button>
           </div>
-          <div class="grid gap-4 sm:grid-cols-2">
-            <.input
-              field={@form[:video_provider]}
-              type="select"
-              label="Video provider"
-              options={Catalog.Lecture.video_provider_values()}
-              required
-            />
-            <.input
-              field={@form[:duration_seconds]}
-              type="number"
-              label="Duration (seconds)"
-              min="1"
-              required
-            />
-          </div>
+
+          <p
+            :if={@video_upload_message}
+            class={[
+              "rounded-xl px-4 py-3 text-sm",
+              @video_upload_state == :error && "bg-rose-50 text-rose-700",
+              @video_upload_state == :ready && "bg-mint text-primary",
+              @video_upload_state not in [:error, :ready] && "bg-white text-muted"
+            ]}
+          >
+            {@video_upload_message}
+          </p>
+
+          <details class="rounded-xl border border-black/5 bg-white p-3 text-sm">
+            <summary class="cursor-pointer font-medium text-dark">
+              Advanced: use an existing Mux playback ID
+            </summary>
+            <div class="mt-3 grid gap-4 sm:grid-cols-2">
+              <.input field={@form[:video_asset_id]} type="text" label="Video playback ID" />
+              <.input
+                field={@form[:duration_seconds]}
+                type="number"
+                label="Duration (seconds)"
+                min="1"
+              />
+            </div>
+          </details>
         </section>
 
         <section
@@ -248,13 +261,14 @@ defmodule WasomiWeb.LectureLive.FormComponent do
 
         <:actions>
           <p
-            :if={save_disabled?(@form, @resource_rows, @question_rows, @uploads)}
+            :if={save_disabled?(@form, @resource_rows, @question_rows, @video_ready)}
             class="text-sm text-amber-700"
           >
-            Select a primary video, enter its duration, and finish all resource uploads before saving.
+            Upload a video (or provide an existing Mux playback ID and duration), and finish all
+            resource uploads before saving.
           </p>
           <.button
-            disabled={save_disabled?(@form, @resource_rows, @question_rows, @uploads)}
+            disabled={save_disabled?(@form, @resource_rows, @question_rows, @video_ready)}
             phx-disable-with="Saving..."
           >
             Save Lecture
@@ -304,20 +318,14 @@ defmodule WasomiWeb.LectureLive.FormComponent do
       |> assign_new(:resource_rows, fn -> Enum.map(lecture.resources || [], &resource_attrs/1) end)
       |> assign_new(:question_rows, fn -> Enum.map(lecture.questions || [], &question_attrs/1) end)
       |> assign_new(:resource_error, fn -> nil end)
+      |> assign_new(:video_upload, fn -> nil end)
+      |> assign_new(:video_upload_state, fn -> :idle end)
+      |> assign_new(:video_upload_message, fn -> nil end)
+      |> assign_new(:video_ready, fn -> nil end)
 
     socket =
-      if Map.has_key?(socket.assigns, :uploads) do
-        socket
-      else
-        allow_upload(socket, :video,
-          accept: ~w(.mp4 .mov .webm),
-          max_entries: 1,
-          max_file_size: 1_000_000_000
-        )
-      end
-
-    socket =
-      if Map.has_key?(socket.assigns.uploads, :resources) do
+      if Map.has_key?(socket.assigns, :uploads) and
+           Map.has_key?(socket.assigns.uploads, :resources) do
         socket
       else
         ResourceUploader.configure_upload(socket, lecture.id)
@@ -459,9 +467,69 @@ defmodule WasomiWeb.LectureLive.FormComponent do
     {:noreply, assign(socket, question_rows: remove_at(socket.assigns.question_rows, index))}
   end
 
+  def handle_event("create-upload", _params, socket) do
+    case Media.create_upload(socket.assigns.current_user, socket.assigns.lecture, []) do
+      {:ok, upload} ->
+        {:noreply,
+         socket
+         |> assign(:video_upload, upload)
+         |> assign(:video_upload_state, :uploading)
+         |> assign(:video_upload_message, "Uploading directly to Mux…")
+         |> push_event("mux-upload-ready", %{url: upload.url})}
+
+      {:error, reason} ->
+        {:noreply,
+         socket
+         |> assign(:video_upload_state, :error)
+         |> assign(:video_upload_message, "Could not start upload: #{inspect(reason)}")}
+    end
+  end
+
+  def handle_event("upload-complete", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:video_upload_state, :processing)
+     |> assign(:video_upload_message, "Upload complete. Mux is preparing protected playback…")
+     |> push_event("mux-check-upload", %{})}
+  end
+
+  def handle_event(
+        "check-upload",
+        _params,
+        %{assigns: %{video_upload: %{id: upload_id}}} = socket
+      ) do
+    case Media.upload_status(socket.assigns.current_user, upload_id) do
+      {:ok, {:ready, playback_id, duration_seconds}} ->
+        {:noreply,
+         socket
+         |> assign(:video_ready, %{
+           video_provider: :mux,
+           video_asset_id: playback_id,
+           duration_seconds: duration_seconds
+         })
+         |> assign(:video_upload_state, :ready)
+         |> assign(:video_upload_message, "Video is ready for protected playback.")}
+
+      {:ok, status} when status in [:waiting, :processing] ->
+        {:noreply,
+         socket
+         |> assign(:video_upload_state, :processing)
+         |> assign(:video_upload_message, "Mux is still processing the video…")
+         |> push_event("mux-check-upload", %{})}
+
+      {:error, reason} ->
+        {:noreply,
+         socket
+         |> assign(:video_upload_state, :error)
+         |> assign(:video_upload_message, "Mux could not process this upload: #{inspect(reason)}")}
+    end
+  end
+
+  def handle_event("check-upload", _params, socket), do: {:noreply, socket}
+
   def handle_event("save", %{"lecture" => lecture_params} = params, socket) do
     socket = consume_resource_uploads(socket)
-    lecture_params = put_uploaded_video(socket, lecture_params)
+    lecture_params = put_video_fields(socket, lecture_params)
     questions = question_params(params, socket.assigns.question_rows)
 
     case validate_resources(socket.assigns.resource_rows) do
@@ -529,16 +597,15 @@ defmodule WasomiWeb.LectureLive.FormComponent do
 
   defp sort_by_position(records), do: Enum.sort_by(records, & &1.position)
 
-  defp put_uploaded_video(socket, params) do
-    case consume_uploaded_entries(socket, :video, fn %{path: tmp_path}, entry ->
-           dir = Path.join(:code.priv_dir(:wasomi), "static/uploads/lectures")
-           File.mkdir_p!(dir)
-           filename = "#{entry.uuid}#{Path.extname(entry.client_name)}"
-           File.cp!(tmp_path, Path.join(dir, filename))
-           {:ok, "/uploads/lectures/#{filename}"}
-         end) do
-      [url | _] -> Map.merge(params, %{"video_asset_id" => url, "video_provider" => :mux})
-      [] -> params
+  defp put_video_fields(socket, params) do
+    params = Map.put(params, "video_provider", "mux")
+
+    case socket.assigns.video_ready do
+      %{video_asset_id: asset_id, duration_seconds: duration} ->
+        Map.merge(params, %{"video_asset_id" => asset_id, "duration_seconds" => duration})
+
+      nil ->
+        params
     end
   end
 
@@ -624,21 +691,14 @@ defmodule WasomiWeb.LectureLive.FormComponent do
   defp trim_param(value) when is_binary(value), do: String.trim(value)
   defp trim_param(_value), do: ""
 
-  defp save_disabled?(form, resources, questions, uploads) do
-    required = [
-      :title,
-      :description,
-      :video_provider,
-      :video_asset_id,
-      :duration_seconds,
-      :position
-    ]
+  defp save_disabled?(form, resources, questions, video_ready) do
+    required = [:title, :description, :position]
 
     missing_video =
-      blank?(form[:video_asset_id].value) and
-        Map.get(uploads, :video, %{entries: []}).entries == []
+      is_nil(video_ready) and
+        (blank?(form[:video_asset_id].value) or blank?(form[:duration_seconds].value))
 
-    Enum.any?(required -- [:video_asset_id], &blank?(form[&1].value)) or
+    Enum.any?(required, &blank?(form[&1].value)) or
       missing_video or
       Enum.any?(resources, &(resource_status(&1) in [:uploading, :error])) or
       Enum.any?(resources, &(blank?(&1[:name]) or (&1[:kind] == :link and !valid_url?(&1[:url])))) or
@@ -712,10 +772,6 @@ defmodule WasomiWeb.LectureLive.FormComponent do
 
   defp upload_error(_),
     do: "R2 could not prepare that upload. Check the server log for the storage error."
-
-  defp upload_error_to_string(:too_large), do: "That video is larger than the 1 GB limit."
-  defp upload_error_to_string(:not_accepted), do: "Please choose an MP4, MOV or WebM file."
-  defp upload_error_to_string(_), do: "Could not accept that video."
 
   defp notify_parent(msg), do: send(self(), {__MODULE__, msg})
 end

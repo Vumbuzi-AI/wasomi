@@ -434,8 +434,8 @@ Hooks.MuxUpload = {
     this.startButton = this.el.querySelector("[data-role='start']")
     this.progress = this.el.querySelector("[data-role='progress']")
     // When the widget lives inside a LiveComponent (e.g. the lecture form
-    // modal) it sets data-target so events reach the component, not the view.
-    this.uploadTarget = this.el.getAttribute("data-target")
+    // modal) it sets phx-target so events reach the component, not the view.
+    this.uploadTarget = this.el.getAttribute("phx-target")
 
     this.startButton.addEventListener("click", () => {
       if (!this.fileInput.files[0]) {

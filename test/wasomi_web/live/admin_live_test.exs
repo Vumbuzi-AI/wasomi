@@ -358,20 +358,29 @@ defmodule WasomiWeb.AdminLiveTest do
       assert Wasomi.Catalog.get_course_module!(module.id).position == 2
     end
 
-    test "uploads a lecture video and deletes the lecture", %{conn: conn} do
+    test "uploads a lecture video via Mux and deletes the lecture", %{conn: conn} do
+      import Mox
+
       course = course_fixture()
       module = course_module_fixture(course_id: course.id, title: "Module One")
       {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
 
-      # Open the "add lecture" form, attach a video file, then save.
+      # Open the "add lecture" form, drive the Mux upload/poll flow, then save.
       render_click(view, "new_lecture", %{"module-id" => to_string(module.id)})
 
-      video =
-        file_input(view, "#lecture-form", :video, [
-          %{name: "lesson.mp4", content: "fake-video-bytes", type: "video/mp4"}
-        ])
+      expect(Wasomi.MediaProviderMock, :create_upload, fn %Wasomi.Catalog.Lecture{}, [] ->
+        {:ok, %{id: "upload-123", url: "https://storage.mux.test/direct-upload"}}
+      end)
 
-      assert render_upload(video, "lesson.mp4") =~ "100%"
+      expect(Wasomi.MediaProviderMock, :upload_status, fn "upload-123" ->
+        {:ok, {:ready, "signed-playback-456", 120}}
+      end)
+
+      upload = element(view, "#lecture-video-upload")
+      render_hook(upload, "create-upload", %{})
+      render_hook(upload, "upload-complete", %{})
+      html = render_hook(upload, "check-upload", %{})
+      assert html =~ "Video is ready for protected playback."
 
       refute has_element?(view, "#lecture-form input[name='lecture[position]']")
 
@@ -380,8 +389,7 @@ defmodule WasomiWeb.AdminLiveTest do
         |> form("#lecture-form",
           lecture: %{
             title: "Opening hook",
-            description: "How to start",
-            duration_seconds: "120"
+            description: "How to start"
           }
         )
         |> render_submit()
@@ -390,12 +398,9 @@ defmodule WasomiWeb.AdminLiveTest do
       [lecture] = Wasomi.Catalog.list_lectures()
       assert lecture.title == "Opening hook"
       assert lecture.position == 1
-      assert String.starts_with?(lecture.video_asset_id, "/uploads/lectures/")
-      assert String.ends_with?(lecture.video_asset_id, ".mp4")
-
-      on_exit(fn ->
-        File.rm(Path.join(:code.priv_dir(:wasomi), "static#{lecture.video_asset_id}"))
-      end)
+      assert lecture.video_provider == :mux
+      assert lecture.video_asset_id == "signed-playback-456"
+      assert lecture.duration_seconds == 120
 
       html = render_click(view, "delete_lecture", %{"id" => lecture.id})
       refute html =~ "Opening hook"

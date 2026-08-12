@@ -195,7 +195,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
             <div id="add-link-form" class="flex gap-3">
               <input
                 id="add-link-url"
-                name="url"
+                name="resource_link[url]"
                 type="url"
                 value={@resource_link_draft}
                 phx-change="update-link-draft"
@@ -456,7 +456,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
 
   def handle_event("add-link", _params, socket), do: {:noreply, socket}
 
-  def handle_event("update-link-draft", %{"url" => url}, socket) do
+  def handle_event("update-link-draft", %{"resource_link" => %{"url" => url}}, socket) do
     {:noreply, assign(socket, :resource_link_draft, url)}
   end
 

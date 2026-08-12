@@ -293,7 +293,7 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
 
     view
     |> element("#add-link-url")
-    |> render_change(%{"url" => "https://example.com/slides.pdf"})
+    |> render_change(%{"resource_link" => %{"url" => "https://example.com/slides.pdf"}})
 
     html =
       view

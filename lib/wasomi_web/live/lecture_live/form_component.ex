@@ -17,6 +17,15 @@ defmodule WasomiWeb.LectureLive.FormComponent do
         </:subtitle>
       </.header>
 
+      <%!-- Associated via the `form` attribute below rather than nested inside
+    .simple_form's own <form> — nested <form> elements are invalid HTML and
+    get silently dropped by the browser's parser on parse. Keeping this one
+    as a real, separate <form> (rather than a plain div + phx-change-synced
+    assign) means "Save link" always submits whatever is actually in the
+    input at the moment of the click, with no server round-trip in between
+    to go stale. --%>
+      <form id="add-link-form" phx-submit="add-link" phx-target={@myself} class="hidden"></form>
+
       <.simple_form
         for={@form}
         id="lecture-form"
@@ -192,22 +201,19 @@ defmodule WasomiWeb.LectureLive.FormComponent do
           </div>
 
           <div data-role="resource-panel" data-mode="link" class={@resource_mode != :link && "hidden"}>
-            <div id="add-link-form" class="flex gap-3">
+            <div id="add-link-fields" class="flex gap-3">
               <input
-                id="add-link-url"
-                name="resource_link[url]"
+                id={"add-link-url-#{@resource_link_reset}"}
+                name="url"
                 type="url"
-                value={@resource_link_draft}
-                phx-change="update-link-draft"
-                phx-target={@myself}
+                form="add-link-form"
+                required
                 placeholder="https://example.com/reading"
                 class="w-full min-w-0 flex-1 rounded-xl border border-black/10 bg-white px-3 py-2.5 text-sm text-dark focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
               />
               <button
-                type="button"
-                phx-click="add-link"
-                phx-value-url={@resource_link_draft}
-                phx-target={@myself}
+                type="submit"
+                form="add-link-form"
                 class="shrink-0 rounded-xl border border-primary px-4 py-2.5 text-sm font-medium text-primary hover:bg-mint"
               >
                 Save link
@@ -383,7 +389,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
       |> assign_new(:question_rows, fn -> Enum.map(lecture.questions || [], &question_attrs/1) end)
       |> assign_new(:resource_error, fn -> nil end)
       |> assign_new(:resource_mode, fn -> :upload end)
-      |> assign_new(:resource_link_draft, fn -> "" end)
+      |> assign_new(:resource_link_reset, fn -> 0 end)
       |> assign_new(:video_upload, fn -> nil end)
       |> assign_new(:video_upload_state, fn ->
         if existing_video_ready, do: :ready, else: :idle
@@ -439,25 +445,20 @@ defmodule WasomiWeb.LectureLive.FormComponent do
         url: url,
         storage_key: nil,
         content_type: nil,
-        byte_size: nil
+        byte_size: nil,
+        row_id: Ecto.UUID.generate()
       }
 
       {:noreply,
-       assign(socket,
-         resource_rows: socket.assigns.resource_rows ++ [row],
-         resource_error: nil,
-         resource_link_draft: ""
-       )}
+       socket
+       |> update(:resource_link_reset, &(&1 + 1))
+       |> assign(resource_rows: socket.assigns.resource_rows ++ [row], resource_error: nil)}
     else
       {:noreply, assign(socket, resource_error: "Enter a valid http or https link.")}
     end
   end
 
   def handle_event("add-link", _params, socket), do: {:noreply, socket}
-
-  def handle_event("update-link-draft", %{"resource_link" => %{"url" => url}}, socket) do
-    {:noreply, assign(socket, :resource_link_draft, url)}
-  end
 
   def handle_event("set-resource-mode", %{"mode" => "link"}, socket) do
     {:noreply, assign(socket, :resource_mode, :link)}
@@ -794,7 +795,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
   end
 
   defp resource_attrs(resource),
-    do: Map.take(resource, [:kind, :name, :storage_key, :url, :content_type, :byte_size])
+    do: Map.take(resource, [:id, :kind, :name, :storage_key, :url, :content_type, :byte_size])
 
   defp question_attrs(question), do: Map.take(question, [:question, :answer])
 
@@ -836,7 +837,8 @@ defmodule WasomiWeb.LectureLive.FormComponent do
       end
   end
 
-  defp resource_key(resource, index), do: resource[:storage_key] || index
+  defp resource_key(resource, index),
+    do: resource[:id] || resource[:storage_key] || resource[:row_id] || index
 
   defp question_params(%{"questions" => questions}), do: normalize_questions(questions)
   defp question_params(_params), do: []

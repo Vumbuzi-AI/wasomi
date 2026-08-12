@@ -63,4 +63,39 @@ The repo also contains generated CRUD LiveViews (`*_live/index.ex`, `form_compon
 1. Run `./scripts/check_linters.sh` and fix all failures.
 2. Include screenshots or recordings for UI changes (use `N/A` if none).
 3. Commit message format: `name/what-pr-does` (e.g. `michael/add-lab-order-filters`).
-4. Never add an AI co-author trailer (e.g. `Co-Authored-By: Claude ...`) to commit messages.
+4. Never add an AI co-author trailer (e.g. `Co-Authored-By: Claude ...`) to commit messages, and never add an AI-generated/attribution footer (e.g. "Generated with Claude Code") to the PR description either.
+5. PR descriptions must strictly follow this template — no extra sections, no free-form summaries in place of it:
+
+   ```markdown
+   ## Summary
+
+   <!-- What does this PR do and why? One or two sentences. -->
+
+   ## Changes
+
+   <!-- Bullet list of the main changes. -->
+
+   ## How to test
+
+   <!-- Steps a reviewer follows to verify this locally. -->
+
+   1.
+
+   ## Screenshots
+
+   <!-- Add screenshots or screen recordings for UI changes. Use "N/A" if this PR has no visual changes. -->
+
+   ## Checklist
+
+   - [ ] Ran `./scripts/check_linters.sh`
+   - [ ] Ran `mix format`
+   - [ ] Ran `mix credo`
+   - [ ] Ran `mix test` and tests pass
+   - [ ] Added/updated migrations and seeds if the schema changed
+   - [ ] Updated `README.md` / docs if setup or behavior changed
+   - [ ] No secrets or credentials committed
+
+   ## Related issues
+
+   <!-- e.g. Closes #123 -->
+   ```

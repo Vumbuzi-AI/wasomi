@@ -22,6 +22,7 @@ defmodule Wasomi.Assessments do
     LectureQuiz,
     LectureQuizGeneration,
     LectureQuizQuestion,
+    LectureQuizSubmission,
     Question,
     Quiz,
     QuizGeneration,
@@ -561,6 +562,94 @@ defmodule Wasomi.Assessments do
     LectureQuiz
     |> Repo.get!(id)
     |> Repo.preload([:lecture, questions: {questions_query, question_options: options_query}])
+  end
+
+  @doc """
+  Lists a lecture quiz's `:published` questions with their options, ordered
+  — the only question set a learner should ever be scored against. Mirrors
+  `list_published_questions/1`, minus the extra `quiz.active` check that
+  function has — see the `LectureQuiz` moduledoc for why.
+  """
+  def list_published_lecture_quiz_questions(%LectureQuiz{id: lecture_quiz_id}) do
+    options_query =
+      from(option in Wasomi.Assessments.LectureQuizQuestionOption,
+        order_by: [asc: option.position]
+      )
+
+    LectureQuizQuestion
+    |> where([q], q.lecture_quiz_id == ^lecture_quiz_id and q.status == :published)
+    |> order_by([q], asc: q.position)
+    |> preload(question_options: ^options_query)
+    |> Repo.all()
+  end
+
+  @doc """
+  Whether a lecture quiz has enough reviewed content for a learner to take
+  it — used by `Wasomi.Learning.lecture_unlocked?/3` to decide whether a
+  lecture's quiz should gate the next lecture at all. A quiz with zero
+  published questions (still mid-generation, or awaiting review) never
+  blocks anyone, same as a lecture with no quiz at all.
+  """
+  def lecture_quiz_ready_for_learners?(%LectureQuiz{id: lecture_quiz_id}) do
+    LectureQuizQuestion
+    |> where([q], q.lecture_quiz_id == ^lecture_quiz_id and q.status == :published)
+    |> Repo.exists?()
+  end
+
+  @doc """
+  Scores and records a learner's lecture-quiz attempt. Mirrors `submit_quiz/3`.
+  """
+  def submit_lecture_quiz(%User{} = user, %LectureQuiz{} = quiz, answers) when is_map(answers) do
+    case list_published_lecture_quiz_questions(quiz) do
+      [] ->
+        {:error, :quiz_not_ready}
+
+      questions ->
+        normalized = stringify_answers(answers)
+        correct_count = Enum.count(questions, &lecture_quiz_answer_correct?(&1, normalized))
+        score_percent = round(correct_count / length(questions) * 100)
+        passed = score_percent >= quiz.passing_score_percent
+
+        %LectureQuizSubmission{}
+        |> LectureQuizSubmission.changeset(%{
+          lecture_quiz_id: quiz.id,
+          user_id: user.id,
+          answers: normalized,
+          score_percent: score_percent,
+          passed: passed,
+          submitted_at: DateTime.utc_now() |> DateTime.truncate(:second)
+        })
+        |> Repo.insert()
+    end
+  end
+
+  def list_lecture_quiz_submissions_for_user(%User{id: user_id}, %LectureQuiz{id: lecture_quiz_id}) do
+    LectureQuizSubmission
+    |> where([s], s.user_id == ^user_id and s.lecture_quiz_id == ^lecture_quiz_id)
+    |> order_by([s], desc: s.submitted_at, desc: s.id)
+    |> Repo.all()
+  end
+
+  @doc """
+  Whether a learner has ever passed this lecture quiz, in any attempt.
+  """
+  def passed_lecture_quiz?(%User{id: user_id}, %LectureQuiz{id: lecture_quiz_id}) do
+    LectureQuizSubmission
+    |> where(
+      [s],
+      s.user_id == ^user_id and s.lecture_quiz_id == ^lecture_quiz_id and s.passed == true
+    )
+    |> Repo.exists?()
+  end
+
+  defp lecture_quiz_answer_correct?(
+         %LectureQuizQuestion{id: id, question_options: options},
+         answers
+       ) do
+    case Map.get(answers, to_string(id)) do
+      nil -> false
+      selected -> Enum.any?(options, &(to_string(&1.id) == selected and &1.correct))
+    end
   end
 
   @doc """

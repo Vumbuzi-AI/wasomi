@@ -807,4 +807,99 @@ defmodule Wasomi.AssessmentsTest do
       assert Enum.map(loaded.questions, & &1.id) == [published.id]
     end
   end
+
+  describe "lecture_quiz_ready_for_learners?/1 and submit_lecture_quiz/3" do
+    setup do
+      quiz = lecture_quiz_fixture(passing_score_percent: 50)
+      %{quiz: quiz, user: user_fixture()}
+    end
+
+    test "a quiz with no published questions is not ready for learners", %{quiz: quiz} do
+      refute Assessments.lecture_quiz_ready_for_learners?(quiz)
+
+      generation = lecture_quiz_generation_fixture(lecture_quiz: quiz)
+
+      {:ok, 1} =
+        Assessments.create_lecture_quiz_draft_questions_and_mark_ready(generation, [
+          draft_question_attrs()
+        ])
+
+      refute Assessments.lecture_quiz_ready_for_learners?(quiz)
+    end
+
+    test "a quiz becomes ready for learners once at least one question is published", %{
+      quiz: quiz
+    } do
+      generation = lecture_quiz_generation_fixture(lecture_quiz: quiz)
+
+      {:ok, 1} =
+        Assessments.create_lecture_quiz_draft_questions_and_mark_ready(generation, [
+          draft_question_attrs()
+        ])
+
+      Assessments.publish_all_lecture_quiz_drafts(quiz)
+
+      assert Assessments.lecture_quiz_ready_for_learners?(quiz)
+    end
+
+    test "submit_lecture_quiz/3 errors when the quiz has no published questions yet", %{
+      quiz: quiz,
+      user: user
+    } do
+      assert Assessments.submit_lecture_quiz(user, quiz, %{}) == {:error, :quiz_not_ready}
+    end
+
+    test "scores against published questions and records passed/failed correctly", %{
+      quiz: quiz,
+      user: user
+    } do
+      generation = lecture_quiz_generation_fixture(lecture_quiz: quiz)
+
+      {:ok, 2} =
+        Assessments.create_lecture_quiz_draft_questions_and_mark_ready(generation, [
+          draft_question_attrs(%{prompt: "First question"}),
+          draft_question_attrs(%{prompt: "Second question"})
+        ])
+
+      Assessments.publish_all_lecture_quiz_drafts(quiz)
+      [q1, q2] = Assessments.list_published_lecture_quiz_questions(quiz)
+      right1 = Enum.find(q1.question_options, & &1.correct)
+      wrong2 = Enum.find(q2.question_options, &(!&1.correct))
+
+      assert {:ok, submission} =
+               Assessments.submit_lecture_quiz(user, quiz, %{
+                 to_string(q1.id) => to_string(right1.id),
+                 to_string(q2.id) => to_string(wrong2.id)
+               })
+
+      assert submission.score_percent == 50
+      assert submission.passed
+      assert Assessments.passed_lecture_quiz?(user, quiz)
+    end
+
+    test "passed_lecture_quiz?/2 considers any passing attempt, not just the latest", %{
+      quiz: quiz,
+      user: user
+    } do
+      generation = lecture_quiz_generation_fixture(lecture_quiz: quiz)
+
+      {:ok, 1} =
+        Assessments.create_lecture_quiz_draft_questions_and_mark_ready(generation, [
+          draft_question_attrs()
+        ])
+
+      Assessments.publish_all_lecture_quiz_drafts(quiz)
+      [question] = Assessments.list_published_lecture_quiz_questions(quiz)
+      correct = Enum.find(question.question_options, & &1.correct)
+      wrong = Enum.find(question.question_options, &(!&1.correct))
+
+      refute Assessments.passed_lecture_quiz?(user, quiz)
+
+      {:ok, _} = Assessments.submit_lecture_quiz(user, quiz, %{question.id => correct.id})
+      assert Assessments.passed_lecture_quiz?(user, quiz)
+
+      {:ok, _} = Assessments.submit_lecture_quiz(user, quiz, %{question.id => wrong.id})
+      assert Assessments.passed_lecture_quiz?(user, quiz)
+    end
+  end
 end

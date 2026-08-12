@@ -10,6 +10,7 @@ defmodule Wasomi.Learning do
   alias Wasomi.Repo
 
   alias Wasomi.Accounts.User
+  alias Wasomi.Assessments
   alias Wasomi.Catalog.{Course, CourseModule, Lecture}
   alias Wasomi.Certificates
   alias Wasomi.Enrollments
@@ -132,7 +133,12 @@ defmodule Wasomi.Learning do
 
   @doc """
   A lecture is unlocked when it is first in the course or every preceding
-  lecture is completed.
+  lecture is completed *and* cleared: watching a lecture's video unlocks its
+  own quiz, and passing that quiz is what unlocks the next lecture. A
+  preceding lecture with no lecture quiz yet (or one that isn't ready for
+  learners — see `Wasomi.Assessments.lecture_quiz_ready_for_learners?/1`)
+  falls back to the original video-only gating, so existing courses aren't
+  broken by adding this feature.
   """
   def lecture_unlocked?(user_or_id, %Course{} = course, %Lecture{id: lecture_id}) do
     progress = progress_for_course(user_or_id, course)
@@ -140,7 +146,23 @@ defmodule Wasomi.Learning do
     preceding = Enum.take_while(lectures, &(&1.id != lecture_id))
 
     length(preceding) < length(lectures) and
-      Enum.all?(preceding, &(progress_status(progress, &1.id) == :completed))
+      Enum.all?(preceding, &lecture_cleared?(user_or_id, &1, progress))
+  end
+
+  defp lecture_cleared?(user_or_id, lecture, progress) do
+    progress_status(progress, lecture.id) == :completed and
+      lecture_quiz_cleared?(user_or_id, lecture)
+  end
+
+  defp lecture_quiz_cleared?(user_or_id, lecture) do
+    case Assessments.get_lecture_quiz(lecture.id) do
+      nil ->
+        true
+
+      quiz ->
+        not Assessments.lecture_quiz_ready_for_learners?(quiz) or
+          Assessments.passed_lecture_quiz?(%User{id: id_for(user_or_id)}, quiz)
+    end
   end
 
   @doc """

@@ -1,10 +1,12 @@
 defmodule Wasomi.LearningTest do
   use Wasomi.DataCase
 
+  alias Wasomi.Assessments
   alias Wasomi.Learning
   alias Wasomi.Learning.LectureProgress
 
   import Wasomi.AccountsFixtures
+  import Wasomi.AssessmentsFixtures
   import Wasomi.CatalogFixtures
   import Wasomi.EnrollmentsFixtures
   import Wasomi.LearningFixtures
@@ -294,5 +296,83 @@ defmodule Wasomi.LearningTest do
           DateTime.utc_now() |> DateTime.add(-seconds_ago, :second) |> DateTime.truncate(:second)
       )
     )
+  end
+
+  describe "lecture quiz gating" do
+    test "a completed lecture with no lecture quiz unlocks the next lecture (no regression)" do
+      %{course: course, first: first, second: second, user: user} = two_lecture_course()
+
+      complete_lecture_via_progress!(user, first)
+
+      assert Learning.lecture_unlocked?(user, course, second)
+    end
+
+    test "a completed lecture whose quiz has no published questions yet still unlocks the next lecture" do
+      %{course: course, first: first, second: second, user: user} = two_lecture_course()
+      lecture_quiz_fixture(lecture: first)
+
+      complete_lecture_via_progress!(user, first)
+
+      assert Learning.lecture_unlocked?(user, course, second)
+    end
+
+    test "a completed lecture with a ready quiz blocks the next lecture until attempted" do
+      %{course: course, first: first, second: second, user: user} = two_lecture_course()
+      published_lecture_quiz(first)
+
+      complete_lecture_via_progress!(user, first)
+
+      refute Learning.lecture_unlocked?(user, course, second)
+    end
+
+    test "failing the lecture quiz still blocks the next lecture" do
+      %{course: course, first: first, second: second, user: user} = two_lecture_course()
+      quiz = published_lecture_quiz(first)
+      Assessments.submit_lecture_quiz(user, quiz, %{})
+
+      complete_lecture_via_progress!(user, first)
+
+      refute Learning.lecture_unlocked?(user, course, second)
+    end
+
+    test "passing the lecture quiz unlocks the next lecture" do
+      %{course: course, first: first, second: second, user: user} = two_lecture_course()
+      quiz = published_lecture_quiz(first)
+      [question] = Assessments.list_published_lecture_quiz_questions(quiz)
+      correct_option = Enum.find(question.question_options, & &1.correct)
+
+      assert {:ok, %{passed: true}} =
+               Assessments.submit_lecture_quiz(user, quiz, %{question.id => correct_option.id})
+
+      complete_lecture_via_progress!(user, first)
+
+      assert Learning.lecture_unlocked?(user, course, second)
+    end
+  end
+
+  defp two_lecture_course do
+    course = course_fixture(status: :published)
+    course_module = course_module_fixture(course_id: course.id, position: 1)
+    first = lecture_fixture(module_id: course_module.id, position: 1, duration_seconds: 100)
+    second = lecture_fixture(module_id: course_module.id, position: 2, duration_seconds: 100)
+    user = user_fixture()
+
+    enrollment_fixture(user_id: user.id, course_id: course.id, status: :active)
+    course = Wasomi.Catalog.get_course_by_slug!(course.slug)
+
+    %{course: course, first: first, second: second, user: user}
+  end
+
+  defp published_lecture_quiz(lecture) do
+    quiz = lecture_quiz_fixture(lecture: lecture)
+    generation = lecture_quiz_generation_fixture(lecture_quiz: quiz)
+
+    {:ok, 1} =
+      Assessments.create_lecture_quiz_draft_questions_and_mark_ready(generation, [
+        draft_question_attrs()
+      ])
+
+    Assessments.publish_all_lecture_quiz_drafts(quiz)
+    quiz
   end
 end

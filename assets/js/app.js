@@ -375,33 +375,23 @@ Hooks.VideoPreview = {
   }
 }
 
+// Drives the "Upload files" / "Add link" mode toggle and the "Save link"
+// button on the lecture resources panel. File uploads themselves go through
+// LiveView's own native upload JS (see WasomiWeb.AdminLive.Components.ResourceUploader) —
+// this hook only ever needs to know which panel is visible and forward the
+// link form to the LectureLive.FormComponent that owns "add-link".
 Hooks.R2ResourceUpload = {
   mounted() {
-    this.fileInput = this.el.querySelector("[data-role='file']")
     this.linkInput = this.el.querySelector("[data-role='link']")
     this.addLinkButton = this.el.querySelector("[data-role='add-link']")
     this.modeButtons = Array.from(this.el.querySelectorAll("[data-role='resource-mode']"))
     this.modePanels = Array.from(this.el.querySelectorAll("[data-role='resource-panel']"))
-    this.uploadTarget = this.el.getAttribute("data-target")
-    this.pending = new Map()
+    this.uploadTarget = this.el.getAttribute("phx-target")
+
     this.modeButtons.forEach(button => {
       button.addEventListener("click", () => this.setMode(button.dataset.mode))
     })
     this.setMode("upload")
-
-    this.fileInput.addEventListener("change", event => {
-      Array.from(event.target.files || []).forEach(file => {
-        const clientRef = `${Date.now()}-${Math.random().toString(36).slice(2)}`
-        this.pending.set(clientRef, file)
-        this.pushUp("presign-resource", {
-          client_ref: clientRef,
-          filename: file.name,
-          content_type: file.type || "application/octet-stream",
-          size: file.size
-        })
-      })
-      event.target.value = ""
-    })
 
     this.addLinkButton.addEventListener("click", () => {
       const url = this.linkInput.value.trim()
@@ -409,13 +399,6 @@ Hooks.R2ResourceUpload = {
       this.pushUp("add-link", {url})
       this.linkInput.value = ""
     })
-
-    this.handleEvent("r2-upload-ready", upload => this.upload(upload))
-  },
-
-  destroyed() {
-    this.pending.clear()
-    this.request?.abort()
   },
 
   setMode(mode) {
@@ -437,44 +420,6 @@ Hooks.R2ResourceUpload = {
     } else {
       this.pushEvent(event, payload)
     }
-  },
-
-  upload(upload) {
-    const file = this.pending.get(upload.client_ref)
-    if (!file) return
-
-    const request = new XMLHttpRequest()
-    this.request = request
-    request.addEventListener("load", () => {
-      this.pending.delete(upload.client_ref)
-
-      if (request.status >= 200 && request.status < 300) {
-        this.pushUp("resource-uploaded", {
-          client_ref: upload.client_ref,
-          kind: upload.kind,
-          name: file.name,
-          key: upload.key,
-          public_url: upload.public_url,
-          content_type: file.type,
-          byte_size: file.size
-        })
-      } else {
-        this.pushUp("resource-upload-failed", {
-          client_ref: upload.client_ref,
-          message: `Upload failed (${request.status})`
-        })
-      }
-    })
-    request.addEventListener("error", () => {
-      this.pending.delete(upload.client_ref)
-      this.pushUp("resource-upload-failed", {
-        client_ref: upload.client_ref,
-        message: "Upload failed because of a network error"
-      })
-    })
-    request.open("PUT", upload.url)
-    request.setRequestHeader("Content-Type", file.type || "application/octet-stream")
-    request.send(file)
   }
 }
 function titleCaseFromFilename(filename) {

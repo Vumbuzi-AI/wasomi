@@ -306,33 +306,68 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
     end
   end
 
-  def handle_event("validate", _params, socket), do: {:noreply, socket}
+  def handle_event("validate", params, socket) do
+    resource_keys = params |> Map.get("resources", []) |> List.wrap()
+    {:noreply, assign(socket, :selected_resources, resource_keys)}
+  end
 
   def handle_event("cancel-upload", %{"ref" => ref}, socket) do
     {:noreply, cancel_upload(socket, :source_pdf, ref)}
   end
 
-  def handle_event("generate", _params, socket) do
+  def handle_event("generate", params, socket) do
     quiz = socket.assigns.quiz
     user = socket.assigns.current_user
 
-    results =
-      consume_uploaded_entries(socket, :source_pdf, fn %{path: path}, entry ->
-        {:ok, start_generation(quiz, user, entry.client_name, path)}
-      end)
+    if not socket.assigns.module_ready? do
+      {:noreply,
+       put_flash(
+         socket,
+         :error,
+         "Every lecture in this module must have a generated lecture quiz before generating the module quiz."
+       )}
+    else
+      resource_keys = params |> Map.get("resources", []) |> List.wrap()
 
-    case results do
-      [%QuizGeneration{}] ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "PDF uploaded. Generating draft questions in the background…")
-         |> assign(:generations, Assessments.list_generations_for_quiz(quiz))}
+      pdf_results =
+        consume_uploaded_entries(socket, :source_pdf, fn %{path: path}, entry ->
+          {:ok, start_generation(quiz, user, entry.client_name, path)}
+        end)
 
-      [{:error, reason}] ->
-        {:noreply, put_flash(socket, :error, "Could not start generation: #{inspect(reason)}")}
+      cond do
+        pdf_results != [] ->
+          case pdf_results do
+            [%QuizGeneration{}] ->
+              {:noreply,
+               socket
+               |> put_flash(:info, "PDF uploaded. Generating draft questions in the background…")
+               |> assign(:generations, Assessments.list_generations_for_quiz(quiz))}
 
-      [] ->
-        {:noreply, put_flash(socket, :error, "Choose a PDF file first.")}
+            [{:error, reason}] ->
+              {:noreply, put_flash(socket, :error, "Could not start generation: #{inspect(reason)}")}
+          end
+
+        resource_keys != [] ->
+          label = source_label(resource_keys, socket.assigns)
+          {:ok, generation} = Assessments.create_generation(quiz, user, label)
+
+          %{"generation_id" => generation.id, "resource_selection" => resource_keys}
+          |> GenerateQuizFromPDFWorker.new()
+          |> Oban.insert()
+
+          {:noreply,
+           socket
+           |> put_flash(:info, "Generating draft questions from selected module resources…")
+           |> assign(:generations, Assessments.list_generations_for_quiz(quiz))}
+
+        true ->
+          {:noreply,
+           put_flash(
+             socket,
+             :error,
+             "Select at least one module resource or upload a PDF document."
+           )}
+      end
     end
   end
 
@@ -420,20 +455,10 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
         <div class="flex flex-wrap items-center justify-between gap-4">
           <.link
             navigate={~p"/admin/courses/#{@course_slug}"}
-            class="inline-flex items-center gap-1.5 text-sm font-medium text-muted hover:text-primary"
+            class="inline-flex items-center gap-1.5 text-sm font-medium text-muted hover:text-primary transition active:scale-[0.96]"
           >
             <.icon name="hero-arrow-left-mini" class="h-4 w-4" /> Back to course
           </.link>
-          <span
-            id="quiz-status"
-            class={[
-              "rounded-full px-3 py-1 text-xs font-semibold",
-              @quiz.active && "bg-mint text-primary",
-              !@quiz.active && "bg-neutral-50 text-body"
-            ]}
-          >
-            {if @quiz.active, do: "Active", else: "Draft"}
-          </span>
         </div>
 
         <header>
@@ -446,7 +471,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
               id="edit-title"
               phx-click="start_editing_title"
               aria-label="Rename quiz"
-              class="rounded-lg p-1.5 text-muted hover:bg-neutral-50 hover:text-primary"
+              class="rounded-lg p-1.5 text-muted hover:bg-neutral-50 hover:text-primary transition active:scale-[0.96]"
             >
               <.icon name="hero-pencil-square" class="h-5 w-5" />
             </button>
@@ -472,21 +497,21 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
             </div>
             <button
               type="submit"
-              class="rounded-full bg-dark px-4 py-2 text-sm font-semibold text-white hover:bg-primary"
+              class="rounded-full bg-dark px-4 py-2 text-sm font-semibold text-white hover:bg-primary transition active:scale-[0.96]"
             >
               Save
             </button>
             <button
               type="button"
               phx-click="cancel_editing_title"
-              class="text-sm font-medium text-muted hover:text-dark"
+              class="text-sm font-medium text-muted hover:text-dark transition active:scale-[0.96]"
             >
               Cancel
             </button>
           </.form>
 
           <p class="mt-2 text-body">
-            Edit every question inline, drag questions into order, then publish when the quiz is complete.
+            Edit questions inline and drag to reorder. Published questions are live immediately for learners.
           </p>
         </header>
 
@@ -548,80 +573,162 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
           </summary>
 
           <div class="mt-5 space-y-5">
-            <div>
-              <h3 class="font-semibold text-dark">Upload a source PDF</h3>
-              <p class="mt-1 text-sm text-body">
-                Up to 25MB. Draft multiple-choice questions are generated in the background from the
-                document's content and appear below for review before publishing.
+            <div
+              :if={!@module_ready?}
+              class="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800"
+            >
+              <p class="font-semibold flex items-center gap-2 text-amber-900">
+                <.icon name="hero-exclamation-triangle" class="h-5 w-5 text-amber-600" />
+                Module Quiz Generation Locked
               </p>
+              <p class="mt-1 text-xs text-amber-800">
+                Every lecture in this module must have a generated lecture quiz before generating the module quiz.
+              </p>
+            </div>
 
-              <form
-                id="generate-questions-form"
-                phx-submit="generate"
-                phx-change="validate"
-                class="mt-4"
-              >
-                <div class={[@uploads.source_pdf.entries != [] && "hidden", "flex items-center"]}>
-                  <label class="inline-flex cursor-pointer items-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-semibold text-white transition hover:bg-dark">
-                    <.icon name="hero-document-arrow-up" class="h-5 w-5" /> Select PDF
-                    <.live_file_input upload={@uploads.source_pdf} class="sr-only" />
-                  </label>
+            <form
+              id="generate-questions-form"
+              phx-submit="generate"
+              phx-change="validate"
+              class="mt-4 space-y-6"
+            >
+              <div class="grid grid-cols-1 gap-6 md:grid-cols-2 min-w-0">
+                <div class="min-w-0 rounded-2xl border border-black/5 bg-neutral-50/50 p-5 space-y-3 flex flex-col justify-between overflow-hidden">
+                  <div class="min-w-0">
+                    <h3 class="font-semibold text-dark flex items-center gap-2">
+                      <.icon name="hero-rectangle-stack" class="h-5 w-5 text-primary shrink-0" />
+                      Module resources
+                    </h3>
+                    <p class="mt-1 text-xs text-body">
+                      Select video transcripts and attached documents from this module to feed as source context.
+                    </p>
+
+                    <fieldset class="mt-3 space-y-2 min-w-0">
+                      <label
+                        :for={lecture <- @module_video_lectures}
+                        class="flex items-center gap-2.5 rounded-xl border border-black/5 bg-white p-3 text-sm text-dark transition hover:border-black/10 cursor-pointer min-w-0 max-w-full overflow-hidden"
+                      >
+                        <input
+                          type="checkbox"
+                          name="resources[]"
+                          value={"video:#{lecture.id}"}
+                          checked={"video:#{lecture.id}" in @selected_resources}
+                          disabled={not @module_ready?}
+                          class="shrink-0 rounded border-black/20 text-primary focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
+                        />
+                        <span class="min-w-0 flex-1 truncate font-medium" title={lecture.title}>
+                          {lecture.title} <span class="text-xs text-muted shrink-0">(video)</span>
+                        </span>
+                      </label>
+
+                      <label
+                        :for={resource <- @module_document_resources}
+                        class="flex items-center gap-2.5 rounded-xl border border-black/5 bg-white p-3 text-sm text-dark transition hover:border-black/10 cursor-pointer min-w-0 max-w-full overflow-hidden"
+                      >
+                        <input
+                          type="checkbox"
+                          name="resources[]"
+                          value={"doc:#{resource.id}"}
+                          checked={"doc:#{resource.id}" in @selected_resources}
+                          disabled={not @module_ready?}
+                          class="shrink-0 rounded border-black/20 text-primary focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
+                        />
+                        <span class="min-w-0 flex-1 truncate font-medium" title={resource.name}>{resource.name}</span>
+                      </label>
+
+                      <p
+                        :if={@module_video_lectures == [] and @module_document_resources == []}
+                        class="text-xs text-muted py-2"
+                      >
+                        No lecture resources found in this module.
+                      </p>
+                    </fieldset>
+                  </div>
                 </div>
 
-                <div :if={@uploads.source_pdf.entries != []} class="space-y-4">
-                  <div
-                    :for={entry <- @uploads.source_pdf.entries}
-                    class="flex items-center gap-3 rounded-2xl border border-black/5 bg-neutral-50/30 p-4 text-sm"
-                  >
-                    <span class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
-                      <.icon name="hero-document" class="h-5 w-5" />
-                    </span>
-                    <div class="min-w-0 flex-1">
-                      <div class="flex items-center justify-between gap-3">
-                        <p class="truncate font-medium text-dark">{entry.client_name}</p>
-                        <span class="shrink-0 text-xs tabular-nums text-muted">
-                          {entry.progress}%
-                        </span>
+                <div class="min-w-0 rounded-2xl border border-black/5 bg-neutral-50/50 p-5 space-y-3 flex flex-col justify-between overflow-hidden">
+                  <div>
+                    <h3 class="font-semibold text-dark flex items-center gap-2">
+                      <.icon name="hero-document-text" class="h-5 w-5 text-primary" />
+                      Custom document upload
+                    </h3>
+                    <p class="mt-1 text-xs text-body">
+                      Upload a PDF or DOCX file (up to 25MB) to generate questions directly from document text.
+                    </p>
+
+                    <div class="mt-4">
+                      <div class={[@uploads.source_pdf.entries != [] && "hidden", "flex items-center"]}>
+                        <label class={[
+                          "inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold transition active:scale-[0.96]",
+                          @module_ready? && "cursor-pointer bg-primary text-white hover:bg-dark",
+                          !@module_ready? && "cursor-not-allowed bg-neutral-200 text-muted"
+                        ]}>
+                          <.icon name="hero-document-arrow-up" class="h-4 w-4" /> Select file
+                          <.live_file_input upload={@uploads.source_pdf} disabled={not @module_ready?} class="sr-only" />
+                        </label>
                       </div>
-                      <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-neutral-50">
+
+                      <div :if={@uploads.source_pdf.entries != []} class="space-y-3">
                         <div
-                          class="h-full rounded-full bg-primary transition-[width]"
-                          style={"width: #{entry.progress}%"}
-                          role="progressbar"
-                          aria-valuemin="0"
-                          aria-valuemax="100"
-                          aria-valuenow={entry.progress}
-                          value={entry.progress}
+                          :for={entry <- @uploads.source_pdf.entries}
+                          class="flex items-center gap-3 rounded-xl border border-black/5 bg-white p-3 text-sm"
                         >
+                          <span class="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+                            <.icon name="hero-document" class="h-4 w-4" />
+                          </span>
+                          <div class="min-w-0 flex-1">
+                            <div class="flex items-center justify-between gap-2">
+                              <p class="truncate font-medium text-dark text-xs">{entry.client_name}</p>
+                              <span class="shrink-0 text-xs tabular-nums text-muted">
+                                {entry.progress}%
+                              </span>
+                            </div>
+                            <div class="mt-1.5 h-1 overflow-hidden rounded-full bg-neutral-100">
+                              <div
+                                class="h-full rounded-full bg-primary transition-[width]"
+                                style={"width: #{entry.progress}%"}
+                                role="progressbar"
+                                aria-valuemin="0"
+                                aria-valuemax="100"
+                                aria-valuenow={entry.progress}
+                                value={entry.progress}
+                              >
+                              </div>
+                            </div>
+                            <p
+                              :for={err <- upload_errors(@uploads.source_pdf, entry)}
+                              class="mt-1 text-xs text-red-600"
+                            >
+                              {error_to_string(err)}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            phx-click="cancel-upload"
+                            phx-value-ref={entry.ref}
+                            aria-label={"Remove #{entry.client_name}"}
+                            class="grid h-7 w-7 shrink-0 place-items-center rounded-full text-muted transition hover:bg-red-50 hover:text-red-500 active:scale-[0.96]"
+                          >
+                            <.icon name="hero-x-mark" class="h-4 w-4" />
+                          </button>
                         </div>
                       </div>
-                      <p
-                        :for={err <- upload_errors(@uploads.source_pdf, entry)}
-                        class="mt-1 text-xs text-red-600"
-                      >
-                        {error_to_string(err)}
-                      </p>
                     </div>
-                    <button
-                      type="button"
-                      phx-click="cancel-upload"
-                      phx-value-ref={entry.ref}
-                      aria-label={"Remove #{entry.client_name}"}
-                      class="grid h-8 w-8 shrink-0 place-items-center rounded-full text-muted transition hover:bg-red-50 hover:text-red-500"
-                    >
-                      <.icon name="hero-x-mark" class="h-4 w-4" />
-                    </button>
                   </div>
-
-                  <button
-                    type="submit"
-                    class="inline-flex items-center gap-2 rounded-full bg-dark px-6 py-3 text-sm font-semibold text-white transition hover:bg-primary"
-                  >
-                    <.icon name="hero-arrow-path" class="h-4 w-4" /> Generate questions
-                  </button>
                 </div>
-              </form>
-            </div>
+              </div>
+
+              <div class="flex justify-end pt-2">
+                <button
+                  type="submit"
+                  disabled={not @module_ready? or (@selected_resources == [] and @uploads.source_pdf.entries == [])}
+                  title={if not @module_ready?, do: "Every lecture in this module must have a generated lecture quiz before generating the module quiz.", else: "Generate module quiz"}
+                  class="inline-flex items-center gap-2 rounded-full bg-dark px-6 py-3 text-sm font-semibold text-white transition hover:bg-primary active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-dark disabled:active:scale-100"
+                >
+                  <.icon name="hero-arrow-path" class="h-4 w-4" /> Generate module quiz
+                </button>
+              </div>
+            </form>
 
             <div
               :if={active_generation(@generations)}
@@ -688,142 +795,145 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
           </div>
         </details>
 
-        <div
-          id="quiz-questions"
-          phx-hook="SortableList"
-          data-event="reorder_questions"
-          data-order-key="ids"
-          class="space-y-5"
-        >
-          <article
-            :for={{question, index} <- Enum.with_index(@quiz.questions, 1)}
-            id={"question-#{question.id}"}
-            data-sortable-item
-            data-id={question.id}
-            class="rounded-3xl border border-black/5 bg-white p-6 shadow-sm data-[dragging=true]:opacity-50 lg:p-8"
-          >
-            <div class="mb-5 flex items-center justify-between gap-4">
-              <div class="flex items-center gap-3">
+        <section id="questions-section" class="space-y-6">
+          <div class="flex flex-wrap items-center justify-between gap-4 border-b border-black/5 pb-4">
+            <div>
+              <h2 class="text-xl font-semibold text-dark">Questions</h2>
+              <p class="mt-0.5 text-xs text-body">
+                {length(@quiz.questions)} question(s) {if draft_questions(@quiz) != [], do: "· #{length(draft_questions(@quiz))} draft(s)"}
+              </p>
+            </div>
+
+            <div :if={is_nil(@new_question_form)} class="flex flex-wrap items-center gap-3">
+              <button
+                :if={draft_questions(@quiz) != []}
+                type="button"
+                phx-click="confirm_publish_all_drafts"
+                class="rounded-full bg-mint px-4 py-2 text-xs font-semibold text-primary transition hover:bg-emerald-200 active:scale-[0.96]"
+              >
+                Publish all drafts
+              </button>
+              <button
+                :if={draft_questions(@quiz) != []}
+                type="button"
+                phx-click="confirm_delete_all_drafts"
+                class="rounded-full border border-black/10 px-4 py-2 text-xs font-medium text-muted transition hover:border-red-300 hover:text-red-600 active:scale-[0.96]"
+              >
+                Delete all drafts
+              </button>
+
+              <div class="inline-flex rounded-full bg-primary p-0.5 shadow-sm">
                 <button
+                  id="add-question"
                   type="button"
-                  data-sortable-handle
-                  title="Drag to reorder"
-                  class="cursor-grab rounded-lg p-2 text-muted hover:bg-neutral-50 hover:text-dark active:cursor-grabbing"
+                  phx-click="new_question"
+                  class="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2 text-sm font-semibold text-white transition hover:bg-dark active:scale-[0.96]"
                 >
-                  <.icon name="hero-bars-3" class="h-5 w-5" />
-                </button>
-                <h2 class="font-semibold text-dark">Question {index}</h2>
-                <span class={[
-                  "rounded-full px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wider",
-                  question.status == :published && "bg-mint text-primary",
-                  question.status == :draft && "bg-neutral-50 text-body"
-                ]}>
-                  {Phoenix.Naming.humanize(question.status)}
-                </span>
-              </div>
-              <div class="flex items-center gap-4">
-                <button
-                  :if={question.status == :draft}
-                  type="button"
-                  phx-click="publish_question"
-                  phx-value-id={question.id}
-                  class="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:text-dark"
-                >
-                  <.icon name="hero-check-circle" class="h-4 w-4" /> Publish
+                  <.icon name="hero-plus" class="h-4 w-4" /> Add question
                 </button>
                 <button
+                  id="add-true-false-question"
                   type="button"
-                  phx-click="confirm_delete_question"
-                  phx-value-id={question.id}
-                  class="inline-flex items-center gap-1.5 text-sm font-medium text-red-500 hover:text-red-700"
+                  phx-click="new_question"
+                  phx-value-type="true_false"
+                  title="Add True/False question"
+                  class="inline-flex items-center rounded-full px-3 py-2 text-xs font-medium text-white/90 transition hover:bg-dark hover:text-white active:scale-[0.96]"
                 >
-                  <.icon name="hero-trash" class="h-4 w-4" /> Remove
+                  T/F
                 </button>
               </div>
             </div>
-
-            <.question_form
-              form={Map.fetch!(@question_forms, question.id)}
-              question={question}
-              dirty={MapSet.member?(@dirty_question_ids, question.id)}
-            />
-          </article>
-        </div>
-
-        <section
-          :if={@quiz.questions == [] && is_nil(@new_question_form)}
-          id="empty-quiz"
-          class="rounded-3xl border border-dashed border-black/10 bg-white p-10 text-center"
-        >
-          <p class="font-medium text-dark">This quiz has no questions yet.</p>
-          <p class="mt-1 text-sm text-body">Add the first question before publishing.</p>
-        </section>
-
-        <section
-          :if={@new_question_form}
-          id="new-question"
-          class="rounded-3xl border border-primary/20 bg-white p-6 lg:p-8"
-        >
-          <h2 class="mb-5 font-semibold text-dark">New question</h2>
-          <.question_form form={@new_question_form} question={nil} />
-        </section>
-
-        <div class="space-y-4 rounded-3xl bg-dark p-6 text-white">
-          <div :if={is_nil(@new_question_form)} class="flex flex-wrap items-center gap-3">
-            <button
-              id="add-question"
-              type="button"
-              phx-click="new_question"
-              class="inline-flex items-center gap-2 rounded-full border border-white/20 px-5 py-2.5 text-sm font-semibold hover:bg-white hover:text-dark"
-            >
-              <.icon name="hero-plus" class="h-4 w-4" /> Add question
-            </button>
-            <button
-              id="add-true-false-question"
-              type="button"
-              phx-click="new_question"
-              phx-value-type="true_false"
-              class="inline-flex items-center gap-2 rounded-full border border-white/20 px-5 py-2.5 text-sm font-semibold hover:bg-white hover:text-dark"
-            >
-              <.icon name="hero-plus" class="h-4 w-4" /> Add true/false question
-            </button>
-            <button
-              :if={draft_questions(@quiz) != []}
-              type="button"
-              phx-click="confirm_publish_all_drafts"
-              class="rounded-full bg-mint px-4 py-2.5 text-sm font-semibold text-primary transition hover:bg-white"
-            >
-              Publish all drafts
-            </button>
-            <button
-              :if={draft_questions(@quiz) != []}
-              type="button"
-              phx-click="confirm_delete_all_drafts"
-              class="rounded-full border border-white/20 px-4 py-2.5 text-sm font-medium text-white/80 transition hover:border-red-300 hover:text-red-300"
-            >
-              Delete all drafts
-            </button>
           </div>
 
-          <div class="flex flex-wrap items-center justify-between gap-4 border-t border-white/10 pt-4">
-            <span :if={@new_question_form} class="text-sm text-white/60">
-              Save or cancel the new question before publishing.
-            </span>
-            <span :if={is_nil(@new_question_form)} class="text-sm text-white/60">
-              {length(@quiz.questions)} question(s) · {length(draft_questions(@quiz))} draft(s)
-            </span>
-            <button
-              id="publish-quiz"
-              type="button"
-              phx-click="publish"
-              disabled={!is_nil(@new_question_form)}
-              class="ml-auto inline-flex items-center gap-2 rounded-full bg-primary px-6 py-3 font-semibold text-white transition hover:bg-white hover:text-dark disabled:cursor-not-allowed disabled:opacity-40"
+          <div
+            id="quiz-questions"
+            phx-hook="SortableList"
+            data-event="reorder_questions"
+            data-order-key="ids"
+            class="space-y-5"
+          >
+            <article
+              :for={{question, index} <- Enum.with_index(@quiz.questions, 1)}
+              id={"question-#{question.id}"}
+              data-sortable-item
+              data-id={question.id}
+              class="rounded-3xl border border-black/5 bg-white p-6 shadow-sm data-[dragging=true]:opacity-50 lg:p-8"
             >
-              <.icon name="hero-paper-airplane" class="h-5 w-5" />
-              {if @quiz.active, do: "Publish updates", else: "Publish quiz"}
-            </button>
+              <div class="mb-5 flex items-center justify-between gap-4">
+                <div class="flex items-center gap-3">
+                  <button
+                    type="button"
+                    data-sortable-handle
+                    title="Drag to reorder"
+                    class="cursor-grab rounded-lg p-2 text-muted hover:bg-neutral-50 hover:text-dark active:cursor-grabbing"
+                  >
+                    <.icon name="hero-bars-3" class="h-5 w-5" />
+                  </button>
+                  <h2 class="font-semibold text-dark">Question {index}</h2>
+                  <span class={[
+                    "rounded-full px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wider",
+                    question.status == :published && "bg-mint text-primary",
+                    question.status == :draft && "bg-neutral-50 text-body"
+                  ]}>
+                    {Phoenix.Naming.humanize(question.status)}
+                  </span>
+                </div>
+                <div class="flex items-center gap-4">
+                  <button
+                    :if={question.status == :draft}
+                    type="button"
+                    phx-click="publish_question"
+                    phx-value-id={question.id}
+                    class="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:text-dark transition active:scale-[0.96]"
+                  >
+                    <.icon name="hero-check-circle" class="h-4 w-4" /> Publish
+                  </button>
+                  <button
+                    type="button"
+                    phx-click="confirm_delete_question"
+                    phx-value-id={question.id}
+                    class="inline-flex items-center gap-1.5 text-sm font-medium text-red-500 hover:text-red-700 transition active:scale-[0.96]"
+                  >
+                    <.icon name="hero-trash" class="h-4 w-4" /> Remove
+                  </button>
+                </div>
+              </div>
+
+              <.question_form
+                form={Map.fetch!(@question_forms, question.id)}
+                question={question}
+                dirty={MapSet.member?(@dirty_question_ids, question.id)}
+              />
+            </article>
           </div>
-        </div>
+
+          <section
+            :if={@quiz.questions == [] && is_nil(@new_question_form)}
+            id="empty-quiz"
+            class="rounded-3xl border border-dashed border-black/10 bg-white p-10 text-center"
+          >
+            <p class="font-medium text-dark">This quiz has no questions yet.</p>
+            <p class="mt-1 text-sm text-body">Add your first question manually or generate from resources above.</p>
+            <div class="mt-5 flex justify-center">
+              <button
+                type="button"
+                phx-click="new_question"
+                class="inline-flex items-center gap-2 rounded-full bg-primary px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-dark active:scale-[0.96]"
+              >
+                <.icon name="hero-plus" class="h-4 w-4" /> Add question
+              </button>
+            </div>
+          </section>
+
+          <section
+            :if={@new_question_form}
+            id="new-question"
+            class="rounded-3xl border border-primary/20 bg-white p-6 shadow-sm lg:p-8"
+          >
+            <h2 class="mb-5 font-semibold text-dark">New question</h2>
+            <.question_form form={@new_question_form} question={nil} />
+          </section>
+        </section>
       </div>
 
       <.confirm_modal
@@ -876,129 +986,6 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
     """
   end
 
-  attr :form, Phoenix.HTML.Form, required: true
-  attr :question, :any, required: true
-  attr :dirty, :boolean, default: true
-
-  defp question_form(assigns) do
-    assigns =
-      assign(
-        assigns,
-        :input_prefix,
-        if(assigns.question, do: "question-#{assigns.question.id}", else: "new-question")
-      )
-
-    ~H"""
-    <.form
-      for={@form}
-      id={if @question, do: "question-form-#{@question.id}", else: "new-question-form"}
-      phx-change={if @question, do: "validate_question", else: "validate_new_question"}
-      phx-submit={if @question, do: "save_question", else: "save_new_question"}
-      phx-value-id={@question && @question.id}
-      class="space-y-5"
-    >
-      <.input
-        field={@form[:prompt]}
-        id={"#{@input_prefix}-prompt"}
-        type="textarea"
-        label="Question text"
-      />
-      <.input
-        field={@form[:explanation]}
-        id={"#{@input_prefix}-explanation"}
-        type="textarea"
-        label="Explanation"
-        placeholder="Explain why the selected answer is correct"
-      />
-
-      <fieldset>
-        <legend class="mb-3 text-sm font-semibold text-dark">
-          Answer options <span class="font-normal text-body">(select the correct answer)</span>
-        </legend>
-        <div class="space-y-3">
-          <.inputs_for :let={option_form} field={@form[:question_options]}>
-            <div class="flex items-start gap-3">
-              <input
-                type="radio"
-                name={"#{@input_prefix}[correct_option_id]"}
-                value={option_form.index}
-                checked={option_form[:correct].value == true}
-                aria-label={"Mark option #{option_form.index + 1} correct"}
-                class="mt-3 h-4 w-4 border-black/20 text-primary focus:ring-primary"
-              />
-              <input
-                type="hidden"
-                name={"#{option_form.name}[position]"}
-                value={option_form.index + 1}
-              />
-              <div class="flex-1">
-                <.input
-                  field={option_form[:label]}
-                  id={"#{@input_prefix}-option-#{option_form.index}"}
-                  type="text"
-                  label={"Option #{option_form.index + 1}"}
-                />
-              </div>
-              <button
-                :if={length(@form.impl.to_form(@form.source, @form, :question_options, [])) > 2}
-                type="button"
-                phx-click="remove_option"
-                phx-value-id={if @question, do: @question.id, else: "new"}
-                phx-value-index={option_form.index}
-                tabindex="-1"
-                class="mt-8 p-2 text-muted hover:text-red-500 rounded-lg hover:bg-neutral-50 transition shrink-0"
-                title="Remove option"
-              >
-                <.icon name="hero-trash" class="h-4 w-4" />
-              </button>
-            </div>
-          </.inputs_for>
-          <div
-            :if={length(@form.impl.to_form(@form.source, @form, :question_options, [])) < 4}
-            class="pt-1"
-          >
-            <button
-              type="button"
-              phx-click="add_option"
-              phx-value-id={if @question, do: @question.id, else: "new"}
-              class="inline-flex items-center gap-1.5 rounded-full border border-black/10 px-3 py-1.5 text-xs font-semibold text-dark transition hover:bg-neutral-50 hover:text-primary"
-            >
-              <.icon name="hero-plus-circle" class="h-4 w-4" /> Add option
-            </button>
-          </div>
-          <.field_error field={@form[:question_options]} />
-        </div>
-      </fieldset>
-
-      <div class="flex items-center gap-4">
-        <button
-          type="submit"
-          disabled={@question && !@dirty}
-          class="rounded-full bg-dark px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-primary disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {if @question, do: "Save question", else: "Add question"}
-        </button>
-        <button
-          :if={is_nil(@question)}
-          type="button"
-          phx-click="cancel_new_question"
-          class="text-sm font-medium text-muted hover:text-dark"
-        >
-          Cancel
-        </button>
-      </div>
-    </.form>
-    """
-  end
-
-  attr :field, Phoenix.HTML.FormField, required: true
-
-  defp field_error(assigns) do
-    ~H"""
-    <.error :for={error <- @field.errors}>{translate_error(error)}</.error>
-    """
-  end
-
   defp load_quiz!(quiz_id, course_slug) do
     quiz = Assessments.get_quiz_with_questions!(quiz_id)
     course = Catalog.get_course_by_slug!(course_slug)
@@ -1016,8 +1003,32 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
         {question.id, to_form(Assessments.change_question(question))}
       end)
 
+    module_ready? = Assessments.module_ready_for_quiz_generation?(quiz.module_id)
+    lectures = Catalog.list_lectures_for_module(quiz.module_id) |> Wasomi.Repo.preload([:resources])
+
+    document_resources =
+      Enum.flat_map(lectures, fn lecture ->
+        Enum.filter(lecture.resources, &(&1.kind == :document))
+      end)
+
+    video_lectures =
+      Enum.filter(lectures, fn lecture ->
+        is_binary(lecture.video_asset_id) and lecture.video_asset_id != ""
+      end)
+
+    default_resources =
+      Enum.flat_map(video_lectures, fn lecture ->
+        transcript = Catalog.get_lecture_transcript(lecture.id)
+        if transcript && transcript.status == :ready, do: ["video:#{lecture.id}"], else: []
+      end) ++ Enum.map(document_resources, fn r -> "doc:#{r.id}" end)
+
     socket
     |> assign(:quiz, quiz)
+    |> assign(:module_ready?, module_ready?)
+    |> assign(:module_video_lectures, video_lectures)
+    |> assign(:module_document_resources, document_resources)
+    |> assign(:default_resources, default_resources)
+    |> assign_new(:selected_resources, fn -> default_resources end)
     |> assign(:question_forms, forms)
     |> assign(:dirty_question_ids, MapSet.new())
   end
@@ -1091,6 +1102,35 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
     do: Application.get_env(:wasomi, :assessments_storage, Wasomi.Assessments.Storage.R2)
 
   defp draft_questions(quiz), do: Enum.filter(quiz.questions, &(&1.status == :draft))
+
+  defp source_label(resource_keys, assigns) do
+    labels =
+      Enum.map(resource_keys, fn
+        "video:" <> lecture_id_str ->
+          lecture_id = String.to_integer(lecture_id_str)
+
+          case Enum.find(assigns.module_video_lectures, &(&1.id == lecture_id)) do
+            %{title: title} -> "#{title} (transcript)"
+            nil -> "Lecture ##{lecture_id} transcript"
+          end
+
+        "doc:" <> resource_id_str ->
+          resource_id = String.to_integer(resource_id_str)
+
+          case Enum.find(assigns.module_document_resources, &(&1.id == resource_id)) do
+            %{name: name} -> name
+            nil -> "Resource ##{resource_id}"
+          end
+
+        _ ->
+          "Selected resource"
+      end)
+
+    case labels do
+      [] -> "No resources selected"
+      labels -> Enum.join(labels, " + ")
+    end
+  end
 
   defp active_generation(generations),
     do: Enum.find(generations, &(&1.status in [:pending, :processing]))

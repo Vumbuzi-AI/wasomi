@@ -238,5 +238,42 @@ defmodule Wasomi.Assessments.Workers.GenerateQuizFromPDFWorkerTest do
 
       assert :ok = Oban.Testing.perform_job(GenerateQuizFromPDFWorker, args(generation), [])
     end
+
+    test "generates module quiz from selected module resources (video transcript and document)" do
+      module = course_module_fixture()
+      lecture = lecture_fixture(module_id: module.id, video_asset_id: "asset_123")
+      Wasomi.Catalog.upsert_lecture_transcript(lecture.id, %{status: :ready, text: "Video transcript text."})
+
+      resource =
+        lecture_resource_fixture(
+          lecture_id: lecture.id,
+          kind: :document,
+          storage_key: "lectures/notes.docx"
+        )
+
+      quiz = quiz_fixture(module: module)
+      generation = quiz_generation_fixture(quiz: quiz)
+
+      expect(Wasomi.LectureResourceReaderMock, :extract_text, fn res ->
+        assert res.id == resource.id
+        {:ok, "Document resource text."}
+      end)
+
+      expect(Wasomi.QuestionGeneratorMock, :generate_questions, fn text, _opts ->
+        assert text =~ "Video transcript text."
+        assert text =~ "Document resource text."
+        {:ok, [draft_question_attrs(%{prompt: "Module synthesis question?"})]}
+      end)
+
+      args = %{
+        "generation_id" => generation.id,
+        "resource_selection" => ["video:#{lecture.id}", "doc:#{resource.id}"]
+      }
+
+      assert :ok = Oban.Testing.perform_job(GenerateQuizFromPDFWorker, args, [])
+
+      updated = Assessments.get_generation!(generation.id)
+      assert updated.status == :ready
+    end
   end
 end

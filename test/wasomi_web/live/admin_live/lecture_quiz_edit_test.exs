@@ -257,5 +257,87 @@ defmodule WasomiWeb.AdminLive.LectureQuizEditTest do
       loaded = Assessments.get_lecture_quiz_with_questions!(quiz.id)
       assert loaded.questions == []
     end
+
+    test "admin can add a question inline", %{conn: conn, lecture: lecture} do
+      {:ok, view, _html} = live(conn, edit_path(lecture))
+
+      view |> element("#add-question") |> render_click()
+
+      assert has_element?(view, "#new-question-form")
+
+      view
+      |> form("#new-question-form", %{
+        "lecture_quiz_question" => %{
+          "prompt" => "What is the capital of Kenya?",
+          "explanation" => "Nairobi is the capital city.",
+          "question_options" => %{
+            "0" => %{"label" => "Nairobi", "position" => "1"},
+            "1" => %{"label" => "Mombasa", "position" => "2"},
+            "2" => %{"label" => "Kisumu", "position" => "3"},
+            "3" => %{"label" => "Nakuru", "position" => "4"}
+          }
+        },
+        "new-question" => %{"correct_option_id" => "0"}
+      })
+      |> render_submit()
+
+      assert render(view) =~ "Question added."
+      quiz = Assessments.get_lecture_quiz_with_questions!(Assessments.get_lecture_quiz(lecture.id).id)
+      assert Enum.any?(quiz.questions, &(&1.prompt == "What is the capital of Kenya?"))
+    end
+
+    test "admin can edit and save question prompt and options inline", %{conn: conn, lecture: lecture} do
+      {:ok, view, _html} = live(conn, edit_path(lecture))
+
+      [question] =
+        Assessments.get_lecture_quiz_with_questions!(Assessments.get_lecture_quiz(lecture.id).id).questions
+
+      view
+      |> form("#question-form-#{question.id}", %{
+        "lecture_quiz_question" => %{
+          "prompt" => "Updated lecture prompt text?",
+          "explanation" => "Updated explanation text.",
+          "question_options" => %{
+            "0" => %{"label" => "Updated Option 1", "position" => "1"},
+            "1" => %{"label" => "Option 2", "position" => "2"}
+          }
+        },
+        "question-#{question.id}" => %{"correct_option_id" => "0"}
+      })
+      |> render_submit()
+
+      updated = Assessments.get_lecture_quiz_question!(question.id)
+      assert updated.prompt == "Updated lecture prompt text?"
+    end
+
+    test "admins can dynamically add and remove options in the lecture quiz editor", %{
+      conn: conn,
+      lecture: lecture
+    } do
+      {:ok, view, _html} = live(conn, edit_path(lecture))
+
+      [question] =
+        Assessments.get_lecture_quiz_with_questions!(Assessments.get_lecture_quiz(lecture.id).id).questions
+
+      assert view
+             |> element("#question-form-#{question.id}")
+             |> render() =~ ~s(id="question-#{question.id}-option-3")
+
+      view
+      |> element("#question-form-#{question.id} button[phx-value-index='3']")
+      |> render_click()
+
+      refute view
+             |> element("#question-form-#{question.id}")
+             |> render() =~ ~s(id="question-#{question.id}-option-3")
+
+      view
+      |> element("#question-form-#{question.id} button", "Add option")
+      |> render_click()
+
+      assert view
+             |> element("#question-form-#{question.id}")
+             |> render() =~ ~s(id="question-#{question.id}-option-3")
+    end
   end
 end

@@ -204,30 +204,31 @@ defmodule WasomiWeb.AdminLive.QuizEditTest do
     assert length(Assessments.get_quiz_with_questions!(quiz.id).questions) == 2
   end
 
-  test "publish reports completeness errors and leaves an empty quiz inactive", %{conn: conn} do
-    quiz = quiz_fixture(%{active: false})
-    {:ok, view, _html} = live(conn, edit_path(quiz))
-
-    html = view |> element("#publish-quiz") |> render_click()
-
-    assert html =~ "Add at least one question before publishing."
-    refute Assessments.get_quiz!(quiz.id).active
-  end
-
-  test "publishing marks the quiz active and publishes all questions", %{conn: conn} do
-    quiz = quiz_fixture()
+  test "publishing a draft question or all drafts activates the quiz and marks questions published", %{conn: conn} do
+    quiz = ready_quiz_fixture(%{active: false})
     first = question_fixture(%{quiz: quiz, status: :draft, position: 1})
-    second = question_fixture(%{quiz: quiz, status: :draft, position: 2})
+    _second = question_fixture(%{quiz: quiz, status: :draft, position: 2})
 
     {:ok, view, _html} = live(conn, edit_path(quiz))
-    view |> element("#publish-quiz") |> render_click()
 
-    assert has_element?(view, "#quiz-status", "Active")
+    view
+    |> element("#question-#{first.id} button", "Publish")
+    |> render_click()
+
     published = Assessments.get_quiz_with_questions!(quiz.id)
     assert published.active
     assert published.published_at
-    assert Enum.map(published.questions, & &1.id) == [first.id, second.id]
-    assert Enum.all?(published.questions, &(&1.status == :published))
+
+    view
+    |> element("button", "Publish all drafts")
+    |> render_click()
+
+    view
+    |> element("#publish-all-drafts-modal button", "Publish all")
+    |> render_click()
+
+    updated = Assessments.get_quiz_with_questions!(quiz.id)
+    assert Enum.all?(updated.questions, &(&1.status == :published))
   end
 
   test "admin can rename the quiz inline", %{conn: conn} do
@@ -598,10 +599,28 @@ defmodule WasomiWeb.AdminLive.QuizEditTest do
     assert Assessments.get_quiz_with_questions!(quiz.id).questions == []
   end
 
-  test "uploading a PDF enqueues generation without an admin-chosen question count", %{
+  defp ready_quiz_fixture(opts \\ []) do
+    quiz = quiz_fixture(opts)
+    lecture = lecture_fixture(module_id: quiz.module_id)
+    lecture_quiz_fixture(lecture: lecture)
+    quiz
+  end
+
+  test "disables module quiz generation controls and displays tooltip warning when lectures lack a lecture quiz", %{
     conn: conn
   } do
     quiz = quiz_fixture()
+    {:ok, view, _html} = live(conn, edit_path(quiz))
+
+    assert render(view) =~ "Module Quiz Generation Locked"
+    assert render(view) =~ "Every lecture in this module must have a generated lecture quiz before generating the module quiz."
+    assert has_element?(view, "#generate-questions-form button[disabled]")
+  end
+
+  test "uploading a PDF enqueues generation without an admin-chosen question count", %{
+    conn: conn
+  } do
+    quiz = ready_quiz_fixture()
     {:ok, view, _html} = live(conn, edit_path(quiz))
 
     expect(Wasomi.AssessmentsStorageMock, :upload, fn _key, _binary -> :ok end)
@@ -624,7 +643,7 @@ defmodule WasomiWeb.AdminLive.QuizEditTest do
   end
 
   test "a PDF over the 25MB limit is rejected with a clear message", %{conn: conn} do
-    quiz = quiz_fixture()
+    quiz = ready_quiz_fixture()
     {:ok, view, _html} = live(conn, edit_path(quiz))
 
     pdf =
@@ -638,7 +657,7 @@ defmodule WasomiWeb.AdminLive.QuizEditTest do
   end
 
   test "a generation-record creation failure shows an error instead of crashing", %{conn: conn} do
-    quiz = quiz_fixture()
+    quiz = ready_quiz_fixture()
     {:ok, view, _html} = live(conn, edit_path(quiz))
 
     # Force Assessments.create_generation/3 to fail its assoc_constraint(:quiz)
@@ -663,7 +682,7 @@ defmodule WasomiWeb.AdminLive.QuizEditTest do
   end
 
   test "a storage upload failure shows an error instead of crashing", %{conn: conn} do
-    quiz = quiz_fixture()
+    quiz = ready_quiz_fixture()
     {:ok, view, _html} = live(conn, edit_path(quiz))
 
     expect(Wasomi.AssessmentsStorageMock, :upload, fn _key, _binary ->

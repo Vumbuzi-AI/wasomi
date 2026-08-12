@@ -156,6 +156,28 @@ defmodule Wasomi.StorageTest do
              })
   end
 
+  test "R2.download_url/1 recomputes a public URL from the configured base" do
+    previous = Application.get_env(:wasomi, :r2_public_url)
+    on_exit(fn -> Application.put_env(:wasomi, :r2_public_url, previous) end)
+    Application.put_env(:wasomi, :r2_public_url, "https://cdn.example.test")
+
+    assert {:ok, "https://cdn.example.test/lectures/123/notes.pdf"} =
+             R2.download_url("lectures/123/notes.pdf")
+  end
+
+  test "R2.download_url/1 errors instead of returning a broken URL when unconfigured" do
+    previous = Application.get_env(:wasomi, :r2_public_url)
+    on_exit(fn -> Application.put_env(:wasomi, :r2_public_url, previous) end)
+    Application.delete_env(:wasomi, :r2_public_url)
+
+    assert {:error, :r2_not_configured} = R2.download_url("lectures/123/notes.pdf")
+  end
+
+  test "Storage.download_url/2 rejects a blank storage key" do
+    assert {:error, :invalid_storage_key} = Storage.download_url("", Adapter)
+    assert {:error, :invalid_storage_key} = Storage.download_url(nil, Adapter)
+  end
+
   test "only admins can delete uploads" do
     learner = Wasomi.AccountsFixtures.user_fixture()
     admin = Wasomi.AccountsFixtures.user_fixture()

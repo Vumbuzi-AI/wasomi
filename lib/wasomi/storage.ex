@@ -10,6 +10,7 @@ defmodule Wasomi.Storage do
 
   @callback presign_upload(User.t(), map()) :: {:ok, upload()} | {:error, term()}
   @callback delete_upload(User.t(), String.t()) :: :ok | {:error, term()}
+  @callback download_url(String.t()) :: {:ok, String.t()} | {:error, term()}
 
   def presign_upload(user, attrs), do: presign_upload(user, attrs, configured_adapter())
 
@@ -26,6 +27,14 @@ defmodule Wasomi.Storage do
   end
 
   def delete_upload(_user, _key, _adapter), do: {:error, :forbidden}
+
+  def download_url(key), do: download_url(key, configured_adapter())
+
+  def download_url(key, adapter) when is_binary(key) and key != "" do
+    adapter.download_url(key)
+  end
+
+  def download_url(_key, _adapter), do: {:error, :invalid_storage_key}
 
   def configured_adapter do
     Application.get_env(:wasomi, :storage_provider, Wasomi.Storage.R2)

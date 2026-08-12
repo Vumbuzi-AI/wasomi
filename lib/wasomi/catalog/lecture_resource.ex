@@ -70,7 +70,7 @@ defmodule Wasomi.Catalog.LectureResource do
     end
   end
 
-  defp valid_url?(url) when is_binary(url) do
+  def valid_url?(url) when is_binary(url) do
     case URI.parse(String.trim(url)) do
       %URI{scheme: scheme, host: host} when scheme in ["http", "https"] and is_binary(host) ->
         true
@@ -80,5 +80,5 @@ defmodule Wasomi.Catalog.LectureResource do
     end
   end
 
-  defp valid_url?(_), do: false
+  def valid_url?(_), do: false
 end

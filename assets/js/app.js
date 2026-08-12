@@ -46,6 +46,29 @@ const R2Uploader = (entries, onViewError) => {
   })
 }
 
+const SIDEBAR_COLLAPSED_KEY = "admin-sidebar-collapsed"
+
+Hooks.SidebarToggle = {
+  mounted() {
+    const sidebar = document.getElementById("admin-sidebar")
+    if (!sidebar) return
+
+    const setTitle = isCollapsed => {
+      this.el.title = isCollapsed ? "Expand sidebar" : "Collapse sidebar"
+    }
+
+    const collapsed = localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true"
+    sidebar.classList.toggle("is-collapsed", collapsed)
+    setTitle(collapsed)
+
+    this.el.addEventListener("click", () => {
+      const isCollapsed = sidebar.classList.toggle("is-collapsed")
+      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, isCollapsed)
+      setTitle(isCollapsed)
+    })
+  }
+}
+
 Hooks.SortableList = {
   mounted() {
     this.draggedItem = null

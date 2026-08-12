@@ -24,6 +24,23 @@ defmodule Wasomi.Certificates do
     |> Repo.all()
   end
 
+  @doc """
+  Counts course-level (not module-level) certificates issued, optionally
+  scoped to a single course. Used by the admin conversion funnel as its
+  terminal "Certified" step.
+  """
+  def count_course_certificates(opts \\ []) do
+    course_id = Keyword.get(opts, :course_id)
+
+    Certificate
+    |> where([c], c.type == :course)
+    |> filter_course(course_id)
+    |> Repo.aggregate(:count)
+  end
+
+  defp filter_course(query, nil), do: query
+  defp filter_course(query, course_id), do: where(query, [c], c.course_id == ^course_id)
+
   def list_for_user(%User{id: user_id}) do
     Certificate
     |> where([certificate], certificate.user_id == ^user_id)

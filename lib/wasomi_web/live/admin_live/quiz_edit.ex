@@ -429,7 +429,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
             class={[
               "rounded-full px-3 py-1 text-xs font-semibold",
               @quiz.active && "bg-mint text-primary",
-              !@quiz.active && "bg-soft text-body"
+              !@quiz.active && "bg-neutral-50 text-body"
             ]}
           >
             {if @quiz.active, do: "Active", else: "Draft"}
@@ -446,7 +446,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
               id="edit-title"
               phx-click="start_editing_title"
               aria-label="Rename quiz"
-              class="rounded-lg p-1.5 text-muted hover:bg-soft hover:text-primary"
+              class="rounded-lg p-1.5 text-muted hover:bg-neutral-50 hover:text-primary"
             >
               <.icon name="hero-pencil-square" class="h-5 w-5" />
             </button>
@@ -571,7 +571,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
                 <div :if={@uploads.source_pdf.entries != []} class="space-y-4">
                   <div
                     :for={entry <- @uploads.source_pdf.entries}
-                    class="flex items-center gap-3 rounded-2xl border border-black/5 bg-soft/30 p-4 text-sm"
+                    class="flex items-center gap-3 rounded-2xl border border-black/5 bg-neutral-50/30 p-4 text-sm"
                   >
                     <span class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary">
                       <.icon name="hero-document" class="h-5 w-5" />
@@ -583,7 +583,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
                           {entry.progress}%
                         </span>
                       </div>
-                      <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-soft">
+                      <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-neutral-50">
                         <div
                           class="h-full rounded-full bg-primary transition-[width]"
                           style={"width: #{entry.progress}%"}
@@ -646,7 +646,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
               <summary class="flex cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
                 <span class="flex items-center gap-2">
                   <h3 class="font-semibold text-dark">Generation history</h3>
-                  <span class="rounded-full bg-soft px-2 py-0.5 text-xs font-semibold text-body">
+                  <span class="rounded-full bg-neutral-50 px-2 py-0.5 text-xs font-semibold text-body">
                     {length(@generations)}
                   </span>
                 </span>
@@ -708,7 +708,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
                   type="button"
                   data-sortable-handle
                   title="Drag to reorder"
-                  class="cursor-grab rounded-lg p-2 text-muted hover:bg-soft hover:text-dark active:cursor-grabbing"
+                  class="cursor-grab rounded-lg p-2 text-muted hover:bg-neutral-50 hover:text-dark active:cursor-grabbing"
                 >
                   <.icon name="hero-bars-3" class="h-5 w-5" />
                 </button>
@@ -716,7 +716,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
                 <span class={[
                   "rounded-full px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wider",
                   question.status == :published && "bg-mint text-primary",
-                  question.status == :draft && "bg-soft text-body"
+                  question.status == :draft && "bg-neutral-50 text-body"
                 ]}>
                   {Phoenix.Naming.humanize(question.status)}
                 </span>
@@ -946,7 +946,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
                 phx-value-id={if @question, do: @question.id, else: "new"}
                 phx-value-index={option_form.index}
                 tabindex="-1"
-                class="mt-8 p-2 text-muted hover:text-red-500 rounded-lg hover:bg-soft transition shrink-0"
+                class="mt-8 p-2 text-muted hover:text-red-500 rounded-lg hover:bg-neutral-50 transition shrink-0"
                 title="Remove option"
               >
                 <.icon name="hero-trash" class="h-4 w-4" />
@@ -961,7 +961,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
               type="button"
               phx-click="add_option"
               phx-value-id={if @question, do: @question.id, else: "new"}
-              class="inline-flex items-center gap-1.5 rounded-full border border-black/10 px-3 py-1.5 text-xs font-semibold text-dark transition hover:bg-soft hover:text-primary"
+              class="inline-flex items-center gap-1.5 rounded-full border border-black/10 px-3 py-1.5 text-xs font-semibold text-dark transition hover:bg-neutral-50 hover:text-primary"
             >
               <.icon name="hero-plus-circle" class="h-4 w-4" /> Add option
             </button>
@@ -1125,9 +1125,9 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
     <span class={[
       "inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium",
       @status == :ready && @remaining_count > 0 && "bg-mint text-primary",
-      @status == :ready && @remaining_count == 0 && "bg-soft text-body",
+      @status == :ready && @remaining_count == 0 && "bg-neutral-50 text-body",
       @status == :failed && "bg-red-50 text-red-600",
-      @status in [:pending, :processing] && "bg-soft text-body"
+      @status in [:pending, :processing] && "bg-neutral-50 text-body"
     ]}>
       <.icon
         :if={@status in [:pending, :processing]}

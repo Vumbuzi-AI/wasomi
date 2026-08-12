@@ -4,6 +4,7 @@ defmodule Wasomi.Catalog.AnalyticsTest do
   import Wasomi.AccountsFixtures
   import Wasomi.AssessmentsFixtures
   import Wasomi.CatalogFixtures
+  import Wasomi.CertificatesFixtures
   import Wasomi.EnrollmentsFixtures
   import Wasomi.LearningFixtures
   import Wasomi.PaymentsFixtures
@@ -254,6 +255,214 @@ defmodule Wasomi.Catalog.AnalyticsTest do
       )
 
       assert [%{revenue_minor: 1_000}] = Analytics.monthly_revenue(course_id: course_a.id)
+    end
+  end
+
+  describe "revenue_by_course/1" do
+    test "sums successful payments per course, richest first" do
+      rich = course_fixture(title: "Rich Course")
+      poor = course_fixture(title: "Poor Course")
+
+      payment_fixture(
+        course_id: rich.id,
+        status: :successful,
+        amount_minor: 1_000,
+        paid_at: ~U[2026-05-15 10:00:00Z]
+      )
+
+      payment_fixture(
+        course_id: rich.id,
+        status: :successful,
+        amount_minor: 4_000,
+        paid_at: ~U[2026-05-20 10:00:00Z]
+      )
+
+      payment_fixture(
+        course_id: poor.id,
+        status: :successful,
+        amount_minor: 500,
+        paid_at: ~U[2026-05-15 10:00:00Z]
+      )
+
+      # A pending payment must never count as revenue.
+      payment_fixture(course_id: poor.id, status: :pending)
+
+      assert [
+               %{course_id: rich_id, title: "Rich Course", revenue_minor: 5_000},
+               %{course_id: poor_id, title: "Poor Course", revenue_minor: 500}
+             ] = Analytics.revenue_by_course()
+
+      assert rich_id == rich.id
+      assert poor_id == poor.id
+    end
+
+    test "a course with no successful payments is omitted" do
+      course_fixture()
+      assert Analytics.revenue_by_course() == []
+    end
+
+    test "respects the from/to date range" do
+      course = course_fixture()
+
+      payment_fixture(
+        course_id: course.id,
+        status: :successful,
+        amount_minor: 1_000,
+        paid_at: ~U[2026-05-15 10:00:00Z]
+      )
+
+      payment_fixture(
+        course_id: course.id,
+        status: :successful,
+        amount_minor: 9_000,
+        paid_at: ~U[2026-07-01 10:00:00Z]
+      )
+
+      assert [%{revenue_minor: 1_000}] =
+               Analytics.revenue_by_course(from: ~D[2026-05-01], to: ~D[2026-05-31])
+    end
+  end
+
+  describe "quiz_pass_rate_by_course/1" do
+    test "percentage of submissions that passed, keyed by course" do
+      course = course_fixture()
+      module = course_module_fixture(course_id: course.id)
+      quiz = quiz_fixture(%{module: module})
+
+      submission_fixture(quiz, %{passed: true, score_percent: 90})
+      submission_fixture(quiz, %{passed: true, score_percent: 85})
+      submission_fixture(quiz, %{passed: true, score_percent: 80})
+      submission_fixture(quiz, %{passed: false, score_percent: 40})
+
+      assert Analytics.quiz_pass_rate_by_course() == %{course.id => 75}
+    end
+
+    test "a course with no submissions is omitted" do
+      course_fixture()
+      assert Analytics.quiz_pass_rate_by_course() == %{}
+    end
+  end
+
+  describe "completion_rate_by_course/1" do
+    test "averages each course's module completion rates" do
+      course = course_fixture()
+      module_a = course_module_fixture(course_id: course.id, position: 1)
+      module_b = course_module_fixture(course_id: course.id, position: 2)
+      lecture_a = lecture_fixture(module_id: module_a.id, duration_seconds: 100)
+      lecture_fixture(module_id: module_b.id, duration_seconds: 100)
+
+      # Two active enrollees; both finish module A, neither finishes module B.
+      active_enrollment(course)
+      active_enrollment(course)
+
+      for _ <- 1..2 do
+        lecture_progress_fixture(
+          user_id: user_fixture().id,
+          lecture_id: lecture_a.id,
+          status: :completed,
+          completed_at: ~U[2026-06-10 09:00:00Z]
+        )
+      end
+
+      # Module A rate = 100%, module B rate = 0% -> average 50%.
+      assert Analytics.completion_rate_by_course() == %{course.id => 50}
+    end
+
+    test "a course with no modules with lectures is omitted" do
+      course_fixture()
+      assert Analytics.completion_rate_by_course() == %{}
+    end
+  end
+
+  describe "course_scorecards/1" do
+    test "combines enrollment, completion, quiz pass rate, and revenue per course" do
+      course = course_fixture(title: "Applied Negotiation")
+      active_enrollment(course)
+
+      payment_fixture(
+        course_id: course.id,
+        status: :successful,
+        amount_minor: 5_000,
+        paid_at: ~U[2026-06-20 10:00:00Z]
+      )
+
+      assert [
+               %{
+                 title: "Applied Negotiation",
+                 enrolled: 1,
+                 completion_rate_percent: 0,
+                 quiz_pass_rate_percent: 0,
+                 revenue_minor: 5_000
+               }
+             ] = Analytics.course_scorecards(course_id: course.id)
+    end
+
+    test "sorts richest-first by revenue" do
+      lean = course_fixture(title: "Lean Course")
+      rich = course_fixture(title: "Rich Course")
+
+      payment_fixture(course_id: lean.id, status: :successful, amount_minor: 1_000)
+      payment_fixture(course_id: rich.id, status: :successful, amount_minor: 9_000)
+
+      # payment_fixture/1 always creates its own throwaway course+enrollment
+      # alongside the payment (see test/support/fixtures/payments_fixtures.ex)
+      # regardless of the course_id override, so scope down to just the two
+      # courses under test rather than assuming an empty `courses` table.
+      scorecards =
+        Analytics.course_scorecards()
+        |> Enum.filter(&(&1.course_id in [lean.id, rich.id]))
+
+      assert [%{title: "Rich Course"}, %{title: "Lean Course"}] = scorecards
+    end
+
+    test "includes a course with zero of everything" do
+      course = course_fixture(title: "Untouched Course")
+
+      assert [%{title: "Untouched Course", enrolled: 0, revenue_minor: 0}] =
+               Analytics.course_scorecards(course_id: course.id)
+    end
+  end
+
+  describe "funnel/1" do
+    test "counts checkout started, paid, active, completed, and certified" do
+      course = course_fixture()
+      module = course_module_fixture(course_id: course.id)
+      lecture = lecture_fixture(module_id: module.id, duration_seconds: 100)
+
+      # Two checkout attempts (one successful, one failed) -> "Checkout started" = 2.
+      payment_fixture(course_id: course.id, status: :successful)
+      payment_fixture(course_id: course.id, status: :failed)
+
+      enrollment = active_enrollment(course)
+
+      lecture_progress_fixture(
+        user_id: enrollment.user_id,
+        lecture_id: lecture.id,
+        status: :completed,
+        completed_at: ~U[2026-06-10 09:00:00Z]
+      )
+
+      certificate_fixture(type: :course, course_id: course.id, user_id: enrollment.user_id)
+
+      assert Analytics.funnel(course_id: course.id) == [
+               %{step: "Checkout started", count: 2},
+               %{step: "Paid", count: 1},
+               %{step: "Active", count: 1},
+               %{step: "Completed", count: 1},
+               %{step: "Certified", count: 1}
+             ]
+    end
+
+    test "with no activity, every step is zero" do
+      course_fixture()
+
+      assert Analytics.funnel() == [
+               %{step: "Checkout started", count: 0},
+               %{step: "Paid", count: 0},
+               %{step: "Active", count: 0},
+               %{step: "Completed", count: 0},
+               %{step: "Certified", count: 0}
+             ]
     end
   end
 end

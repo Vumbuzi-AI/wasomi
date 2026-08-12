@@ -13,6 +13,7 @@ defmodule Wasomi.Learning do
   alias Wasomi.Catalog.{Course, CourseModule, Lecture}
   alias Wasomi.Certificates
   alias Wasomi.Enrollments
+  alias Wasomi.Enrollments.Enrollment
   alias Wasomi.Learning.LectureProgress
 
   @completion_ratio 0.95
@@ -367,6 +368,34 @@ defmodule Wasomi.Learning do
     course.id
     |> Enrollments.list_active_for_course()
     |> Enum.count(&(not course_complete?(&1.user, course)))
+  end
+
+  @doc """
+  Counts active enrollments that have completed every lecture in their
+  course — optionally scoped to one course. The "Completed" step of the
+  admin conversion funnel.
+
+  There's no stored "course completed" timestamp to aggregate in SQL
+  (completion is derived by comparing lecture progress, not recorded on the
+  enrollment itself), so this runs `course_complete?/2` once per active
+  enrollment in scope — two aggregate queries each. Fine at admin-dashboard
+  scale; would need a materialized completion flag if this page saw
+  meaningful traffic.
+  """
+  def count_course_completions(opts \\ []) do
+    query =
+      case Keyword.get(opts, :course_id) do
+        nil ->
+          from(e in Enrollment, where: e.status == :active)
+
+        course_id ->
+          from(e in Enrollment, where: e.status == :active and e.course_id == ^course_id)
+      end
+
+    query
+    |> Repo.all()
+    |> Repo.preload([:user, :course])
+    |> Enum.count(&course_complete?(&1.user, &1.course))
   end
 
   defp completion_counts(user_id, lectures_query) do

@@ -520,4 +520,26 @@ defmodule Wasomi.AccountsTest do
       refute inspect(%User{password: "123456"}) =~ "password: \"123456\""
     end
   end
+
+  describe "list_users_page/1" do
+    test "paginates, newest first" do
+      Enum.each(1..3, fn n -> user_fixture(name: "User #{n}") end)
+
+      page = Accounts.list_users_page(page: 1, page_size: 2)
+
+      assert page.total_count == 3
+      assert page.total_pages == 2
+      assert length(page.entries) == 2
+    end
+
+    test "filters by search, same as list_users/1" do
+      match = user_fixture(name: "Amina Otieno")
+      user_fixture(name: "Brian Kamau")
+
+      page = Accounts.list_users_page(search: "Amina")
+
+      assert [%{id: id}] = page.entries
+      assert id == match.id
+    end
+  end
 end

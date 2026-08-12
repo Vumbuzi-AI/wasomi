@@ -158,7 +158,7 @@ defmodule WasomiWeb.AdminLive.StudentShow do
               </.link>
             </div>
 
-            <p :if={@enrollments == []} class="mt-5 rounded-2xl bg-soft p-5 text-body">
+            <p :if={@enrollments == []} class="mt-5 rounded-2xl bg-neutral-50 p-5 text-body">
               This learner has no active enrollments.
             </p>
           </section>
@@ -186,7 +186,7 @@ defmodule WasomiWeb.AdminLive.StudentShow do
               </div>
             </div>
 
-            <p :if={@payments == []} class="mt-5 rounded-2xl bg-soft p-5 text-body">
+            <p :if={@payments == []} class="mt-5 rounded-2xl bg-neutral-50 p-5 text-body">
               No payments recorded for this learner.
             </p>
           </section>
@@ -215,7 +215,7 @@ defmodule WasomiWeb.AdminLive.StudentShow do
         >
           <div>
             <p class="text-sm font-medium text-dark">Learner</p>
-            <p class="mt-1 rounded-xl bg-soft px-3 py-2.5 text-sm text-body">
+            <p class="mt-1 rounded-xl bg-neutral-50 px-3 py-2.5 text-sm text-body">
               {@user.name || "Learner"} · {@user.email}
             </p>
           </div>

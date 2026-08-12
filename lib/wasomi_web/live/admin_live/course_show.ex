@@ -339,7 +339,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
               "flex-1 rounded-full px-5 py-2.5 text-sm font-medium transition sm:flex-none",
               if(@active_tab == :curriculum,
                 do: "bg-dark text-white",
-                else: "text-muted hover:text-dark"
+                else: "text-body hover:text-dark"
               )
             ]}
           >
@@ -352,7 +352,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
               "flex-1 rounded-full px-5 py-2.5 text-sm font-medium transition sm:flex-none",
               if(@active_tab == :students,
                 do: "bg-dark text-white",
-                else: "text-muted hover:text-dark"
+                else: "text-body hover:text-dark"
               )
             ]}
           >
@@ -399,7 +399,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
               data-sortable-item
               data-id={module.id}
               draggable="false"
-              class="rounded-2xl border border-black/5 bg-soft/40 p-5 transition data-[dragging=true]:opacity-60 data-[drag-over=true]:border-primary data-[drag-over=true]:bg-mint/50"
+              class="rounded-2xl border border-black/5 bg-neutral-50/40 p-5 transition data-[dragging=true]:opacity-60 data-[drag-over=true]:border-primary data-[drag-over=true]:bg-mint/50"
             >
               <div class="flex items-start gap-4">
                 <button
@@ -565,7 +565,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
 
           <div
             :if={@course.modules == []}
-            class="mt-6 rounded-2xl border border-dashed border-black/10 bg-soft/40 p-10 text-center"
+            class="mt-6 rounded-2xl border border-dashed border-black/10 bg-neutral-50/40 p-10 text-center"
           >
             <span class="mx-auto grid h-12 w-12 place-items-center rounded-full bg-mint text-primary">
               <.icon name="hero-rectangle-stack" class="h-6 w-6" />
@@ -586,7 +586,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
 
           <div :if={@students != []} class="mt-5 overflow-x-auto">
             <table class="w-full text-left text-sm">
-              <thead class="border-b border-black/5 text-xs uppercase tracking-wide text-muted">
+              <thead class="border-b border-black/5 text-xs uppercase tracking-wide text-body">
                 <tr>
                   <th class="py-3 pr-4 font-semibold">Student</th>
                   <th class="py-3 pr-4 font-semibold">Enrolled</th>
@@ -613,7 +613,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
             </table>
           </div>
 
-          <p :if={@students == []} class="mt-5 rounded-2xl bg-soft p-5 text-body">
+          <p :if={@students == []} class="mt-5 rounded-2xl bg-neutral-50 p-5 text-body">
             No students have enrolled in this course yet.
           </p>
         </section>

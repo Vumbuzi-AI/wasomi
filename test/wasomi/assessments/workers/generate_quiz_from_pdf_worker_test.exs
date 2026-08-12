@@ -280,6 +280,18 @@ defmodule Wasomi.Assessments.Workers.GenerateQuizFromPDFWorkerTest do
       assert updated.status == :ready
     end
 
+    test "returns error for empty resource selection" do
+      generation = quiz_generation_fixture()
+
+      args = %{
+        "generation_id" => generation.id,
+        "resource_selection" => []
+      }
+
+      assert {:error, :no_resources_selected} =
+               Oban.Testing.perform_job(GenerateQuizFromPDFWorker, args, [])
+    end
+
     test "returns error for an invalid resource key" do
       generation = quiz_generation_fixture()
 

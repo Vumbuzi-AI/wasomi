@@ -111,6 +111,8 @@ defmodule Wasomi.Assessments.Workers.GenerateQuizFromPDFWorker do
     end
   end
 
+  defp gather_module_text([]), do: {:error, :no_resources_selected}
+
   defp gather_module_text(keys) when is_list(keys) do
     keys
     |> Enum.reduce_while({:ok, []}, fn key, {:ok, acc} ->

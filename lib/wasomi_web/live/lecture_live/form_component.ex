@@ -17,6 +17,15 @@ defmodule WasomiWeb.LectureLive.FormComponent do
         </:subtitle>
       </.header>
 
+      <%!-- Associated via the `form` attribute below rather than nested inside
+    .simple_form's own <form> — nested <form> elements are invalid HTML and
+    get silently dropped by the browser's parser on parse. Keeping this one
+    as a real, separate <form> (rather than a plain div + phx-change-synced
+    assign) means "Save link" always submits whatever is actually in the
+    input at the moment of the click, with no server round-trip in between
+    to go stale. --%>
+      <form id="add-link-form" phx-submit="add-link" phx-target={@myself} class="hidden"></form>
+
       <.simple_form
         for={@form}
         id="lecture-form"
@@ -141,25 +150,47 @@ defmodule WasomiWeb.LectureLive.FormComponent do
             >
               <button
                 type="button"
+                phx-click="set-resource-mode"
+                phx-target={@myself}
+                phx-value-mode="upload"
                 data-role="resource-mode"
                 data-mode="upload"
-                aria-pressed="true"
-                class="rounded-full bg-dark px-3 py-1.5 text-xs font-semibold text-white transition"
+                aria-pressed={to_string(@resource_mode == :upload)}
+                class={[
+                  "rounded-full px-3 py-1.5 text-xs font-semibold transition",
+                  if(@resource_mode == :upload,
+                    do: "bg-dark text-white",
+                    else: "text-muted hover:text-dark"
+                  )
+                ]}
               >
                 Upload files
               </button>
               <button
                 type="button"
+                phx-click="set-resource-mode"
+                phx-target={@myself}
+                phx-value-mode="link"
                 data-role="resource-mode"
                 data-mode="link"
-                aria-pressed="false"
-                class="rounded-full px-3 py-1.5 text-xs font-semibold text-muted transition hover:text-dark"
+                aria-pressed={to_string(@resource_mode == :link)}
+                class={[
+                  "rounded-full px-3 py-1.5 text-xs font-semibold transition",
+                  if(@resource_mode == :link,
+                    do: "bg-dark text-white",
+                    else: "text-muted hover:text-dark"
+                  )
+                ]}
               >
                 Add link
               </button>
             </div>
           </div>
-          <div data-role="resource-panel" data-mode="upload">
+          <div
+            data-role="resource-panel"
+            data-mode="upload"
+            class={@resource_mode != :upload && "hidden"}
+          >
             <.live_component
               module={ResourceUploader}
               id="lecture-resource-uploader"
@@ -169,18 +200,21 @@ defmodule WasomiWeb.LectureLive.FormComponent do
             />
           </div>
 
-          <div data-role="resource-panel" data-mode="link" class="hidden">
-            <div class="grid gap-3 sm:grid-cols-[1fr_auto]">
+          <div data-role="resource-panel" data-mode="link" class={@resource_mode != :link && "hidden"}>
+            <div id="add-link-fields" class="flex gap-3">
               <input
-                data-role="link"
+                id={"add-link-url-#{@resource_link_reset}"}
+                name="url"
                 type="url"
+                form="add-link-form"
+                required
                 placeholder="https://example.com/reading"
-                class="w-full rounded-xl border border-black/10 bg-white px-3 py-2.5 text-sm text-dark focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                class="w-full min-w-0 flex-1 rounded-xl border border-black/10 bg-white px-3 py-2.5 text-sm text-dark focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
               />
               <button
-                data-role="add-link"
-                type="button"
-                class="rounded-xl border border-primary px-4 py-2.5 text-sm font-medium text-primary hover:bg-mint"
+                type="submit"
+                form="add-link-form"
+                class="shrink-0 rounded-xl border border-primary px-4 py-2.5 text-sm font-medium text-primary hover:bg-mint"
               >
                 Save link
               </button>
@@ -197,12 +231,15 @@ defmodule WasomiWeb.LectureLive.FormComponent do
             <li
               :for={{resource, index} <- Enum.with_index(@resource_rows)}
               id={"lecture-resource-#{resource_key(resource, index)}"}
-              class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-black/5 bg-soft px-3 py-2.5"
+              class="relative flex items-start gap-3 rounded-xl border border-black/5 bg-soft px-3 py-2.5 pr-10"
             >
-              <div class="min-w-0">
+              <span class="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white text-primary">
+                <.icon name={resource_icon(resource.kind)} class="h-4 w-4" />
+              </span>
+              <div class="min-w-0 flex-1">
                 <p class="truncate text-sm font-medium text-dark">{resource.name}</p>
-                <p class="text-xs capitalize text-muted">
-                  {resource.kind} · {resource.content_type || resource.url}
+                <p class="truncate text-xs text-muted">
+                  {resource.content_type || resource.url}
                 </p>
                 <div
                   :if={resource_status(resource) == :uploading}
@@ -222,9 +259,10 @@ defmodule WasomiWeb.LectureLive.FormComponent do
                 phx-click="remove-resource"
                 phx-target={@myself}
                 phx-value-index={index}
-                class="shrink-0 text-sm font-medium text-rose-600 hover:text-rose-700"
+                aria-label={"Remove #{resource.name}"}
+                class="absolute right-2 top-2 grid h-6 w-6 shrink-0 place-items-center rounded-full text-muted transition hover:bg-rose-50 hover:text-rose-600"
               >
-                Remove
+                <.icon name="hero-x-mark" class="h-3.5 w-3.5" />
               </button>
             </li>
           </ul>
@@ -350,6 +388,8 @@ defmodule WasomiWeb.LectureLive.FormComponent do
       |> assign_new(:resource_rows, fn -> Enum.map(lecture.resources || [], &resource_attrs/1) end)
       |> assign_new(:question_rows, fn -> Enum.map(lecture.questions || [], &question_attrs/1) end)
       |> assign_new(:resource_error, fn -> nil end)
+      |> assign_new(:resource_mode, fn -> :upload end)
+      |> assign_new(:resource_link_reset, fn -> 0 end)
       |> assign_new(:video_upload, fn -> nil end)
       |> assign_new(:video_upload_state, fn ->
         if existing_video_ready, do: :ready, else: :idle
@@ -405,14 +445,27 @@ defmodule WasomiWeb.LectureLive.FormComponent do
         url: url,
         storage_key: nil,
         content_type: nil,
-        byte_size: nil
+        byte_size: nil,
+        row_id: Ecto.UUID.generate()
       }
 
       {:noreply,
-       assign(socket, resource_rows: socket.assigns.resource_rows ++ [row], resource_error: nil)}
+       socket
+       |> update(:resource_link_reset, &(&1 + 1))
+       |> assign(resource_rows: socket.assigns.resource_rows ++ [row], resource_error: nil)}
     else
       {:noreply, assign(socket, resource_error: "Enter a valid http or https link.")}
     end
+  end
+
+  def handle_event("add-link", _params, socket), do: {:noreply, socket}
+
+  def handle_event("set-resource-mode", %{"mode" => "link"}, socket) do
+    {:noreply, assign(socket, :resource_mode, :link)}
+  end
+
+  def handle_event("set-resource-mode", %{"mode" => _mode}, socket) do
+    {:noreply, assign(socket, :resource_mode, :upload)}
   end
 
   def handle_event("cancel-upload", %{"ref" => ref}, socket) do
@@ -429,62 +482,6 @@ defmodule WasomiWeb.LectureLive.FormComponent do
       _ ->
         {:noreply, socket}
     end
-  end
-
-  def handle_event("add-link", _params, socket), do: {:noreply, socket}
-
-  def handle_event("presign-resource", params, socket) do
-    case Storage.presign_upload(socket.assigns.current_user, params) do
-      {:ok, upload} ->
-        pending = %{
-          kind: upload.kind,
-          name: params["filename"],
-          url: nil,
-          storage_key: nil,
-          content_type: params["content_type"],
-          byte_size: parse_integer(params["size"]),
-          status: :uploading,
-          client_ref: params["client_ref"]
-        }
-
-        {:noreply,
-         socket
-         |> assign(resource_rows: socket.assigns.resource_rows ++ [pending])
-         |> push_event("r2-upload-ready", Map.put(upload, :client_ref, params["client_ref"]))}
-
-      {:error, reason} ->
-        {:noreply, assign(socket, :resource_error, upload_error(reason))}
-    end
-  end
-
-  def handle_event("resource-uploaded", params, socket) do
-    row = %{
-      kind: string_to_kind(params["kind"]),
-      name: params["name"],
-      storage_key: params["key"],
-      url: params["public_url"],
-      content_type: params["content_type"],
-      byte_size: parse_integer(params["byte_size"])
-    }
-
-    {:noreply,
-     assign(socket,
-       resource_rows:
-         replace_pending_resource(socket.assigns.resource_rows, params["client_ref"], row),
-       resource_error: nil
-     )}
-  end
-
-  def handle_event(
-        "resource-upload-failed",
-        %{"client_ref" => client_ref, "message" => message},
-        socket
-      ) do
-    {:noreply,
-     assign(socket,
-       resource_rows: mark_resource_error(socket.assigns.resource_rows, client_ref, message),
-       resource_error: message
-     )}
   end
 
   def handle_event("remove-resource", %{"index" => index}, socket) do
@@ -798,11 +795,15 @@ defmodule WasomiWeb.LectureLive.FormComponent do
   end
 
   defp resource_attrs(resource),
-    do: Map.take(resource, [:kind, :name, :storage_key, :url, :content_type, :byte_size])
+    do: Map.take(resource, [:id, :kind, :name, :storage_key, :url, :content_type, :byte_size])
 
   defp question_attrs(question), do: Map.take(question, [:question, :answer])
 
   defp resource_status(resource), do: Map.get(resource, :status, :ready)
+
+  defp resource_icon(:document), do: "hero-document-text"
+  defp resource_icon(:video), do: "hero-film"
+  defp resource_icon(:link), do: "hero-link"
 
   defp resource_at(rows, index) do
     case parse_index(index) do
@@ -836,21 +837,8 @@ defmodule WasomiWeb.LectureLive.FormComponent do
       end
   end
 
-  defp resource_key(resource, index), do: resource[:client_ref] || resource[:storage_key] || index
-
-  defp replace_pending_resource(resources, client_ref, row) do
-    Enum.map(resources, fn resource ->
-      if resource[:client_ref] == client_ref, do: row, else: resource
-    end)
-  end
-
-  defp mark_resource_error(resources, client_ref, message) do
-    Enum.map(resources, fn resource ->
-      if resource[:client_ref] == client_ref,
-        do: Map.merge(resource, %{status: :error, error: message}),
-        else: resource
-    end)
-  end
+  defp resource_key(resource, index),
+    do: resource[:id] || resource[:storage_key] || resource[:row_id] || index
 
   defp question_params(%{"questions" => questions}), do: normalize_questions(questions)
   defp question_params(_params), do: []
@@ -936,10 +924,6 @@ defmodule WasomiWeb.LectureLive.FormComponent do
   end
 
   defp parse_index(_), do: :error
-
-  defp string_to_kind("video"), do: :video
-  defp string_to_kind("link"), do: :link
-  defp string_to_kind(_), do: :document
 
   defp upload_error(:unsupported_content_type), do: "That file type is not supported."
 

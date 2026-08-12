@@ -197,6 +197,44 @@ defmodule Wasomi.AssessmentsTest do
     end
   end
 
+  describe "latest_quiz_scores_by_user/1" do
+    test "batch-loads each user's latest attempt per module quiz, scoped to the course" do
+      course = course_fixture()
+      course_module = course_module_fixture(course_id: course.id)
+      other_course_module = course_module_fixture()
+
+      quiz = quiz_fixture(%{module: course_module, title: "Module One Quiz"})
+      question = question_fixture(%{quiz: quiz})
+      right = Enum.find(question.question_options, & &1.correct)
+      wrong = Enum.find(question.question_options, &(!&1.correct))
+
+      other_quiz = quiz_fixture(%{module: other_course_module, title: "Unrelated Quiz"})
+      other_question = question_fixture(%{quiz: other_quiz})
+      other_right = Enum.find(other_question.question_options, & &1.correct)
+
+      user = user_fixture()
+      never_attempted = user_fixture()
+
+      {:ok, _first} =
+        Assessments.submit_quiz(user, quiz, %{to_string(question.id) => to_string(wrong.id)})
+
+      {:ok, _second} =
+        Assessments.submit_quiz(user, quiz, %{to_string(question.id) => to_string(right.id)})
+
+      {:ok, _unrelated} =
+        Assessments.submit_quiz(user, other_quiz, %{
+          to_string(other_question.id) => to_string(other_right.id)
+        })
+
+      scores = Assessments.latest_quiz_scores_by_user(course.id)
+
+      assert [%{quiz_title: "Module One Quiz", score_percent: 100, passed: true}] =
+               scores[user.id]
+
+      refute Map.has_key?(scores, never_attempted.id)
+    end
+  end
+
   describe "questions and options" do
     test "create_question/2 with a valid option set succeeds" do
       quiz = quiz_fixture()

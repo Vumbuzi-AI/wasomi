@@ -244,6 +244,28 @@ defmodule Wasomi.LearningTest do
     end
   end
 
+  describe "completion_percent_by_user/1" do
+    test "batch-computes each user's percentage in one query, absent means 0%" do
+      course = course_fixture(status: :published)
+      course_module = course_module_fixture(course_id: course.id, position: 1)
+      first = lecture_fixture(module_id: course_module.id, position: 1, duration_seconds: 100)
+      lecture_fixture(module_id: course_module.id, position: 2, duration_seconds: 100)
+
+      halfway = user_fixture()
+      not_started = user_fixture()
+      enrollment_fixture(user_id: halfway.id, course_id: course.id, status: :active)
+      enrollment_fixture(user_id: not_started.id, course_id: course.id, status: :active)
+
+      complete_lecture_via_progress!(halfway, first)
+
+      course = Wasomi.Catalog.get_course_by_slug!(course.slug)
+      percentages = Learning.completion_percent_by_user(course)
+
+      assert percentages[halfway.id] == 50
+      refute Map.has_key?(percentages, not_started.id)
+    end
+  end
+
   describe "count_incomplete_enrollees/1" do
     test "is zero when the course has no active enrollees" do
       course = course_fixture(status: :published)

@@ -279,6 +279,45 @@ defmodule WasomiWeb.AdminLiveTest do
       assert html =~ "cover.jpg"
     end
 
+    test "shows each enrolled student's completion percent and latest quiz scores", %{
+      conn: conn
+    } do
+      course = course_fixture(status: :published)
+      module = course_module_fixture(course_id: course.id, position: 1)
+      lecture = lecture_fixture(module_id: module.id, position: 1, duration_seconds: 100)
+      learner = user_fixture(name: "Amina Otieno")
+      enrollment_fixture(user_id: learner.id, course_id: course.id, status: :active)
+
+      quiz = quiz_fixture(module: module, title: "Module One Quiz")
+      question = question_fixture(quiz: quiz)
+      correct_option = Enum.find(question.question_options, & &1.correct)
+
+      Wasomi.Learning.record_progress(learner, lecture, lecture.duration_seconds)
+      Wasomi.Assessments.submit_quiz(learner, quiz, %{question.id => correct_option.id})
+
+      {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
+      html = view |> render_click("switch_tab", %{"tab" => "students"})
+
+      assert html =~ "100%"
+      assert html =~ "Module One Quiz: 100%"
+    end
+
+    test "shows a dash for quiz scores and 0% progress for a student who hasn't started", %{
+      conn: conn
+    } do
+      course = course_fixture(status: :published)
+      module = course_module_fixture(course_id: course.id, position: 1)
+      lecture_fixture(module_id: module.id, position: 1, duration_seconds: 100)
+      learner = user_fixture(name: "Brian Kamau")
+      enrollment_fixture(user_id: learner.id, course_id: course.id, status: :active)
+
+      {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
+      html = view |> render_click("switch_tab", %{"tab" => "students"})
+
+      assert html =~ "Brian Kamau"
+      assert html =~ "0%"
+    end
+
     test "links each lecture to its own lecture-quiz page", %{conn: conn} do
       course = course_fixture()
       module = course_module_fixture(course_id: course.id)

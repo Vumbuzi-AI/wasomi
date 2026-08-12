@@ -107,6 +107,26 @@ defmodule Wasomi.Learning do
   end
 
   @doc """
+  Completion percentage for every enrolled user in one course, in a single
+  query — for the admin course view's enrolled-students table, where
+  calling `course_progress/2` once per row would be an N+1. A user with no
+  completed lectures yet is absent from the result; callers should treat a
+  missing key as 0%, not raise on it.
+  """
+  def completion_percent_by_user(%Course{} = course) do
+    lectures = course_lectures(course)
+    total = length(lectures)
+    lecture_ids = Enum.map(lectures, & &1.id)
+
+    LectureProgress
+    |> where([p], p.lecture_id in ^lecture_ids and p.status == :completed)
+    |> group_by([p], p.user_id)
+    |> select([p], {p.user_id, count(p.id)})
+    |> Repo.all()
+    |> Map.new(fn {user_id, completed} -> {user_id, percentage(completed, total)} end)
+  end
+
+  @doc """
   Pure version of `course_progress/2` for a progress map you already have,
   rather than one just read from the database.
 

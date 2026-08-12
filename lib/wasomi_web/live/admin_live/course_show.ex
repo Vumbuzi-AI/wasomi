@@ -1,7 +1,7 @@
 defmodule WasomiWeb.AdminLive.CourseShow do
   use WasomiWeb, :live_view
 
-  alias Wasomi.{Assessments, Catalog, Enrollments, Payments}
+  alias Wasomi.{Assessments, Catalog, Enrollments, Learning, Payments}
   alias Wasomi.Catalog.{CourseModule, Lecture}
   alias WasomiWeb.CourseLive
   alias WasomiWeb.CourseModuleLive
@@ -226,9 +226,17 @@ defmodule WasomiWeb.AdminLive.CourseShow do
       |> Enum.filter(&(&1.status == :successful))
       |> Map.new(&{&1.user_id, &1})
 
+    completion_percent_by_user = Learning.completion_percent_by_user(course)
+    quiz_scores_by_user = Assessments.latest_quiz_scores_by_user(course.id)
+
     students =
       Enum.map(enrollments, fn enrollment ->
-        %{enrollment: enrollment, payment: Map.get(paid_by_user, enrollment.user_id)}
+        %{
+          enrollment: enrollment,
+          payment: Map.get(paid_by_user, enrollment.user_id),
+          completion_percent: Map.get(completion_percent_by_user, enrollment.user_id, 0),
+          quiz_scores: Map.get(quiz_scores_by_user, enrollment.user_id, [])
+        }
       end)
 
     lecture_count = Enum.sum(Enum.map(course.modules, &length(&1.lectures)))
@@ -636,6 +644,8 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                 <tr>
                   <th class="py-3 pr-4 font-semibold">Student</th>
                   <th class="py-3 pr-4 font-semibold">Enrolled</th>
+                  <th class="py-3 pr-4 font-semibold">Progress</th>
+                  <th class="py-3 pr-4 font-semibold">Quiz scores</th>
                   <th class="py-3 text-right font-semibold">Paid</th>
                 </tr>
               </thead>
@@ -651,6 +661,30 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                     <p class="text-xs text-muted">{row.enrollment.user.email}</p>
                   </td>
                   <td class="py-3 pr-4 text-body">{format_date(row.enrollment.activated_at)}</td>
+                  <td class="py-3 pr-4">
+                    <div class="flex items-center gap-2">
+                      <div class="h-1.5 w-16 overflow-hidden rounded-full bg-neutral-50">
+                        <div
+                          class="h-full rounded-full bg-primary"
+                          style={"width: #{row.completion_percent}%"}
+                        />
+                      </div>
+                      <span class="text-xs tabular-nums text-body">{row.completion_percent}%</span>
+                    </div>
+                  </td>
+                  <td class="py-3 pr-4">
+                    <p :if={row.quiz_scores == []} class="text-xs text-muted">—</p>
+                    <p
+                      :for={score <- row.quiz_scores}
+                      class={[
+                        "text-xs",
+                        score.passed && "text-primary",
+                        !score.passed && "text-red-600"
+                      ]}
+                    >
+                      {score.quiz_title}: {score.score_percent}%
+                    </p>
+                  </td>
                   <td class="py-3 text-right font-semibold text-dark">
                     {if row.payment, do: Payments.format_amount(row.payment), else: "—"}
                   </td>

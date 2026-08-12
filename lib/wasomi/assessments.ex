@@ -129,6 +129,43 @@ defmodule Wasomi.Assessments do
   end
 
   @doc """
+  Each enrolled user's latest attempt per module quiz in a course, keyed by
+  `user_id`, as a list of `%{quiz_title:, score_percent:, passed:}` maps —
+  only for quizzes the user has actually attempted at least once (a user
+  absent from the result, or missing a particular quiz from their list,
+  simply hasn't attempted it yet).
+
+  For the admin course view's enrolled-students table: two queries total
+  regardless of student count, so computing this per row doesn't become an
+  N+1 the way calling `list_submissions_for_user/2` per (student, quiz) pair
+  would.
+  """
+  def latest_quiz_scores_by_user(course_id) do
+    quiz_titles =
+      Quiz
+      |> join(:inner, [q], module in CourseModule, on: module.id == q.module_id)
+      |> where([_q, module], module.course_id == ^course_id)
+      |> select([q], {q.id, q.title})
+      |> Repo.all()
+      |> Map.new()
+
+    quiz_ids = Map.keys(quiz_titles)
+
+    QuizSubmission
+    |> where([s], s.quiz_id in ^quiz_ids)
+    |> order_by([s], asc: s.user_id, asc: s.quiz_id, desc: s.submitted_at, desc: s.id)
+    |> Repo.all()
+    |> Enum.uniq_by(&{&1.user_id, &1.quiz_id})
+    |> Enum.group_by(& &1.user_id, fn submission ->
+      %{
+        quiz_title: Map.fetch!(quiz_titles, submission.quiz_id),
+        score_percent: submission.score_percent,
+        passed: submission.passed
+      }
+    end)
+  end
+
+  @doc """
   Gets a quiz with every question and option preloaded, any status —
   the admin/authoring view. Learner-facing scoring never uses this; see
   `list_published_questions/1`.

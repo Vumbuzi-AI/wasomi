@@ -171,6 +171,12 @@ defmodule WasomiWeb.CoreComponents do
   attr :flash, :map, default: %{}, doc: "the map of flash messages to display"
   attr :title, :string, default: nil
   attr :kind, :atom, values: [:info, :error], doc: "used for styling and flash lookup"
+
+  attr :auto_dismiss, :boolean,
+    default: true,
+    doc:
+      "whether this flash hides itself ~5s after appearing (disable for connection-status flashes)"
+
   attr :rest, :global, doc: "the arbitrary HTML attributes to add to the flash container"
 
   slot :inner_block, doc: "the optional inner block that renders the flash message"
@@ -182,6 +188,8 @@ defmodule WasomiWeb.CoreComponents do
     <div
       :if={msg = render_slot(@inner_block) || Phoenix.Flash.get(@flash, @kind)}
       id={@id}
+      phx-hook={if @auto_dismiss, do: "FlashAutoDismiss"}
+      data-auto-dismiss-ms="5000"
       phx-click={JS.push("lv:clear-flash", value: %{key: @kind}) |> hide("##{@id}")}
       role="alert"
       class={[
@@ -223,6 +231,7 @@ defmodule WasomiWeb.CoreComponents do
         id="client-error"
         kind={:error}
         title={gettext("We can't find the internet")}
+        auto_dismiss={false}
         phx-disconnected={show(".phx-client-error #client-error")}
         phx-connected={hide("#client-error")}
         hidden
@@ -235,6 +244,7 @@ defmodule WasomiWeb.CoreComponents do
         id="server-error"
         kind={:error}
         title={gettext("Something went wrong!")}
+        auto_dismiss={false}
         phx-disconnected={show(".phx-server-error #server-error")}
         phx-connected={hide("#server-error")}
         hidden

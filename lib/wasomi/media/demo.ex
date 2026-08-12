@@ -23,4 +23,7 @@ defmodule Wasomi.Media.Demo do
 
   @impl true
   def thumbnail_url(%Lecture{}, %User{}), do: {:error, :demo_provider_does_not_support_thumbnails}
+
+  @impl true
+  def download_url(%Lecture{}), do: {:error, :demo_provider_does_not_support_downloads}
 end

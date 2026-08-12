@@ -21,6 +21,7 @@ defmodule Wasomi.Media do
   @callback playback_token(Lecture.t(), User.t(), pos_integer()) ::
               {:ok, String.t()} | {:error, term()}
   @callback thumbnail_url(Lecture.t(), User.t()) :: {:ok, String.t()} | {:error, term()}
+  @callback download_url(Lecture.t()) :: {:ok, String.t()} | {:error, term()}
 
   def playback_token(user, lecture, ttl \\ 300, adapter \\ configured_adapter()) do
     with {:ok, lecture} <- Enrollments.authorize_lecture(user, lecture) do

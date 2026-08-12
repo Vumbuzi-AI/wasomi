@@ -12,9 +12,11 @@ defmodule Wasomi.Catalog do
     Lecture,
     LectureQuestion,
     LectureResource,
+    LectureTranscript,
     PublishGuard
   }
 
+  alias Wasomi.Catalog.Workers.TranscribeLecture
   alias Wasomi.Paginate
 
   @doc """
@@ -623,6 +625,8 @@ defmodule Wasomi.Catalog do
   """
   def update_lecture_content(%Lecture{} = lecture, lecture_attrs, resources, questions)
       when is_list(resources) and is_list(questions) do
+    previous_asset_id = lecture.video_asset_id
+
     Repo.transaction(fn ->
       with {:ok, lecture} <- Repo.update(Lecture.changeset(lecture, lecture_attrs)),
            :ok <- delete_lecture_content(lecture.id),
@@ -633,6 +637,7 @@ defmodule Wasomi.Catalog do
         {:error, %Ecto.Changeset{} = changeset} -> Repo.rollback(changeset)
       end
     end)
+    |> maybe_enqueue_transcript(previous_asset_id)
   end
 
   defp delete_lecture_content(lecture_id) do
@@ -677,6 +682,46 @@ defmodule Wasomi.Catalog do
         {:error, %Ecto.Changeset{} = changeset} -> Repo.rollback(changeset)
       end
     end)
+    |> maybe_enqueue_transcript(nil)
+  end
+
+  # Only (re-)enqueues transcription when the lecture's video actually
+  # changed to a real asset — otherwise every unrelated edit (title,
+  # resources, reordering) on an already-transcribed lecture would restart
+  # transcription from scratch.
+  defp maybe_enqueue_transcript(
+         {:ok, %Lecture{video_asset_id: asset_id} = lecture},
+         previous_asset_id
+       )
+       when is_binary(asset_id) and asset_id != "" and asset_id != previous_asset_id do
+    TranscribeLecture.enqueue(lecture.id)
+    {:ok, lecture}
+  end
+
+  defp maybe_enqueue_transcript(result, _previous_asset_id), do: result
+
+  @doc """
+  Returns the transcript for a lecture, or `nil` if none has been generated yet.
+  """
+  def get_lecture_transcript(lecture_id) do
+    Repo.get_by(LectureTranscript, lecture_id: lecture_id)
+  end
+
+  @doc """
+  Creates or updates a lecture's transcript in one shot, keyed on `lecture_id`.
+
+  Used by `Wasomi.Catalog.Workers.TranscribeLecture` to move a transcript
+  through `:pending` -> `:processing` -> `:ready`/`:failed` without needing
+  to look up whether a row already exists first.
+  """
+  def upsert_lecture_transcript(lecture_id, attrs) do
+    %LectureTranscript{}
+    |> LectureTranscript.changeset(Map.put(attrs, :lecture_id, lecture_id))
+    |> Repo.insert(
+      on_conflict: {:replace, [:status, :text, :error, :updated_at]},
+      conflict_target: :lecture_id,
+      returning: true
+    )
   end
 
   def lecture_resource_count(%Lecture{resources: resources}) when is_list(resources),

@@ -145,6 +145,28 @@ defmodule Wasomi.MediaTest do
     refute token =~ "%"
   end
 
+  test "download_url/1 builds a signed static-rendition URL for the transcription pipeline" do
+    lecture =
+      lecture_fixture(video_provider: :mux, video_asset_id: "av1Ab2_XyZ-9", duration_seconds: 120)
+
+    assert {:ok, url} = Mux.download_url(lecture)
+    assert String.starts_with?(url, "https://stream.mux.com/av1Ab2_XyZ-9/low.mp4?token=")
+
+    token = url |> String.split("token=") |> List.last()
+    [header_segment, claims_segment, _signature_segment] = String.split(token, ".")
+    claims = claims_segment |> Base.url_decode64!(padding: false) |> Jason.decode!()
+    header = header_segment |> Base.url_decode64!(padding: false) |> Jason.decode!()
+
+    assert header == %{"alg" => "RS256", "typ" => "JWT"}
+    assert claims["sub"] == "av1Ab2_XyZ-9"
+    assert claims["aud"] == "v"
+  end
+
+  test "download_url/1 rejects a non-Mux lecture" do
+    lecture = lecture_fixture(video_provider: :cloudflare, video_asset_id: "some-id")
+    assert {:error, {:unsupported_video_provider, :cloudflare}} = Mux.download_url(lecture)
+  end
+
   defp restore_env(key, nil), do: Application.delete_env(:wasomi, key)
   defp restore_env(key, value), do: Application.put_env(:wasomi, key, value)
 

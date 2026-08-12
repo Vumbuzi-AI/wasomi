@@ -1,7 +1,9 @@
 defmodule Wasomi.CatalogTest do
   use Wasomi.DataCase
+  use Oban.Testing, repo: Wasomi.Repo
 
   alias Wasomi.Catalog
+  alias Wasomi.Catalog.Workers.TranscribeLecture
 
   describe "courses" do
     alias Wasomi.Catalog.Course
@@ -424,6 +426,50 @@ defmodule Wasomi.CatalogTest do
 
       assert Catalog.get_lecture!(lecture.id).title == lecture.title
       assert Wasomi.Repo.get!(Wasomi.Catalog.LectureResource, resource.id).id == resource.id
+    end
+
+    test "create_lecture_content/3 enqueues transcription when the lecture has a video" do
+      course_module = course_module_fixture()
+
+      assert {:ok, lecture} =
+               Catalog.create_lecture_content(
+                 %{
+                   title: "New lecture",
+                   description: "desc",
+                   video_provider: :mux,
+                   video_asset_id: "fresh-playback-id",
+                   duration_seconds: 60,
+                   position: 1,
+                   module_id: course_module.id
+                 },
+                 [],
+                 []
+               )
+
+      assert_enqueued(worker: TranscribeLecture, args: %{"lecture_id" => lecture.id})
+    end
+
+    test "update_lecture_content/4 enqueues transcription when the video asset changes" do
+      lecture = lecture_fixture(video_asset_id: "old-playback-id")
+
+      assert {:ok, updated} =
+               Catalog.update_lecture_content(
+                 lecture,
+                 %{video_asset_id: "new-playback-id"},
+                 [],
+                 []
+               )
+
+      assert_enqueued(worker: TranscribeLecture, args: %{"lecture_id" => updated.id})
+    end
+
+    test "update_lecture_content/4 does not re-enqueue transcription when the video is unchanged" do
+      lecture = lecture_fixture(video_asset_id: "same-playback-id")
+
+      assert {:ok, _updated} =
+               Catalog.update_lecture_content(lecture, %{title: "Retitled"}, [], [])
+
+      refute_enqueued(worker: TranscribeLecture)
     end
 
     test "course outlines preload ordered resources and questions" do
@@ -914,6 +960,43 @@ defmodule Wasomi.CatalogTest do
         })
 
       assert changeset.valid?
+    end
+  end
+
+  describe "lecture transcripts" do
+    import Wasomi.CatalogFixtures
+
+    test "get_lecture_transcript/1 returns nil when no transcript has been generated yet" do
+      lecture = lecture_fixture()
+      assert Catalog.get_lecture_transcript(lecture.id) == nil
+    end
+
+    test "upsert_lecture_transcript/2 creates a transcript row" do
+      lecture = lecture_fixture()
+
+      assert {:ok, transcript} =
+               Catalog.upsert_lecture_transcript(lecture.id, %{status: :processing})
+
+      assert transcript.status == :processing
+      assert transcript.lecture_id == lecture.id
+      assert Catalog.get_lecture_transcript(lecture.id).id == transcript.id
+    end
+
+    test "upsert_lecture_transcript/2 replaces an existing transcript for the same lecture" do
+      lecture = lecture_fixture()
+      {:ok, _} = Catalog.upsert_lecture_transcript(lecture.id, %{status: :processing})
+
+      assert {:ok, transcript} =
+               Catalog.upsert_lecture_transcript(lecture.id, %{
+                 status: :ready,
+                 text: "Full transcript.",
+                 error: nil
+               })
+
+      assert transcript.status == :ready
+      assert transcript.text == "Full transcript."
+
+      assert Catalog.get_lecture_transcript(lecture.id).text == "Full transcript."
     end
   end
 end

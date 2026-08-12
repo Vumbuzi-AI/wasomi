@@ -18,6 +18,36 @@ defmodule WasomiWeb.CoreComponentsTest do
     """
   end
 
+  describe "flash/1" do
+    test "auto-dismisses by default via the FlashAutoDismiss hook, 5 seconds out" do
+      html =
+        render_component(&CoreComponents.flash/1, %{kind: :info, flash: %{"info" => "Saved!"}})
+
+      assert html =~ ~s(phx-hook="FlashAutoDismiss")
+      assert html =~ ~s(data-auto-dismiss-ms="5000")
+      assert html =~ "Saved!"
+    end
+
+    test "manual dismissal still pushes lv:clear-flash regardless of auto_dismiss" do
+      html =
+        render_component(&CoreComponents.flash/1, %{kind: :info, flash: %{"info" => "Saved!"}})
+
+      assert html =~ "lv:clear-flash"
+    end
+
+    test "auto_dismiss={false} renders without the auto-dismiss hook" do
+      html =
+        render_component(&CoreComponents.flash/1, %{
+          kind: :error,
+          flash: %{"error" => "Oops"},
+          auto_dismiss: false
+        })
+
+      refute html =~ "phx-hook"
+      assert html =~ "Oops"
+    end
+  end
+
   describe "search_input/1" do
     test "debounces via phx-debounce and pushes the configured event/param name" do
       html =

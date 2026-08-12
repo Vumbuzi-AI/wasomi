@@ -648,6 +648,23 @@ Hooks.PdfDownload = {
   }
 }
 
+Hooks.FlashAutoDismiss = {
+  mounted() {
+    this.schedule()
+  },
+  updated() {
+    this.schedule()
+  },
+  schedule() {
+    window.clearTimeout(this.dismissTimer)
+    const ms = parseInt(this.el.dataset.autoDismissMs, 10) || 5000
+    this.dismissTimer = window.setTimeout(() => this.el.click(), ms)
+  },
+  destroyed() {
+    window.clearTimeout(this.dismissTimer)
+  }
+}
+
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const DOW = ["S","M","T","W","T","F","S"];
 

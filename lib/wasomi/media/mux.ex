@@ -24,7 +24,8 @@ defmodule Wasomi.Media.Mux do
         new_asset_settings: %{
           passthrough: "lecture:#{lecture_id}",
           playback_policies: ["signed"],
-          video_quality: "basic"
+          video_quality: "basic",
+          mp4_support: "standard"
         }
       }
     )
@@ -90,6 +91,31 @@ defmodule Wasomi.Media.Mux do
   end
 
   def thumbnail_url(%Lecture{video_provider: provider}, _user),
+    do: {:error, {:unsupported_video_provider, provider}}
+
+  @impl true
+  def download_url(%Lecture{video_provider: :mux, video_asset_id: playback_id})
+      when is_binary(playback_id) and playback_id != "" do
+    # A static MP4 rendition, signed the same way as the HLS/thumbnail URLs
+    # above (Mux's JWT "aud" claim covers all video-shaped resources under
+    # this playback ID, not just the HLS manifest). Requires the asset's
+    # `mp4_support` setting from `create_upload/2` — "low" keeps the file a
+    # background transcription job needs to download small.
+    claims = %{
+      "sub" => playback_id,
+      "aud" => "v",
+      "exp" => System.system_time(:second) + 600,
+      "kid" => signing_key_id(),
+      "viewer_id" => "system:transcription"
+    }
+
+    with {:ok, token} <- sign_jwt(claims) do
+      {:ok,
+       "https://stream.mux.com/#{URI.encode(playback_id)}/low.mp4?token=#{URI.encode_www_form(token)}"}
+    end
+  end
+
+  def download_url(%Lecture{video_provider: provider}),
     do: {:error, {:unsupported_video_provider, provider}}
 
   defp resolve_upload(%{"asset_id" => asset_id}) when is_binary(asset_id) do

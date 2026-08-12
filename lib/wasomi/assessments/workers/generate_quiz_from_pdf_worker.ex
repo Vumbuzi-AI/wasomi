@@ -142,9 +142,10 @@ defmodule Wasomi.Assessments.Workers.GenerateQuizFromPDFWorker do
   defp source_text("doc:" <> resource_id_str) do
     case Integer.parse(resource_id_str) do
       {resource_id, ""} ->
-        resource_id
-        |> Wasomi.Catalog.get_lecture_resource!()
-        |> resource_reader().extract_text()
+        case Wasomi.Catalog.get_lecture_resource(resource_id) do
+          nil -> {:error, :resource_not_found}
+          resource -> resource_reader().extract_text(resource)
+        end
 
       _ ->
         {:error, :invalid_resource_key}

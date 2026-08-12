@@ -591,6 +591,13 @@ defmodule Wasomi.Catalog do
     |> Repo.preload(:lecture)
   end
 
+  def get_lecture_resource(id) do
+    case Repo.get(LectureResource, id) do
+      nil -> nil
+      resource -> Repo.preload(resource, :lecture)
+    end
+  end
+
   @doc """
   Creates a lecture.
 

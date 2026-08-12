@@ -279,5 +279,104 @@ defmodule Wasomi.Assessments.Workers.GenerateQuizFromPDFWorkerTest do
       updated = Assessments.get_generation!(generation.id)
       assert updated.status == :ready
     end
+
+    test "returns error for an invalid resource key" do
+      generation = quiz_generation_fixture()
+
+      args = %{
+        "generation_id" => generation.id,
+        "resource_selection" => ["bogus_key"]
+      }
+
+      assert {:error, :invalid_resource_key} =
+               Oban.Testing.perform_job(GenerateQuizFromPDFWorker, args, [])
+    end
+
+    test "returns error for a malformed video key" do
+      generation = quiz_generation_fixture()
+
+      args = %{
+        "generation_id" => generation.id,
+        "resource_selection" => ["video:abc"]
+      }
+
+      assert {:error, :invalid_resource_key} =
+               Oban.Testing.perform_job(GenerateQuizFromPDFWorker, args, [])
+    end
+
+    test "returns error for a malformed doc key" do
+      generation = quiz_generation_fixture()
+
+      args = %{
+        "generation_id" => generation.id,
+        "resource_selection" => ["doc:not_a_number"]
+      }
+
+      assert {:error, :invalid_resource_key} =
+               Oban.Testing.perform_job(GenerateQuizFromPDFWorker, args, [])
+    end
+
+    test "returns error when video transcript is not ready" do
+      module = course_module_fixture()
+      lecture = lecture_fixture(module_id: module.id, video_asset_id: "asset_456")
+
+      Wasomi.Catalog.upsert_lecture_transcript(lecture.id, %{
+        status: :processing,
+        text: nil
+      })
+
+      quiz = quiz_fixture(module: module)
+      generation = quiz_generation_fixture(quiz: quiz)
+
+      args = %{
+        "generation_id" => generation.id,
+        "resource_selection" => ["video:#{lecture.id}"]
+      }
+
+      assert {:error, {:transcript_not_ready, :processing}} =
+               Oban.Testing.perform_job(GenerateQuizFromPDFWorker, args, [])
+    end
+
+    test "returns error when video has no transcript at all" do
+      module = course_module_fixture()
+      lecture = lecture_fixture(module_id: module.id, video_asset_id: "asset_789")
+      quiz = quiz_fixture(module: module)
+      generation = quiz_generation_fixture(quiz: quiz)
+
+      args = %{
+        "generation_id" => generation.id,
+        "resource_selection" => ["video:#{lecture.id}"]
+      }
+
+      assert {:error, :transcript_not_ready} =
+               Oban.Testing.perform_job(GenerateQuizFromPDFWorker, args, [])
+    end
+
+    test "returns error when document resource does not exist" do
+      generation = quiz_generation_fixture()
+
+      args = %{
+        "generation_id" => generation.id,
+        "resource_selection" => ["doc:999999"]
+      }
+
+      assert {:error, :resource_not_found} =
+               Oban.Testing.perform_job(GenerateQuizFromPDFWorker, args, [])
+    end
+
+    test "halts on first failing resource in a mixed selection" do
+      module = course_module_fixture()
+      lecture = lecture_fixture(module_id: module.id, video_asset_id: "asset_halt")
+      quiz = quiz_fixture(module: module)
+      generation = quiz_generation_fixture(quiz: quiz)
+
+      args = %{
+        "generation_id" => generation.id,
+        "resource_selection" => ["video:#{lecture.id}", "doc:999999"]
+      }
+
+      assert {:error, :transcript_not_ready} =
+               Oban.Testing.perform_job(GenerateQuizFromPDFWorker, args, [])
+    end
   end
 end

@@ -511,7 +511,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                           class="grid h-8 w-8 place-items-center rounded-full text-muted transition hover:bg-mint hover:text-primary"
                           title="Lecture quiz"
                         >
-                          <.icon name="hero-sparkles" class="h-4 w-4" />
+                          <.icon name="hero-clipboard-document-check" class="h-4 w-4" />
                         </.link>
                         <button
                           type="button"

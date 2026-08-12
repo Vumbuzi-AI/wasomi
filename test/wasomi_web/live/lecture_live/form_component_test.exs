@@ -274,4 +274,25 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
 
     assert Catalog.get_lecture!(lecture.id).video_asset_id == "old-playback-id"
   end
+
+  test "the resources panel wires up the upload/link toggle hook and add-link attaches a resource",
+       %{conn: conn} do
+    course = course_fixture()
+    course_module = course_module_fixture(course_id: course.id)
+
+    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
+    render_click(view, "new_lecture", %{"module-id" => to_string(course_module.id)})
+
+    # Regression guard: this hook attribute is what drives the "Upload
+    # files" / "Add link" toggle and the "Save link" button client-side —
+    # it was previously missing from the markup entirely, silently
+    # disabling both controls with no server-side error to surface.
+    assert has_element?(view, "#lecture-resources[phx-hook='R2ResourceUpload']")
+
+    resources = element(view, "#lecture-resources")
+    html = render_hook(resources, "add-link", %{"url" => "https://example.com/slides.pdf"})
+
+    assert html =~ "https://example.com/slides.pdf"
+    refute html =~ "No resources added yet."
+  end
 end

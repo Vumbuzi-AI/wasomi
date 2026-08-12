@@ -125,6 +125,8 @@ defmodule WasomiWeb.LectureLive.FormComponent do
 
         <section
           id="lecture-resources"
+          phx-hook="R2ResourceUpload"
+          phx-target={@myself}
           class="space-y-4 rounded-2xl border border-black/5 bg-white p-4 sm:p-5"
         >
           <div class="flex flex-wrap items-start justify-between gap-3">
@@ -432,60 +434,6 @@ defmodule WasomiWeb.LectureLive.FormComponent do
   end
 
   def handle_event("add-link", _params, socket), do: {:noreply, socket}
-
-  def handle_event("presign-resource", params, socket) do
-    case Storage.presign_upload(socket.assigns.current_user, params) do
-      {:ok, upload} ->
-        pending = %{
-          kind: upload.kind,
-          name: params["filename"],
-          url: nil,
-          storage_key: nil,
-          content_type: params["content_type"],
-          byte_size: parse_integer(params["size"]),
-          status: :uploading,
-          client_ref: params["client_ref"]
-        }
-
-        {:noreply,
-         socket
-         |> assign(resource_rows: socket.assigns.resource_rows ++ [pending])
-         |> push_event("r2-upload-ready", Map.put(upload, :client_ref, params["client_ref"]))}
-
-      {:error, reason} ->
-        {:noreply, assign(socket, :resource_error, upload_error(reason))}
-    end
-  end
-
-  def handle_event("resource-uploaded", params, socket) do
-    row = %{
-      kind: string_to_kind(params["kind"]),
-      name: params["name"],
-      storage_key: params["key"],
-      url: params["public_url"],
-      content_type: params["content_type"],
-      byte_size: parse_integer(params["byte_size"])
-    }
-
-    {:noreply,
-     assign(socket,
-       resource_rows:
-         replace_pending_resource(socket.assigns.resource_rows, params["client_ref"], row),
-       resource_error: nil
-     )}
-  end
-
-  def handle_event(
-        "resource-upload-failed",
-        %{"client_ref" => client_ref, "message" => message},
-        socket
-      ) do
-    {:noreply,
-     assign(socket,
-       resource_rows: mark_resource_error(socket.assigns.resource_rows, client_ref, message),
-       resource_error: message
-     )}
-  end
 
   def handle_event("remove-resource", %{"index" => index}, socket) do
     case resource_at(socket.assigns.resource_rows, index) do
@@ -836,21 +784,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
       end
   end
 
-  defp resource_key(resource, index), do: resource[:client_ref] || resource[:storage_key] || index
-
-  defp replace_pending_resource(resources, client_ref, row) do
-    Enum.map(resources, fn resource ->
-      if resource[:client_ref] == client_ref, do: row, else: resource
-    end)
-  end
-
-  defp mark_resource_error(resources, client_ref, message) do
-    Enum.map(resources, fn resource ->
-      if resource[:client_ref] == client_ref,
-        do: Map.merge(resource, %{status: :error, error: message}),
-        else: resource
-    end)
-  end
+  defp resource_key(resource, index), do: resource[:storage_key] || index
 
   defp question_params(%{"questions" => questions}), do: normalize_questions(questions)
   defp question_params(_params), do: []
@@ -936,10 +870,6 @@ defmodule WasomiWeb.LectureLive.FormComponent do
   end
 
   defp parse_index(_), do: :error
-
-  defp string_to_kind("video"), do: :video
-  defp string_to_kind("link"), do: :link
-  defp string_to_kind(_), do: :document
 
   defp upload_error(:unsupported_content_type), do: "That file type is not supported."
 

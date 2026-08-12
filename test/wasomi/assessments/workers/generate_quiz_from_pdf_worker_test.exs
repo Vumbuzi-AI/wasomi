@@ -376,6 +376,29 @@ defmodule Wasomi.Assessments.Workers.GenerateQuizFromPDFWorkerTest do
                Oban.Testing.perform_job(GenerateQuizFromPDFWorker, args, [])
     end
 
+    test "returns error when resource is not a document" do
+      module = course_module_fixture()
+      lecture = lecture_fixture(module_id: module.id)
+
+      resource =
+        lecture_resource_fixture(
+          lecture_id: lecture.id,
+          kind: :video,
+          storage_key: "lectures/clip.mp4"
+        )
+
+      quiz = quiz_fixture(module: module)
+      generation = quiz_generation_fixture(quiz: quiz)
+
+      args = %{
+        "generation_id" => generation.id,
+        "resource_selection" => ["doc:#{resource.id}"]
+      }
+
+      assert {:error, {:unsupported_resource_kind, :video}} =
+               Oban.Testing.perform_job(GenerateQuizFromPDFWorker, args, [])
+    end
+
     test "halts on first failing resource in a mixed selection" do
       module = course_module_fixture()
       lecture = lecture_fixture(module_id: module.id, video_asset_id: "asset_halt")

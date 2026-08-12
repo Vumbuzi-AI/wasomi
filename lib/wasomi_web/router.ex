@@ -112,6 +112,8 @@ defmodule WasomiWeb.Router do
 
       live "/payments", AdminLive.Payments, :index
 
+      live "/analytics", AdminLive.Analytics, :index
+
       live "/courses/:course_slug/quizzes/:id/edit", AdminLive.QuizEdit, :edit
       live "/courses/:course_slug/quizzes/:quiz_id", AdminLive.QuizShow, :show
       live "/courses/:slug/preview", CoursePlayerLive, :preview

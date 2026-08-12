@@ -21,8 +21,10 @@ defmodule Wasomi.Catalog.Analytics do
   import Ecto.Query, warn: false
 
   alias Wasomi.Assessments.{Quiz, QuizSubmission}
-  alias Wasomi.Catalog.{CourseModule, Lecture}
+  alias Wasomi.Catalog.{Course, CourseModule, Lecture}
+  alias Wasomi.Certificates
   alias Wasomi.Enrollments
+  alias Wasomi.Learning
   alias Wasomi.Learning.LectureProgress
   alias Wasomi.Payments.Payment
   alias Wasomi.Repo
@@ -181,6 +183,150 @@ defmodule Wasomi.Catalog.Analytics do
     |> order_by([p], fragment("date_trunc('month', ?)", p.paid_at))
     |> Repo.all()
   end
+
+  @doc """
+  Successful revenue, in minor units, per course, richest first. Same
+  `:course_id`/`:from`/`:to` scoping as every other function here — passing
+  `:course_id` just returns that one course's row, so callers building a
+  "top courses" breakdown normally leave it unset.
+  """
+  def revenue_by_course(opts \\ []) do
+    course_id = Keyword.get(opts, :course_id)
+    {from, to} = date_bounds(opts)
+
+    Payment
+    |> where([p], p.status == :successful)
+    |> filter_payment_course(course_id)
+    |> filter_range(:paid_at, from, to)
+    |> join(:inner, [p], c in Course, on: c.id == p.course_id)
+    |> group_by([p, c], c.id)
+    |> select([p, c], %{course_id: c.id, title: c.title, revenue_minor: sum(p.amount_minor)})
+    |> order_by([p, c], desc: sum(p.amount_minor))
+    |> Repo.all()
+  end
+
+  @doc """
+  Percentage (0-100) of quiz submissions that passed, keyed by `course_id`.
+  """
+  def quiz_pass_rate_by_course(opts \\ []) do
+    course_id = Keyword.get(opts, :course_id)
+    {from, to} = date_bounds(opts)
+
+    QuizSubmission
+    |> join(:inner, [s], q in Quiz, on: q.id == s.quiz_id)
+    |> join(:inner, [s, q], m in CourseModule, on: m.id == q.module_id)
+    |> filter_module_course(course_id, m_binding: 2)
+    |> filter_range(:submitted_at, from, to)
+    |> group_by([s, q, m], m.course_id)
+    |> select([s, q, m], %{
+      course_id: m.course_id,
+      passed: fragment("count(*) filter (where ?)", s.passed),
+      total: count(s.id)
+    })
+    |> Repo.all()
+    |> Map.new(fn row -> {row.course_id, percent(row.passed, row.total)} end)
+  end
+
+  @doc """
+  Average module completion rate per course, keyed by `course_id` — the
+  simple mean of `module_completion_rates/1`'s per-module rates for that
+  course (not a weighted sum: every module in a course shares the same
+  "active enrollees" denominator, so weighting by it would just multiply
+  the same number in rather than add signal).
+  """
+  def completion_rate_by_course(opts \\ []) do
+    opts
+    |> module_completion_rates()
+    |> Map.values()
+    |> Enum.group_by(& &1.course_id, & &1.rate_percent)
+    |> Map.new(fn {course_id, rates} -> {course_id, average(rates)} end)
+  end
+
+  @doc """
+  One row per course combining enrollment, completion rate, quiz pass
+  rate, and revenue — the org-wide course leaderboard for the analytics
+  overview. Same `:course_id`/`:from`/`:to` scoping as the rest of this
+  module. Sorted richest-first by revenue.
+  """
+  def course_scorecards(opts \\ []) do
+    course_id = Keyword.get(opts, :course_id)
+
+    courses =
+      Course
+      |> filter_course(course_id)
+      |> select([c], %{id: c.id, title: c.title, slug: c.slug})
+      |> Repo.all()
+
+    revenue_by_course = opts |> revenue_by_course() |> Map.new(&{&1.course_id, &1.revenue_minor})
+    completion_by_course = completion_rate_by_course(opts)
+    pass_rate_by_course = quiz_pass_rate_by_course(opts)
+    enrolled_by_course = Enrollments.count_active_by_course()
+
+    courses
+    |> Enum.map(fn course ->
+      %{
+        course_id: course.id,
+        title: course.title,
+        slug: course.slug,
+        enrolled: Map.get(enrolled_by_course, course.id, 0),
+        completion_rate_percent: Map.get(completion_by_course, course.id, 0),
+        quiz_pass_rate_percent: Map.get(pass_rate_by_course, course.id, 0),
+        revenue_minor: Map.get(revenue_by_course, course.id, 0)
+      }
+    end)
+    |> Enum.sort_by(& &1.revenue_minor, :desc)
+  end
+
+  @doc """
+  The admin conversion funnel: checkout started → paid → active →
+  completed → certified. Optionally scoped to one course via `:course_id`.
+
+  Deliberately **not** scoped by `:from`/`:to` like the rest of this
+  module — the five steps don't share a common timestamp (a payment's
+  `paid_at`, an enrollment's `activated_at`, a certificate's `issued_at`
+  all measure different moments), so windowing each step independently by
+  the same date range would silently misrepresent the conversion rate
+  between them. This is always an all-time snapshot.
+  """
+  def funnel(opts \\ []) do
+    course_id = Keyword.get(opts, :course_id)
+
+    checkout_started =
+      Payment
+      |> filter_payment_course(course_id)
+      |> Repo.aggregate(:count)
+
+    paid =
+      Payment
+      |> where([p], p.status == :successful)
+      |> filter_payment_course(course_id)
+      |> Repo.aggregate(:count)
+
+    active =
+      if course_id,
+        do: Enrollments.count_active_for_course(course_id),
+        else: Enrollments.count_active()
+
+    completed = Learning.count_course_completions(course_id: course_id)
+    certified = Certificates.count_course_certificates(course_id: course_id)
+
+    [
+      %{step: "Checkout started", count: checkout_started},
+      %{step: "Paid", count: paid},
+      %{step: "Active", count: active},
+      %{step: "Completed", count: completed},
+      %{step: "Certified", count: certified}
+    ]
+  end
+
+  defp filter_course(query, nil), do: query
+  defp filter_course(query, course_id), do: where(query, [c], c.id == ^course_id)
+
+  defp percent(_numerator, 0), do: 0
+  defp percent(numerator, denominator), do: round(numerator / denominator * 100)
+
+  defp average([]), do: 0
+  defp average(numbers), do: round(Enum.sum(numbers) / length(numbers))
 
   # `CourseModule` is binding 0 when queried directly (no course_id arg
   # needed beyond that), or binding 1/2 once joined in behind Lecture or

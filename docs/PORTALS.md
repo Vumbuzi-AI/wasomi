@@ -62,11 +62,12 @@ Routes:
 - `/admin/courses/:slug/preview` - `CoursePlayerLive` (admin "view as learner" mode)
 - `/admin/courses/:course_slug/quizzes/:id/edit` - `AdminLive.QuizEdit`
 - `/admin/courses/:course_slug/quizzes/:quiz_id` - `AdminLive.QuizShow` (redirect shim to the edit route)
-- `/admin/students` - `AdminLive.Students`
+- `/admin/students` - `AdminLive.Students` — search + pagination; a page-level "Export enrollments" CSV link (unfiltered).
 - `/admin/students/:id` - `AdminLive.StudentShow`
-- `/admin/payments` - `AdminLive.Payments`
+- `/admin/payments` - `AdminLive.Payments` — two tabs (`?tab=payments`/`?tab=revenue`), each with its own search/status-filter/sort/pagination; a page-level "Export payments" CSV link (unfiltered).
+- `/admin/analytics` - `AdminLive.Analytics` — filterable (course/date-range) by a shared form; Overview tab (conversion funnel + course leaderboard) and Revenue tab (monthly revenue + revenue-by-course charts); a filtered "Export quiz results" CSV link (the one export type with no better single-page home).
 - `/admin/lectures/:id/video` - `AdminLectureVideoLive`
-- `/admin/exports/:type` - `Admin.ExportController` (controller, not a LiveView) — streams a CSV for `type` in `enrollments`/`payments`/`quiz_results`, optionally scoped by `course_id`/`from`/`to` query params matching the dashboard's filter form.
+- `/admin/exports/:type` - `Admin.ExportController` (controller, not a LiveView) — streams a CSV for `type` in `enrollments`/`payments`/`quiz_results`. Only invoked with `course_id`/`from`/`to` query params from the Analytics page's filter form (quiz results); the Students/Payments page-level export links call it unfiltered.
 
 Purpose: operational overview, course content management, learner/payment inspection, lecture video upload management, and CSV data export.
 

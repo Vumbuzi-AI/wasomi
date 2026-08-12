@@ -1,14 +1,112 @@
 defmodule WasomiWeb.AdminLive.Payments do
   use WasomiWeb, :live_view
 
-  alias Wasomi.Payments
+  alias Wasomi.{Catalog, Enrollments, Payments}
+  alias Wasomi.Paginate
+  alias Wasomi.Payments.Payment
+
+  @status_values Ecto.Enum.values(Payment, :status)
+  @sort_values ~w(date reference learner course amount status)a
+  @page_size 10
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, refresh_payments(socket) |> assign(:page_title, "Payments")}
+    {:ok,
+     socket
+     |> assign(:page_title, "Payments")
+     |> assign(:status_values, @status_values)}
   end
 
   @impl true
+  def handle_params(params, _uri, socket) do
+    socket =
+      socket
+      |> assign(:tab, parse_tab(params["tab"]))
+      |> assign(:status_filter, parse_status(params["status"]))
+      |> assign(:search, params["q"] || "")
+      |> assign(:page_number, Paginate.parse_page(params["page"]))
+      |> assign(:sort_by, parse_sort_by(params["sort_by"]))
+      |> assign(:sort_dir, parse_sort_dir(params["sort_dir"]))
+      |> load_tab()
+
+    {:noreply, socket}
+  end
+
+  defp parse_tab("revenue"), do: :revenue
+  defp parse_tab(_), do: :payments
+
+  defp parse_status(value), do: Enum.find(@status_values, &(Atom.to_string(&1) == value))
+
+  defp parse_sort_by(value), do: Enum.find(@sort_values, :date, &(Atom.to_string(&1) == value))
+  defp parse_sort_dir("asc"), do: :asc
+  defp parse_sort_dir(_), do: :desc
+
+  defp load_tab(%{assigns: %{tab: :payments}} = socket) do
+    page =
+      Payments.list_payments_page(
+        status: socket.assigns.status_filter,
+        search: socket.assigns.search,
+        sort_by: socket.assigns.sort_by,
+        sort_dir: socket.assigns.sort_dir,
+        page: socket.assigns.page_number,
+        page_size: @page_size
+      )
+
+    socket
+    |> assign(:payments_page, page)
+    |> assign(:total_transactions, Payments.count_payments())
+    |> assign(:successful, Payments.count_payments(:successful))
+    |> assign(:pending, Payments.count_payments(:pending))
+    |> assign(:failed, Payments.count_payments(:failed))
+  end
+
+  defp load_tab(%{assigns: %{tab: :revenue}} = socket) do
+    revenue_by_course = Payments.revenue_minor_by_course()
+    enrolled_by_course = Enrollments.count_by_course()
+    paid_by_course = Payments.count_successful_by_course()
+    last_paid_by_course = Payments.last_paid_at_by_course()
+
+    rows =
+      Catalog.list_courses(search: socket.assigns.search)
+      |> Enum.map(fn course ->
+        %{
+          course: course,
+          enrolled: Map.get(enrolled_by_course, course.id, 0),
+          paid: Map.get(paid_by_course, course.id, 0),
+          revenue_minor: Map.get(revenue_by_course, course.id, 0),
+          last_paid_at: Map.get(last_paid_by_course, course.id)
+        }
+      end)
+      |> Enum.sort_by(& &1.revenue_minor, :desc)
+
+    gross_revenue_minor = Payments.total_revenue_minor()
+    paid_enrolments = Payments.count_payments(:successful)
+
+    socket
+    |> assign(:revenue_page, Paginate.paginate_list(rows, socket.assigns.page_number, @page_size))
+    |> assign(:gross_revenue_minor, gross_revenue_minor)
+    |> assign(:paid_enrolments, paid_enrolments)
+    |> assign(:average_payment_minor, average(gross_revenue_minor, paid_enrolments))
+    |> assign(:courses_with_revenue, map_size(revenue_by_course))
+  end
+
+  defp average(_total, 0), do: 0
+  defp average(total, count), do: div(total, count)
+
+  @impl true
+  def handle_event("search", %{"q" => query}, socket) do
+    {:noreply,
+     push_patch(socket,
+       to:
+         payments_path(socket.assigns.tab,
+           status: socket.assigns.status_filter,
+           search: query,
+           sort_by: socket.assigns.sort_by,
+           sort_dir: socket.assigns.sort_dir
+         )
+     )}
+  end
+
   def handle_event("reconcile", %{"id" => id}, socket) do
     case id |> String.trim() |> Integer.parse() do
       {payment_id, ""} ->
@@ -16,7 +114,7 @@ defmodule WasomiWeb.AdminLive.Payments do
           payment_id
           |> Payments.verify_transaction(socket.assigns.current_user)
           |> put_reconciliation_flash(socket)
-          |> refresh_payments()
+          |> load_tab()
 
         {:noreply, socket}
 
@@ -25,94 +123,356 @@ defmodule WasomiWeb.AdminLive.Payments do
     end
   end
 
+  # Sorting resets to page 1, same as changing the search or status filter.
+  defp sort_path(status, search, sort_by, sort_dir) do
+    payments_path(:payments, status: status, search: search, sort_by: sort_by, sort_dir: sort_dir)
+  end
+
+  defp payments_path(tab, opts \\ []) do
+    status = Keyword.get(opts, :status)
+    search = Keyword.get(opts, :search, "")
+    page = Keyword.get(opts, :page, 1)
+    sort_by = Keyword.get(opts, :sort_by, :date)
+    sort_dir = Keyword.get(opts, :sort_dir, :desc)
+
+    params =
+      %{tab: tab, status: status, q: search, page: page, sort_by: sort_by, sort_dir: sort_dir}
+      |> Enum.reject(fn
+        {:tab, :payments} -> true
+        {:page, 1} -> true
+        {:sort_by, :date} -> true
+        {:sort_dir, :desc} -> true
+        {_key, value} -> value in [nil, ""]
+      end)
+
+    ~p"/admin/payments?#{params}"
+  end
+
   @impl true
   def render(assigns) do
     ~H"""
     <.admin_layout active={:payments} current_user={@current_user}>
       <div class="mx-auto max-w-container space-y-8 px-5 py-10 lg:px-10">
-        <.page_header eyebrow="Billing" title="Payments">
-          <:subtitle>Every checkout attempt and the revenue it generated.</:subtitle>
+        <.page_header title="Payments and revenue">
+          <:subtitle>Review course revenue and learner payment attempts.</:subtitle>
+          <:actions>
+            <.search_input value={@search} placeholder={search_placeholder(@tab)} debounce={300} />
+            <.link
+              href={~p"/admin/exports/payments"}
+              class="group relative grid h-11 w-11 place-items-center rounded-full border border-black/10 bg-white text-dark transition hover:border-primary hover:text-primary"
+              aria-label="Export all payments as CSV"
+            >
+              <.icon name="hero-document-arrow-down" class="h-5 w-5" />
+              <.tooltip label="Export all payments as CSV" />
+            </.link>
+          </:actions>
         </.page_header>
 
-        <div class="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
+        <div class="grid grid-cols-2 overflow-hidden rounded-2xl border border-black/5 bg-neutral-50 p-1">
+          <.link
+            patch={payments_path(:payments)}
+            class={[
+              "rounded-xl py-2.5 text-center text-sm font-medium transition",
+              tab_class(@tab == :payments)
+            ]}
+          >
+            Payments
+          </.link>
+          <.link
+            patch={payments_path(:revenue)}
+            class={[
+              "rounded-xl py-2.5 text-center text-sm font-medium transition",
+              tab_class(@tab == :revenue)
+            ]}
+          >
+            Revenue
+          </.link>
+        </div>
+
+        <div :if={@tab == :payments} class="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
           <.stat_card
-            label="Total revenue"
-            value={Payments.format_minor(@total_revenue_minor)}
+            label="Total transactions"
+            value={@total_transactions}
+            icon="hero-credit-card"
+            hint="All checkout attempts"
+          />
+          <.stat_card
+            label="Successful"
+            value={@successful}
+            icon="hero-check-circle"
+            hint="Completed transactions"
+          />
+          <.stat_card label="Pending" value={@pending} icon="hero-clock" hint="Awaiting confirmation" />
+          <.stat_card
+            label="Failed"
+            value={@failed}
+            icon="hero-x-circle"
+            hint="Unsuccessful attempts"
+          />
+        </div>
+
+        <div :if={@tab == :revenue} class="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
+          <.stat_card
+            label="Gross revenue"
+            value={Payments.format_minor(@gross_revenue_minor)}
             icon="hero-banknotes"
           />
-          <.stat_card label="Successful" value={@successful} icon="hero-check-circle" />
-          <.stat_card label="Pending" value={@pending} icon="hero-clock" />
-          <.stat_card label="Failed" value={@failed} icon="hero-x-circle" />
+          <.stat_card
+            label="Paid enrolments"
+            value={@paid_enrolments}
+            icon="hero-user"
+            hint="Learners with completed payments"
+          />
+          <.stat_card
+            label="Average payment"
+            value={Payments.format_minor(@average_payment_minor)}
+            icon="hero-calculator"
+          />
+          <.stat_card
+            label="Courses with revenue"
+            value={@courses_with_revenue}
+            icon="hero-rectangle-stack"
+          />
         </div>
 
-        <div :if={@payments != []} class="overflow-hidden rounded-3xl border border-black/5 bg-white">
-          <table class="w-full text-left text-sm">
-            <thead class="border-b border-black/5 text-xs uppercase tracking-wide text-muted">
-              <tr>
-                <th class="px-6 py-4 font-semibold">Student</th>
-                <th class="px-6 py-4 font-semibold">Course</th>
-                <th class="px-6 py-4 font-semibold">Provider</th>
-                <th class="px-6 py-4 font-semibold">Reference</th>
-                <th class="px-6 py-4 font-semibold">Amount</th>
-                <th class="px-6 py-4 font-semibold">Status</th>
-                <th class="px-6 py-4 font-semibold">Date</th>
-                <th class="px-6 py-4 font-semibold"><span class="sr-only">Actions</span></th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-black/5">
-              <tr :for={payment <- @payments} class="transition hover:bg-soft/60">
-                <td class="px-6 py-4">
-                  <.link
-                    :if={payment.user}
-                    navigate={~p"/admin/students/#{payment.user_id}"}
-                    class="font-medium text-dark hover:text-primary"
+        <div :if={@tab == :payments} class="rounded-3xl border border-black/5 bg-white p-6">
+          <div class="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h2 class="text-xl font-semibold text-dark">Payment transactions</h2>
+              <p class="mt-1 text-sm text-body">Every checkout attempt and its current status.</p>
+            </div>
+            <span class="rounded-full border border-primary/30 bg-mint px-3 py-1 text-xs font-semibold text-primary">
+              {@payments_page.total_count} {ngettext(
+                "record",
+                "records",
+                @payments_page.total_count
+              )}
+            </span>
+          </div>
+
+          <div class="mt-5 flex flex-wrap gap-2">
+            <.link
+              patch={
+                payments_path(:payments, search: @search, sort_by: @sort_by, sort_dir: @sort_dir)
+              }
+              class={[
+                "rounded-full px-4 py-2 text-sm font-medium transition",
+                status_pill_class(@status_filter == nil)
+              ]}
+            >
+              All statuses
+            </.link>
+            <.link
+              :for={status <- @status_values}
+              patch={
+                payments_path(:payments,
+                  status: status,
+                  search: @search,
+                  sort_by: @sort_by,
+                  sort_dir: @sort_dir
+                )
+              }
+              class={[
+                "rounded-full px-4 py-2 text-sm font-medium transition",
+                status_pill_class(@status_filter == status)
+              ]}
+            >
+              {String.capitalize(to_string(status))}
+            </.link>
+          </div>
+
+          <.paginated_table
+            page={@payments_page.page}
+            total_pages={@payments_page.total_pages}
+            path_fn={
+              &payments_path(:payments,
+                status: @status_filter,
+                search: @search,
+                sort_by: @sort_by,
+                sort_dir: @sort_dir,
+                page: &1
+              )
+            }
+          >
+            <div :if={@payments_page.entries != []} class="mt-6 overflow-x-auto">
+              <table class="w-full text-left text-sm">
+                <thead class="border-b border-black/5 text-xs uppercase tracking-wide text-body">
+                  <tr>
+                    <th class="px-6 py-4 font-semibold">Payment ID</th>
+                    <.sortable_th
+                      label="Learner"
+                      field={:learner}
+                      current_sort_by={@sort_by}
+                      current_sort_dir={@sort_dir}
+                      path_fn={&sort_path(@status_filter, @search, &1, &2)}
+                    />
+                    <.sortable_th
+                      label="Course"
+                      field={:course}
+                      current_sort_by={@sort_by}
+                      current_sort_dir={@sort_dir}
+                      path_fn={&sort_path(@status_filter, @search, &1, &2)}
+                    />
+                    <th class="px-6 py-4 font-semibold">Provider</th>
+                    <.sortable_th
+                      label="Reference"
+                      field={:reference}
+                      current_sort_by={@sort_by}
+                      current_sort_dir={@sort_dir}
+                      path_fn={&sort_path(@status_filter, @search, &1, &2)}
+                    />
+                    <.sortable_th
+                      label="Amount"
+                      field={:amount}
+                      current_sort_by={@sort_by}
+                      current_sort_dir={@sort_dir}
+                      path_fn={&sort_path(@status_filter, @search, &1, &2)}
+                    />
+                    <.sortable_th
+                      label="Date"
+                      field={:date}
+                      current_sort_by={@sort_by}
+                      current_sort_dir={@sort_dir}
+                      path_fn={&sort_path(@status_filter, @search, &1, &2)}
+                    />
+                    <.sortable_th
+                      label="Status"
+                      field={:status}
+                      current_sort_by={@sort_by}
+                      current_sort_dir={@sort_dir}
+                      path_fn={&sort_path(@status_filter, @search, &1, &2)}
+                    />
+                    <th class="px-6 py-4 font-semibold"><span class="sr-only">Actions</span></th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-black/5">
+                  <tr
+                    :for={payment <- @payments_page.entries}
+                    class="transition hover:bg-neutral-50/60"
                   >
-                    {payment.user.name || payment.user.email}
-                  </.link>
-                  <span :if={!payment.user} class="text-muted">—</span>
-                </td>
-                <td class="px-6 py-4 text-body">{payment.course && payment.course.title}</td>
-                <td class="px-6 py-4 capitalize text-body">{payment.provider}</td>
-                <td class="px-6 py-4 text-xs text-muted">{payment.provider_reference}</td>
-                <td class="px-6 py-4 font-semibold text-dark">{Payments.format_amount(payment)}</td>
-                <td class="px-6 py-4"><.status_badge status={payment.status} /></td>
-                <td class="px-6 py-4 text-body">{format_date(payment.inserted_at)}</td>
-                <td class="px-6 py-4 text-right">
-                  <button
-                    :if={payment.status == :pending}
-                    type="button"
-                    phx-click="reconcile"
-                    phx-value-id={payment.id}
-                    phx-disable-with="Verifying..."
-                    class="rounded-full bg-dark px-4 py-1.5 text-xs font-semibold text-white transition hover:bg-primary disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    Reconcile
-                  </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+                    <td class="px-6 py-4 text-xs text-body">PAY-{payment.id}</td>
+                    <td class="px-6 py-4">
+                      <.link
+                        :if={payment.user}
+                        navigate={~p"/admin/students/#{payment.user_id}"}
+                        class="font-medium text-dark hover:text-primary"
+                      >
+                        {payment.user.name || payment.user.email}
+                      </.link>
+                      <span :if={!payment.user} class="text-muted">—</span>
+                    </td>
+                    <td class="px-6 py-4 text-body">{payment.course && payment.course.title}</td>
+                    <td class="px-6 py-4 capitalize text-body">{payment.provider}</td>
+                    <td class="px-6 py-4 text-xs text-body">{payment.provider_reference}</td>
+                    <td class="px-6 py-4 font-semibold text-dark">
+                      {Payments.format_amount(payment)}
+                    </td>
+                    <td class="px-6 py-4 text-body">{format_date(payment.inserted_at)}</td>
+                    <td class="px-6 py-4"><.status_badge status={payment.status} /></td>
+                    <td class="px-6 py-4 text-right">
+                      <button
+                        :if={payment.status == :pending}
+                        type="button"
+                        phx-click="reconcile"
+                        phx-value-id={payment.id}
+                        phx-disable-with="Verifying..."
+                        class="rounded-full bg-dark px-4 py-1.5 text-xs font-semibold text-white transition hover:bg-primary disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        Reconcile
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div
+              :if={@payments_page.entries == [] and @total_transactions == 0}
+              class="mt-6 rounded-2xl bg-neutral-50 p-12 text-center text-body"
+            >
+              No payments have been recorded yet.
+            </div>
+
+            <div
+              :if={@payments_page.entries == [] and @total_transactions > 0}
+              class="mt-6 rounded-2xl bg-neutral-50 p-12 text-center text-body"
+            >
+              No payments match the current search or status filter.
+            </div>
+          </.paginated_table>
         </div>
 
-        <div
-          :if={@payments == []}
-          class="rounded-3xl border border-black/5 bg-white p-12 text-center text-body"
-        >
-          No payments have been recorded yet.
+        <div :if={@tab == :revenue} class="rounded-3xl border border-black/5 bg-white p-6">
+          <div class="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h2 class="text-xl font-semibold text-dark">Course revenue</h2>
+              <p class="mt-1 text-sm text-body">Revenue grouped by course.</p>
+            </div>
+            <span class="rounded-full border border-primary/30 bg-mint px-3 py-1 text-xs font-semibold text-primary">
+              {@revenue_page.total_count} {ngettext("record", "records", @revenue_page.total_count)}
+            </span>
+          </div>
+
+          <.paginated_table
+            page={@revenue_page.page}
+            total_pages={@revenue_page.total_pages}
+            path_fn={&payments_path(:revenue, search: @search, page: &1)}
+          >
+            <div :if={@revenue_page.entries != []} class="mt-6 overflow-x-auto">
+              <table class="w-full text-left text-sm">
+                <thead class="border-b border-black/5 text-xs uppercase tracking-wide text-body">
+                  <tr>
+                    <th class="px-6 py-4 font-semibold">Course</th>
+                    <th class="px-6 py-4 font-semibold">Enrolled</th>
+                    <th class="px-6 py-4 font-semibold">Paid</th>
+                    <th class="px-6 py-4 font-semibold">Gross revenue</th>
+                    <th class="px-6 py-4 font-semibold">Last payment</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-black/5">
+                  <tr :for={row <- @revenue_page.entries} class="transition hover:bg-neutral-50/60">
+                    <td class="px-6 py-4">
+                      <.link
+                        navigate={~p"/admin/courses/#{row.course.slug}"}
+                        class="font-medium text-dark hover:text-primary"
+                      >
+                        {row.course.title}
+                      </.link>
+                    </td>
+                    <td class="px-6 py-4 text-body">{row.enrolled}</td>
+                    <td class="px-6 py-4 text-body">{row.paid}</td>
+                    <td class="px-6 py-4 font-semibold text-dark">
+                      {Payments.format_minor(row.revenue_minor, row.course.currency)}
+                    </td>
+                    <td class="px-6 py-4 text-body">{format_date(row.last_paid_at)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div
+              :if={@revenue_page.entries == []}
+              class="mt-6 rounded-2xl bg-neutral-50 p-12 text-center text-body"
+            >
+              No courses match the current search.
+            </div>
+          </.paginated_table>
         </div>
       </div>
     </.admin_layout>
     """
   end
 
-  defp refresh_payments(socket) do
-    socket
-    |> assign(:payments, Payments.list_recent_payments(100))
-    |> assign(:total_revenue_minor, Payments.total_revenue_minor())
-    |> assign(:successful, Payments.count_payments(:successful))
-    |> assign(:pending, Payments.count_payments(:pending))
-    |> assign(:failed, Payments.count_payments(:failed))
-  end
+  defp search_placeholder(:payments), do: "Search learner, course or reference"
+  defp search_placeholder(:revenue), do: "Search courses"
+
+  defp tab_class(true), do: "bg-dark text-white"
+  defp tab_class(false), do: "text-body hover:text-dark"
+
+  defp status_pill_class(true), do: "bg-dark text-white"
+
+  defp status_pill_class(false),
+    do: "border border-black/10 bg-white text-body hover:border-primary hover:text-primary"
 
   defp put_reconciliation_flash({:ok, %{verification: verification}}, socket) do
     put_flash(socket, :info, "Payment verified as successful. " <> provider_message(verification))

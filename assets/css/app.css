@@ -30,6 +30,59 @@ body {
 }
 
 /* ==========================================
+   Collapsible Admin Sidebar
+   ========================================== */
+#admin-sidebar {
+  transition: width 220ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+#admin-sidebar.is-collapsed {
+  width: 5rem !important;
+}
+
+#admin-sidebar .sidebar-label {
+  display: inline-block;
+  max-width: 12rem;
+  opacity: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  transition:
+    max-width 200ms ease,
+    opacity 120ms ease;
+}
+
+#admin-sidebar.is-collapsed .sidebar-label {
+  max-width: 0;
+  opacity: 0;
+}
+
+#admin-sidebar.is-collapsed .sidebar-row {
+  gap: 0;
+}
+
+#admin-sidebar.is-collapsed a,
+#admin-sidebar.is-collapsed .sidebar-row,
+#admin-sidebar.is-collapsed .sidebar-header {
+  justify-content: center;
+}
+
+#admin-sidebar .sidebar-toggle-icon {
+  transition: transform 200ms ease;
+}
+
+#admin-sidebar .sidebar-tooltip {
+  display: none;
+}
+
+#admin-sidebar.is-collapsed .group:hover .sidebar-tooltip {
+  display: block;
+}
+
+#admin-sidebar.is-collapsed .sidebar-toggle-icon {
+  transform: rotate(180deg);
+}
+
+/* ==========================================
    Theme Variables & Custom Date Picker CSS
    ========================================== */
 :root {

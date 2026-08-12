@@ -5,6 +5,7 @@ defmodule WasomiWeb.AdminLiveTest do
   import Wasomi.AccountsFixtures
   import Wasomi.AssessmentsFixtures
   import Wasomi.CatalogFixtures
+  import Wasomi.EnrollmentsFixtures
 
   defp admin_fixture(attrs \\ %{}) do
     user = user_fixture(attrs)
@@ -40,6 +41,86 @@ defmodule WasomiWeb.AdminLiveTest do
 
       assert html =~ "Communication Mastery"
       assert html =~ course.slug
+    end
+
+    test "renders stat cards reflecting course, enrollment, and revenue state", %{conn: conn} do
+      course_fixture(status: :draft)
+      published = course_fixture(status: :published)
+      enrollment_fixture(user_id: user_fixture().id, course_id: published.id, status: :active)
+
+      {:ok, _view, html} = live(conn, ~p"/admin/courses")
+
+      assert html =~ "Total courses"
+      assert html =~ ~r/Total courses.*?>\s*2\s*</s
+      assert html =~ ~r/Published.*?>\s*1\s*</s
+      assert html =~ ~r/Draft.*?>\s*1\s*</s
+      assert html =~ "Learners"
+    end
+
+    test "filters the course grid by status", %{conn: conn} do
+      draft = course_fixture(title: "Draft Course", status: :draft)
+      published = course_fixture(title: "Published Course", status: :published)
+
+      {:ok, view, _html} = live(conn, ~p"/admin/courses")
+
+      html =
+        view
+        |> element(~s(a[href="/admin/courses?status=published"]))
+        |> render_click()
+
+      assert html =~ published.title
+      refute html =~ draft.title
+      assert_patched(view, ~p"/admin/courses?status=published")
+    end
+
+    test "searches the course grid by title", %{conn: conn} do
+      match = course_fixture(title: "Communication Mastery")
+      other = course_fixture(title: "Data Analysis")
+
+      {:ok, view, _html} = live(conn, ~p"/admin/courses")
+
+      html =
+        view
+        |> form("form[phx-change=search]", %{"q" => "Communication"})
+        |> render_change()
+
+      assert html =~ match.title
+      refute html =~ other.title
+    end
+
+    test "paginates the course grid, 9 per page", %{conn: conn} do
+      Enum.each(1..10, fn n -> course_fixture(title: "Course #{n}") end)
+
+      {:ok, view, html} = live(conn, ~p"/admin/courses")
+
+      assert html =~ "10 courses"
+      assert html =~ "Page 1 of 2"
+      refute html =~ "Previous"
+      assert html =~ "Next"
+
+      html =
+        view
+        |> element(~s(a[href="/admin/courses?page=2"]))
+        |> render_click()
+
+      assert html =~ "Page 2 of 2"
+      assert html =~ "Previous"
+      refute html =~ "Next"
+      assert_patched(view, ~p"/admin/courses?page=2")
+    end
+
+    test "shows a no-matches empty state distinct from the no-courses-yet state", %{conn: conn} do
+      course_fixture(title: "Communication Mastery")
+
+      {:ok, view, _html} = live(conn, ~p"/admin/courses")
+
+      html =
+        view
+        |> form("form[phx-change=search]", %{"q" => "nonexistent course"})
+        |> render_change()
+
+      assert html =~ "No matching courses"
+      refute html =~ "No courses yet"
     end
 
     test "creates a course through the modal form", %{conn: conn} do
@@ -677,9 +758,56 @@ defmodule WasomiWeb.AdminLiveTest do
       assert html =~ learner.email
     end
 
+    test "searches students by name, email, or phone", %{conn: conn} do
+      match = user_fixture(name: "Amina Otieno", email: "amina@example.com")
+      other = user_fixture(name: "Brian Kamau", email: "brian@example.com")
+
+      {:ok, view, _html} = live(conn, ~p"/admin/students")
+
+      html =
+        view
+        |> form("form[phx-change=search]", %{"q" => "Amina"})
+        |> render_change()
+
+      assert html =~ match.email
+      refute html =~ other.email
+    end
+
+    test "shows a no-matches message distinct from the no-students-yet state", %{conn: conn} do
+      user_fixture(name: "Amina Otieno")
+
+      {:ok, view, _html} = live(conn, ~p"/admin/students")
+
+      html =
+        view
+        |> form("form[phx-change=search]", %{"q" => "nonexistent student"})
+        |> render_change()
+
+      assert html =~ "No students match"
+      refute html =~ "No students have registered yet"
+    end
+
+    test "paginates the student list, 10 per page", %{conn: conn} do
+      Enum.each(1..11, fn n -> user_fixture(name: "Student #{n}") end)
+
+      {:ok, view, html} = live(conn, ~p"/admin/students")
+
+      assert html =~ "Page 1 of 2"
+      refute html =~ "Previous"
+      assert html =~ "Next"
+
+      html =
+        view
+        |> element(~s(a[href="/admin/students?page=2"]))
+        |> render_click()
+
+      assert html =~ "Page 2 of 2"
+      assert_patched(view, ~p"/admin/students?page=2")
+    end
+
     test "renders the payments page", %{conn: conn} do
       {:ok, _view, html} = live(conn, ~p"/admin/payments")
-      assert html =~ "Total revenue"
+      assert html =~ "Total transactions"
     end
   end
 end

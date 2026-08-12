@@ -7,6 +7,7 @@ defmodule Wasomi.Accounts do
   alias Wasomi.Repo
 
   alias Wasomi.Accounts.{User, UserNotifier, UserToken}
+  alias Wasomi.Paginate
 
   ## Database getters
 
@@ -61,13 +62,35 @@ defmodule Wasomi.Accounts do
   def get_user!(id), do: Repo.get!(User, id)
 
   @doc """
-  Lists users newest first, optionally scoped to a role. Used by the admin area.
+  Returns the list of users, newest first, optionally filtered.
+
+  ## Options
+
+    * `:role` - only users with this role (`:learner`, `:admin`).
+    * `:search` - case-insensitive match against name, email, or phone.
+
   """
-  def list_users(role \\ nil) do
+  def list_users(opts \\ []) do
     User
-    |> scope_role(role)
+    |> scope_role(Keyword.get(opts, :role))
+    |> scope_search(Keyword.get(opts, :search))
     |> order_by([u], desc: u.inserted_at, desc: u.id)
     |> Repo.all()
+  end
+
+  @doc """
+  Returns a `Wasomi.Paginate.Page` of users, same `:role`/`:search`
+  filtering as `list_users/1` plus `:page`/`:page_size`.
+  """
+  def list_users_page(opts \\ []) do
+    page = Keyword.get(opts, :page, 1)
+    page_size = Keyword.get(opts, :page_size, 10)
+
+    User
+    |> scope_role(Keyword.get(opts, :role))
+    |> scope_search(Keyword.get(opts, :search))
+    |> order_by([u], desc: u.inserted_at, desc: u.id)
+    |> Paginate.paginate(page, page_size)
   end
 
   @doc """
@@ -81,6 +104,18 @@ defmodule Wasomi.Accounts do
 
   defp scope_role(query, nil), do: query
   defp scope_role(query, role), do: where(query, [u], u.role == ^role)
+
+  defp scope_search(query, search) when search in [nil, ""], do: query
+
+  defp scope_search(query, search) do
+    pattern = "%#{search}%"
+
+    where(
+      query,
+      [u],
+      ilike(u.name, ^pattern) or ilike(u.email, ^pattern) or ilike(u.phone, ^pattern)
+    )
+  end
 
   @doc """
   Updates a user's role through the administrative changeset.

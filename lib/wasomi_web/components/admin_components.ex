@@ -5,9 +5,8 @@ defmodule WasomiWeb.AdminComponents do
   `admin_layout/1` renders the persistent sidebar used across the internal
   admin routes (overview, courses, students, payments). The smaller helpers
   (`stat_card/1`, `page_header/1`, `status_badge/1`) keep the individual admin
-  LiveViews consistent with the Wasomi design system. `bar_chart/1` and
-  `column_chart/1` render dependency-free inline SVG charts for the
-  analytics dashboard.
+  LiveViews consistent with the Wasomi design system. `column_chart/1`
+  renders a dependency-free inline SVG chart for the analytics dashboard.
   """
   use Phoenix.Component
 
@@ -24,7 +23,8 @@ defmodule WasomiWeb.AdminComponents do
     %{key: :overview, label: "Overview", icon: "hero-chart-pie", path: "/admin"},
     %{key: :courses, label: "Courses", icon: "hero-academic-cap", path: "/admin/courses"},
     %{key: :students, label: "Students", icon: "hero-users", path: "/admin/students"},
-    %{key: :payments, label: "Payments", icon: "hero-banknotes", path: "/admin/payments"}
+    %{key: :payments, label: "Payments", icon: "hero-banknotes", path: "/admin/payments"},
+    %{key: :analytics, label: "Analytics", icon: "hero-chart-bar", path: "/admin/analytics"}
   ]
 
   @doc """
@@ -33,7 +33,7 @@ defmodule WasomiWeb.AdminComponents do
   ## Attributes
 
     * `:active` - key of the active nav item (`:overview`, `:courses`,
-      `:students`, `:payments`). Defaults to `nil`.
+      `:students`, `:payments`, `:analytics`). Defaults to `nil`.
     * `:current_user` - the signed-in admin, used for the profile footer.
   """
   attr :active, :atom, default: nil
@@ -44,12 +44,12 @@ defmodule WasomiWeb.AdminComponents do
     assigns = assign(assigns, :nav_items, @nav_items)
 
     ~H"""
-    <div class="min-h-screen bg-soft text-dark lg:flex">
+    <div class="min-h-screen bg-neutral-50 text-dark lg:flex">
       <%!-- Mobile top bar --%>
       <div class="flex items-center justify-between border-b border-black/5 bg-white px-5 py-4 lg:hidden">
-        <.link navigate={~p"/admin"} class="flex items-center gap-3 font-bold text-dark">
-          <span class="grid h-9 w-9 place-items-center rounded-[10px] bg-dark text-white">K</span>
-          <span>Wasomi <span class="text-primary">Admin</span></span>
+        <.link navigate={~p"/admin"} class="flex flex-col items-start">
+          <img src={~p"/images/logo.png"} alt="Wasomi" class="h-4 w-auto" />
+          <span class="text-[10px] font-bold tracking-widest text-primary">ADMIN</span>
         </.link>
         <button
           type="button"
@@ -63,15 +63,23 @@ defmodule WasomiWeb.AdminComponents do
       <%!-- Sidebar --%>
       <aside
         id="admin-sidebar"
+        phx-update="ignore"
         class="hidden w-full shrink-0 border-b border-black/5 bg-white lg:flex lg:h-screen lg:w-72 lg:flex-col lg:border-b-0 lg:border-r"
       >
-        <div class="hidden px-6 py-7 lg:block">
-          <.link navigate={~p"/admin"} class="flex items-center gap-3 font-bold text-dark">
-            <span class="grid h-10 w-10 place-items-center rounded-[10px] bg-dark text-white">
-              K
-            </span>
-            <span class="text-lg">Wasomi <span class="text-primary">Admin</span></span>
+        <div class="sidebar-header hidden items-center justify-between px-6 py-7 lg:flex">
+          <.link navigate={~p"/admin"} class="sidebar-label flex flex-col items-start">
+            <img src={~p"/images/logo.png"} alt="Wasomi" class="h-5 w-auto" />
+            <span class="text-xs font-bold tracking-widest text-primary">ADMIN</span>
           </.link>
+          <button
+            type="button"
+            id="sidebar-toggle"
+            phx-hook="SidebarToggle"
+            class="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-black/10 text-dark transition hover:border-primary hover:text-primary"
+            title="Collapse sidebar"
+          >
+            <.icon name="hero-chevron-double-left" class="sidebar-toggle-icon h-4 w-4" />
+          </button>
         </div>
 
         <nav class="flex-1 space-y-1 px-4 py-4 lg:py-2">
@@ -81,27 +89,32 @@ defmodule WasomiWeb.AdminComponents do
         <div class="border-t border-black/5 p-4">
           <.link
             navigate={~p"/dashboard"}
-            class="mb-2 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-body transition hover:bg-soft hover:text-primary"
+            class="sidebar-row group relative mb-2 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-body transition hover:bg-neutral-50 hover:text-primary"
           >
-            <.icon name="hero-arrow-uturn-left" class="h-5 w-5" /> Back to learner area
+            <.icon name="hero-arrow-uturn-left" class="h-5 w-5 shrink-0" />
+            <span class="sidebar-label inline-block">Back to learner area</span>
+            <.sidebar_tooltip label="Back to learner area" />
           </.link>
-          <div class="flex items-center gap-3 rounded-2xl bg-soft px-3 py-3">
+          <div class="sidebar-row group relative flex items-center gap-3 rounded-2xl bg-neutral-50 px-3 py-3">
             <span class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-mint font-semibold uppercase text-primary">
               {String.first(@current_user.name || @current_user.email)}
             </span>
-            <div class="min-w-0">
+            <div class="sidebar-label min-w-0">
               <p class="truncate text-sm font-semibold text-dark">
                 {@current_user.name || "Administrator"}
               </p>
               <p class="truncate text-xs text-muted">{@current_user.email}</p>
             </div>
+            <.sidebar_tooltip label={@current_user.name || @current_user.email} />
           </div>
           <.link
             href={~p"/users/log_out"}
             method="delete"
-            class="mt-3 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-body transition hover:bg-soft hover:text-primary"
+            class="sidebar-row group relative mt-3 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-body transition hover:bg-neutral-50 hover:text-primary"
           >
-            <.icon name="hero-arrow-left-on-rectangle" class="h-5 w-5" /> Log out
+            <.icon name="hero-arrow-left-on-rectangle" class="h-5 w-5 shrink-0" />
+            <span class="sidebar-label inline-block">Log out</span>
+            <.sidebar_tooltip label="Log out" />
           </.link>
         </div>
       </aside>
@@ -149,7 +162,7 @@ defmodule WasomiWeb.AdminComponents do
     ~H"""
     <div class="rounded-3xl border border-black/5 bg-white p-6">
       <div class="flex items-center justify-between">
-        <p class="text-sm font-medium text-muted">{@label}</p>
+        <p class="text-sm font-medium text-body">{@label}</p>
         <span class="grid h-10 w-10 place-items-center rounded-2xl bg-mint text-primary">
           <.icon name={@icon} class="h-5 w-5" />
         </span>
@@ -222,7 +235,7 @@ defmodule WasomiWeb.AdminComponents do
           "flex items-start gap-3 rounded-xl border p-3 opacity-0 animate-checklist-in",
           stage.status == :passed && "border-emerald-200 bg-emerald-50",
           stage.status == :failed && "border-amber-200 bg-amber-50",
-          stage.status == :not_applicable && "border-black/10 bg-soft"
+          stage.status == :not_applicable && "border-black/10 bg-neutral-50"
         ]}
       >
         <span class={[
@@ -267,104 +280,15 @@ defmodule WasomiWeb.AdminComponents do
   end
 
   @doc """
-  Horizontal bar chart on a fixed `:max` scale (0-100 by default) — used
-  for percentages like completion rate, quiz score, or drop-off.
+  Vertical column chart scaled to the data's own maximum — used for
+  monthly revenue, where there's no fixed upper bound like a percentage.
 
   `:data` is a list of `%{label:, value:, value_label:}` maps. `:value`
-  drives the bar length; `:value_label` is the pre-formatted string shown
+  drives the bar height; `:value_label` is the pre-formatted string shown
   next to it, so this component stays free of formatting logic. An
   optional `:tooltip` string shows on hover instead of `:value_label` —
   use it when the inline label is abbreviated and hovering should reveal
   the precise figure.
-  """
-  attr :title, :string, required: true
-  attr :data, :list, required: true
-  attr :max, :integer, default: 100
-  attr :empty_message, :string, default: "No data yet."
-
-  def bar_chart(assigns) do
-    row_height = 36
-    track_width = 300
-    top_padding = 22
-
-    bars =
-      assigns.data
-      |> Enum.with_index()
-      |> Enum.map(fn {item, index} ->
-        ratio = if assigns.max > 0, do: item.value / assigns.max, else: 0
-        bar_width = min(max(ratio, 0), 1) * track_width
-        tooltip = Map.get(item, :tooltip, item.value_label)
-        tooltip_width = estimate_tooltip_width(tooltip)
-
-        %{
-          label: item.label,
-          value_label: item.value_label,
-          tooltip: tooltip,
-          y: top_padding + index * row_height,
-          bar_width: bar_width,
-          tooltip_x: clamp(bar_width / 2 - tooltip_width / 2, 0, track_width - tooltip_width),
-          tooltip_width: tooltip_width
-        }
-      end)
-
-    assigns =
-      assigns
-      |> assign(:bars, bars)
-      |> assign(:track_width, track_width)
-      |> assign(:svg_height, top_padding + length(bars) * row_height)
-
-    ~H"""
-    <div>
-      <p class="text-sm font-medium text-muted">{@title}</p>
-      <svg
-        :if={@data != []}
-        viewBox={"0 0 #{@track_width} #{@svg_height}"}
-        class="mt-3 w-full"
-        role="img"
-        aria-label={@title}
-      >
-        <g :for={bar <- @bars} transform={"translate(0, #{bar.y})"} class="group">
-          <rect x="0" y="0" width={@track_width} height="30" fill="transparent" />
-          <text x="0" y="12" class="fill-body text-[11px]">{bar.label}</text>
-          <text x={@track_width} y="12" text-anchor="end" class="fill-dark text-[11px] font-semibold">
-            {bar.value_label}
-          </text>
-          <rect x="0" y="18" width={@track_width} height="8" rx="4" class="fill-black/5" />
-          <rect x="0" y="18" width={bar.bar_width} height="8" rx="4" class="fill-primary" />
-
-          <g class="pointer-events-none opacity-0 transition-opacity duration-150 group-hover:opacity-100">
-            <rect
-              x={bar.tooltip_x}
-              y="-20"
-              width={bar.tooltip_width}
-              height="16"
-              rx="4"
-              class="fill-dark"
-            />
-            <text
-              x={bar.tooltip_x + bar.tooltip_width / 2}
-              y="-8"
-              text-anchor="middle"
-              class="fill-white text-[10px] font-semibold"
-            >
-              {bar.tooltip}
-            </text>
-          </g>
-        </g>
-      </svg>
-      <p :if={@data == []} class="mt-3 rounded-2xl bg-soft p-6 text-center text-sm text-muted">
-        {@empty_message}
-      </p>
-    </div>
-    """
-  end
-
-  @doc """
-  Vertical column chart scaled to the data's own maximum — used for
-  monthly revenue, where there's no fixed upper bound like a percentage.
-
-  Same `%{label:, value:, value_label:}` shape as `bar_chart/1`, plus the
-  same optional `:tooltip` override shown on hover.
   """
   attr :title, :string, required: true
   attr :data, :list, required: true
@@ -477,7 +401,7 @@ defmodule WasomiWeb.AdminComponents do
           </g>
         </g>
       </svg>
-      <p :if={@data == []} class="mt-3 rounded-2xl bg-soft p-6 text-center text-sm text-muted">
+      <p :if={@data == []} class="mt-3 rounded-2xl bg-neutral-50 p-6 text-center text-sm text-muted">
         {@empty_message}
       </p>
     </div>
@@ -495,7 +419,7 @@ defmodule WasomiWeb.AdminComponents do
     do: "bg-amber-50 text-amber-700"
 
   defp status_classes(:failed), do: "bg-red-50 text-red-600"
-  defp status_classes(_status), do: "bg-soft text-body"
+  defp status_classes(_status), do: "bg-neutral-50 text-body"
 
   attr :item, :map, required: true
   attr :active, :atom, required: true
@@ -505,16 +429,31 @@ defmodule WasomiWeb.AdminComponents do
     <.link
       navigate={@item.path}
       class={[
-        "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition",
+        "sidebar-row group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition",
         if(@item.key == @active,
           do: "bg-mint text-primary",
-          else: "text-body hover:bg-soft hover:text-primary"
+          else: "text-body hover:bg-neutral-50 hover:text-primary"
         )
       ]}
     >
-      <.icon name={@item.icon} class="h-5 w-5" />
-      {@item.label}
+      <.icon name={@item.icon} class="h-5 w-5 shrink-0" />
+      <span class="sidebar-label inline-block">{@item.label}</span>
+      <.sidebar_tooltip label={@item.label} />
     </.link>
+    """
+  end
+
+  # Shown only while the sidebar is collapsed (see `.sidebar-tooltip` in
+  # app.css) — a plain `title` attribute works too, but browsers impose a
+  # multi-hundred-ms hover delay on those that can't be shortened from CSS,
+  # so icon-only mode gets its own instant, always-fast tooltip instead.
+  attr :label, :string, required: true
+
+  defp sidebar_tooltip(assigns) do
+    ~H"""
+    <span class="sidebar-tooltip pointer-events-none absolute left-full top-1/2 z-50 ml-3 -translate-y-1/2 whitespace-nowrap rounded-lg bg-dark px-2.5 py-1.5 text-xs font-medium text-white shadow-lg">
+      {@label}
+    </span>
     """
   end
 end

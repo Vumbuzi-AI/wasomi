@@ -703,6 +703,169 @@ defmodule WasomiWeb.CoreComponents do
   end
 
   @doc """
+  Hover tooltip for icon-only controls, styled to match the collapsed
+  sidebar's tooltip. Give the trigger element `class="group relative"` so
+  `group-hover:opacity-100` below picks it up — unlike the sidebar's version,
+  this one isn't gated on any sidebar-collapsed state, so it works anywhere.
+
+  ## Examples
+
+      <.link href={...} class="group relative ..." aria-label="Export all payments as CSV">
+        <.icon name="hero-document-arrow-down" class="h-5 w-5" />
+        <.tooltip label="Export all payments as CSV" />
+      </.link>
+  """
+  attr :label, :string, required: true
+
+  def tooltip(assigns) do
+    ~H"""
+    <span class="pointer-events-none absolute left-1/2 top-full z-50 mt-2 -translate-x-1/2 whitespace-nowrap rounded-lg bg-dark px-2.5 py-1.5 text-xs font-medium text-white opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100">
+      {@label}
+    </span>
+    """
+  end
+
+  @doc """
+  Debounced search box for admin list views.
+
+  Wraps its own `<form phx-change>` — the parent LiveView only needs a
+  `handle_event(@event, %{@name => query}, socket)` clause. Emits changes
+  after `@debounce` ms of inactivity so filtering doesn't run on every
+  keystroke.
+
+  ## Examples
+
+      <.search_input value={@search} placeholder="Search course or slug" />
+  """
+  attr :value, :string, default: ""
+  attr :name, :string, default: "q"
+  attr :event, :string, default: "search"
+  attr :placeholder, :string, default: "Search"
+  attr :debounce, :integer, default: 300
+
+  def search_input(assigns) do
+    ~H"""
+    <form phx-change={@event} class="relative">
+      <.icon
+        name="hero-magnifying-glass"
+        class="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted"
+      />
+      <input
+        type="search"
+        name={@name}
+        value={@value}
+        placeholder={@placeholder}
+        phx-debounce={@debounce}
+        class="h-11 w-64 rounded-full border border-black/10 bg-white pl-10 pr-4 text-sm text-dark placeholder:text-muted focus:border-primary focus:outline-none"
+      />
+    </form>
+    """
+  end
+
+  @doc """
+  Wraps admin list content with page-number navigation.
+
+  Renders whatever's in the default slot as-is (each admin table has its
+  own bespoke column layout, so this doesn't impose a shared table markup),
+  followed by Previous/Next controls built from `@path_fn` — a
+  `fun(page_number) -> path` the caller already has from its own filter/search
+  query-param building. Hidden entirely when there's only one page. Previous
+  is hidden (not just disabled) on page 1, and Next on the last page.
+
+  ## Examples
+
+      <.paginated_table page={@page.page} total_pages={@page.total_pages} path_fn={&courses_path(&1, @search)}>
+        <div class="grid gap-7 sm:grid-cols-2 xl:grid-cols-3">
+          <.course_card :for={course <- @page.entries} course={course} />
+        </div>
+      </.paginated_table>
+  """
+  attr :page, :integer, required: true
+  attr :total_pages, :integer, required: true
+  attr :path_fn, :any, required: true
+  slot :inner_block, required: true
+
+  def paginated_table(assigns) do
+    ~H"""
+    <div>
+      {render_slot(@inner_block)}
+      <nav
+        :if={@total_pages > 1}
+        class="mt-6 grid grid-cols-3 items-center border-t border-black/5 pt-4"
+      >
+        <div class="justify-self-start">
+          <.link
+            :if={@page > 1}
+            patch={@path_fn.(@page - 1)}
+            class="inline-flex items-center gap-1 rounded-full border border-black/10 px-4 py-2 text-sm font-medium text-dark transition hover:border-primary hover:text-primary"
+          >
+            <.icon name="hero-chevron-left-mini" class="h-4 w-4" /> Previous
+          </.link>
+        </div>
+        <span class="justify-self-center text-sm text-muted">Page {@page} of {@total_pages}</span>
+        <div class="justify-self-end">
+          <.link
+            :if={@page < @total_pages}
+            patch={@path_fn.(@page + 1)}
+            class="inline-flex items-center gap-1 rounded-full border border-black/10 px-4 py-2 text-sm font-medium text-dark transition hover:border-primary hover:text-primary"
+          >
+            Next <.icon name="hero-chevron-right-mini" class="h-4 w-4" />
+          </.link>
+        </div>
+      </nav>
+    </div>
+    """
+  end
+
+  @doc """
+  A `<th>` that toggles server-side sort on click, with a chevron showing
+  the current direction on whichever column is active.
+
+  Column headers stay plain `<th>` text for columns the caller doesn't
+  pass through this — sorting is opt-in per column, not all-or-nothing.
+
+  ## Examples
+
+      <.sortable_th
+        label="Amount"
+        field={:amount}
+        current_sort_by={@sort_by}
+        current_sort_dir={@sort_dir}
+        path_fn={&payments_path(:payments, sort_by: &1, sort_dir: &2)}
+      />
+  """
+  attr :label, :string, required: true
+  attr :field, :atom, required: true
+  attr :current_sort_by, :atom, required: true
+  attr :current_sort_dir, :atom, required: true
+  attr :path_fn, :any, required: true, doc: "fun(field, next_dir) -> path"
+
+  def sortable_th(assigns) do
+    active? = assigns.field == assigns.current_sort_by
+    next_dir = if active? and assigns.current_sort_dir == :asc, do: :desc, else: :asc
+
+    assigns = assign(assigns, active?: active?, next_dir: next_dir)
+
+    ~H"""
+    <th class="px-4 py-3 font-semibold">
+      <.link
+        patch={@path_fn.(@field, @next_dir)}
+        class={["inline-flex items-center gap-1 hover:text-dark", @active? && "text-dark"]}
+      >
+        {@label}
+        <.icon
+          :if={@active?}
+          name={
+            if @current_sort_dir == :asc, do: "hero-chevron-up-mini", else: "hero-chevron-down-mini"
+          }
+          class="h-3 w-3"
+        />
+      </.link>
+    </th>
+    """
+  end
+
+  @doc """
   Renders a data list.
 
   ## Examples

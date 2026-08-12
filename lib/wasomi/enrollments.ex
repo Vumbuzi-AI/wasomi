@@ -62,6 +62,21 @@ defmodule Wasomi.Enrollments do
   end
 
   @doc """
+  Counts enrollments of any status (`:pending` or `:active`) keyed by
+  `course_id` — everyone who ever started checkout for a course, not just
+  those who completed payment. Used for the admin revenue report's
+  "Enrolled" column, alongside `Payments.count_successful_by_course/0`'s
+  "Paid" column.
+  """
+  def count_by_course do
+    Enrollment
+    |> group_by([e], e.course_id)
+    |> select([e], {e.course_id, count(e.id)})
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  @doc """
   Counts active enrollments keyed by `user_id`.
   """
   def count_active_by_user do

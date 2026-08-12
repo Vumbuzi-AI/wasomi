@@ -9,6 +9,7 @@ defmodule Wasomi.Payments do
   alias Wasomi.Accounts.User
   alias Wasomi.Catalog.Course
   alias Wasomi.Enrollments
+  alias Wasomi.Paginate
   alias Wasomi.Payments.Payment
   alias Wasomi.Repo
 
@@ -75,6 +76,32 @@ defmodule Wasomi.Payments do
   end
 
   @doc """
+  Counts successful payments keyed by `course_id` — the "Paid" side of the
+  admin revenue report's "Enrolled" vs "Paid" columns (see
+  `Enrollments.count_by_course/0` for the "Enrolled" side).
+  """
+  def count_successful_by_course do
+    Payment
+    |> where([p], p.status == :successful)
+    |> group_by([p], p.course_id)
+    |> select([p], {p.course_id, count(p.id)})
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  @doc """
+  The most recent successful payment's `paid_at`, keyed by `course_id`.
+  """
+  def last_paid_at_by_course do
+    Payment
+    |> where([p], p.status == :successful)
+    |> group_by([p], p.course_id)
+    |> select([p], {p.course_id, max(p.paid_at)})
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  @doc """
   Successful revenue, in minor units, keyed by `user_id`.
   """
   def revenue_minor_by_user do
@@ -107,6 +134,81 @@ defmodule Wasomi.Payments do
     |> preload([:user, :course])
     |> Repo.all()
   end
+
+  @sortable_payment_fields ~w(date reference learner course amount status)a
+
+  @doc """
+  Returns a `Wasomi.Paginate.Page` of payments, with the learner and
+  course preloaded.
+
+  ## Options
+
+    * `:status` - only payments in this status (`:pending`, `:successful`, `:failed`).
+    * `:search` - case-insensitive match against learner name/email, course
+      title, or provider reference.
+    * `:sort_by` - one of #{inspect(@sortable_payment_fields)} (default `:date`,
+      which sorts by `inserted_at` — the same field the "Date" column
+      displays, not `paid_at`, which is `nil` for pending/failed payments
+      and would misorder most of the table).
+    * `:sort_dir` - `:asc` or `:desc` (default `:desc`).
+    * `:page` / `:page_size`
+
+  """
+  def list_payments_page(opts \\ []) do
+    page = Keyword.get(opts, :page, 1)
+    page_size = Keyword.get(opts, :page_size, 10)
+    sort_by = Keyword.get(opts, :sort_by, :date)
+    sort_dir = Keyword.get(opts, :sort_dir, :desc)
+
+    page_result =
+      Payment
+      |> join(:left, [p], u in assoc(p, :user))
+      |> join(:left, [p, u], c in assoc(p, :course))
+      |> filter_payment_status(Keyword.get(opts, :status))
+      |> filter_payment_search(Keyword.get(opts, :search))
+      |> sort_payments(sort_by, sort_dir)
+      |> Paginate.paginate(page, page_size)
+
+    %{page_result | entries: Repo.preload(page_result.entries, [:user, :course])}
+  end
+
+  defp filter_payment_status(query, nil), do: query
+  defp filter_payment_status(query, status), do: where(query, [p], p.status == ^status)
+
+  defp filter_payment_search(query, search) when search in [nil, ""], do: query
+
+  defp filter_payment_search(query, search) do
+    pattern = "%#{search}%"
+
+    where(
+      query,
+      [p, u, c],
+      ilike(u.name, ^pattern) or ilike(u.email, ^pattern) or ilike(c.title, ^pattern) or
+        ilike(p.provider_reference, ^pattern)
+    )
+  end
+
+  # `p.id` is the tiebreaker for every column, in the *same* direction as
+  # the primary sort — not always ascending. Same-second inserts otherwise
+  # tie on `inserted_at`, and an always-ascending tiebreak would silently
+  # put the newest of those ties last when sorting "newest first" (desc).
+  defp sort_payments(query, :reference, dir),
+    do: order_by(query, [p], [{^dir, p.provider_reference}, {^dir, p.id}])
+
+  defp sort_payments(query, :learner, dir),
+    do: order_by(query, [p, u], [{^dir, u.name}, {^dir, p.id}])
+
+  defp sort_payments(query, :course, dir),
+    do: order_by(query, [p, u, c], [{^dir, c.title}, {^dir, p.id}])
+
+  defp sort_payments(query, :amount, dir),
+    do: order_by(query, [p], [{^dir, p.amount_minor}, {^dir, p.id}])
+
+  defp sort_payments(query, :status, dir),
+    do: order_by(query, [p], [{^dir, p.status}, {^dir, p.id}])
+
+  defp sort_payments(query, _date_or_unknown, dir),
+    do: order_by(query, [p], [{^dir, p.inserted_at}, {^dir, p.id}])
 
   @doc """
   Lists every payment made against a course, learner preloaded, newest first.

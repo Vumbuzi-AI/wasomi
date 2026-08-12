@@ -5,6 +5,7 @@ defmodule Wasomi.EnrollmentsTest do
   import Swoosh.TestAssertions
   import Wasomi.AccountsFixtures
   import Wasomi.CatalogFixtures
+  import Wasomi.EnrollmentsFixtures
 
   alias Wasomi.Enrollments
 
@@ -232,6 +233,21 @@ defmodule Wasomi.EnrollmentsTest do
                })
 
       refute Enrollments.can_access_course?(learner, course)
+    end
+  end
+
+  describe "count_by_course/0" do
+    test "counts enrollments of any status, keyed by course" do
+      course = course_fixture()
+      enrollment_fixture(course_id: course.id, status: :pending)
+      enrollment_fixture(course_id: course.id, status: :active)
+      other_course = course_fixture()
+      enrollment_fixture(course_id: other_course.id, status: :active)
+
+      counts = Enrollments.count_by_course()
+
+      assert counts[course.id] == 2
+      assert counts[other_course.id] == 1
     end
   end
 end

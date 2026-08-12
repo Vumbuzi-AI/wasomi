@@ -15,21 +15,69 @@ defmodule Wasomi.Catalog do
     PublishGuard
   }
 
+  alias Wasomi.Paginate
+
   @doc """
-  Returns all courses, newest first. `position` is just an auto-incrementing
-  creation counter (courses have no manual reordering UI, unlike modules
-  and lectures), so sorting by it buried new courses at the bottom.
+  Returns the list of courses, newest first, optionally filtered.
+
+  `position` is just an auto-incrementing creation counter (courses have no
+  manual reordering UI, unlike modules and lectures), so sorting by it
+  buried new courses at the bottom — sort by `inserted_at` instead.
+
+  ## Options
+
+    * `:status` - only courses in this status (`:draft`, `:published`, `:archived`).
+    * `:search` - case-insensitive match against title or slug.
 
   ## Examples
 
       iex> list_courses()
       [%Course{}, ...]
 
+      iex> list_courses(status: :published, search: "gs1")
+      [%Course{}, ...]
+
   """
-  def list_courses do
+  def list_courses(opts \\ []) do
+    opts
+    |> filtered_courses_query()
+    |> Repo.all()
+  end
+
+  @doc """
+  Returns a `Wasomi.Paginate.Page` of courses, same filtering as
+  `list_courses/1` plus `:page`/`:page_size`.
+
+  ## Examples
+
+      iex> list_courses_page(status: :published, page: 2, page_size: 9)
+      %Wasomi.Paginate{entries: [%Course{}, ...], page: 2, ...}
+
+  """
+  def list_courses_page(opts \\ []) do
+    page = Keyword.get(opts, :page, 1)
+    page_size = Keyword.get(opts, :page_size, 9)
+
+    opts
+    |> filtered_courses_query()
+    |> Paginate.paginate(page, page_size)
+  end
+
+  defp filtered_courses_query(opts) do
     Course
     |> order_by([course], desc: course.inserted_at, desc: course.id)
-    |> Repo.all()
+    |> filter_by_status(Keyword.get(opts, :status))
+    |> filter_by_search(Keyword.get(opts, :search))
+  end
+
+  defp filter_by_status(query, nil), do: query
+  defp filter_by_status(query, status), do: where(query, [course], course.status == ^status)
+
+  defp filter_by_search(query, search) when search in [nil, ""], do: query
+
+  defp filter_by_search(query, search) do
+    pattern = "%#{search}%"
+    where(query, [course], ilike(course.title, ^pattern) or ilike(course.slug, ^pattern))
   end
 
   @doc """
@@ -44,6 +92,25 @@ defmodule Wasomi.Catalog do
     Course
     |> where([course], course.status == ^status)
     |> Repo.aggregate(:count)
+  end
+
+  @doc """
+  Aggregate course counts (total, published, draft) for the admin courses
+  stat cards, computed in a single grouped query.
+  """
+  def course_stats do
+    by_status =
+      Course
+      |> group_by([course], course.status)
+      |> select([course], {course.status, count(course.id)})
+      |> Repo.all()
+      |> Map.new()
+
+    %{
+      total: Enum.reduce(by_status, 0, fn {_status, count}, acc -> acc + count end),
+      published: Map.get(by_status, :published, 0),
+      draft: Map.get(by_status, :draft, 0)
+    }
   end
 
   @doc """

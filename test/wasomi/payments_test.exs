@@ -5,6 +5,7 @@ defmodule Wasomi.PaymentsTest do
   import Mox
   import Wasomi.AccountsFixtures
   import Wasomi.CatalogFixtures
+  import Wasomi.PaymentsFixtures
 
   alias Wasomi.{Enrollments, Payments, Repo}
   alias Wasomi.Payments.Workers.{ProcessPaystackWebhook, ReconcilePendingPayments}
@@ -329,6 +330,149 @@ defmodule Wasomi.PaymentsTest do
 
       assert {:ok, %{verification: verification}} = Payments.verify_transaction(payment.id, admin)
       assert verification["gateway_response"] == "Confirmed elsewhere"
+    end
+  end
+
+  describe "list_payments_page/1" do
+    test "paginates, newest first, with learner and course preloaded" do
+      Enum.each(1..3, fn _ -> payment_fixture() end)
+
+      page = Payments.list_payments_page(page: 1, page_size: 2)
+
+      assert page.total_count == 3
+      assert page.total_pages == 2
+      assert length(page.entries) == 2
+      assert %Wasomi.Accounts.User{} = hd(page.entries).user
+      assert %Wasomi.Catalog.Course{} = hd(page.entries).course
+    end
+
+    test "filters by status" do
+      pending = payment_fixture(status: :pending)
+      payment_fixture(status: :successful)
+
+      page = Payments.list_payments_page(status: :pending)
+
+      assert [%{id: id}] = page.entries
+      assert id == pending.id
+    end
+
+    test "searches by learner name, email, course title, or provider reference" do
+      user = user_fixture(name: "Amina Otieno")
+      course = course_fixture(title: "Applied Negotiation")
+      match = payment_fixture(user_id: user.id, course_id: course.id)
+      other = payment_fixture()
+
+      by_name = Payments.list_payments_page(search: "Amina")
+      by_course = Payments.list_payments_page(search: "Negotiation")
+      by_reference = Payments.list_payments_page(search: match.provider_reference)
+
+      for page <- [by_name, by_course, by_reference] do
+        assert [%{id: id}] = page.entries
+        assert id == match.id
+      end
+
+      refute Enum.any?(by_name.entries, &(&1.id == other.id))
+    end
+
+    test "sorts by amount" do
+      small = payment_fixture(amount_minor: 1_000)
+      big = payment_fixture(amount_minor: 9_000)
+
+      assert [%{id: first}, %{id: second}] =
+               Payments.list_payments_page(sort_by: :amount, sort_dir: :asc).entries
+
+      assert first == small.id
+      assert second == big.id
+
+      assert [%{id: first_desc}, %{id: second_desc}] =
+               Payments.list_payments_page(sort_by: :amount, sort_dir: :desc).entries
+
+      assert first_desc == big.id
+      assert second_desc == small.id
+    end
+
+    test "sorts by learner name" do
+      a = payment_fixture(user_id: user_fixture(name: "Amina").id)
+      b = payment_fixture(user_id: user_fixture(name: "Brian").id)
+
+      assert [%{id: first}, %{id: second}] =
+               Payments.list_payments_page(sort_by: :learner, sort_dir: :asc).entries
+
+      assert first == a.id
+      assert second == b.id
+    end
+
+    test "sorts by course title" do
+      a = payment_fixture(course_id: course_fixture(title: "Applied Negotiation").id)
+      b = payment_fixture(course_id: course_fixture(title: "Basic Excel").id)
+
+      assert [%{id: first}, %{id: second}] =
+               Payments.list_payments_page(sort_by: :course, sort_dir: :asc).entries
+
+      assert first == a.id
+      assert second == b.id
+    end
+
+    test "sorts by provider reference" do
+      a = payment_fixture(provider_reference: "AAA-001")
+      b = payment_fixture(provider_reference: "ZZZ-999")
+
+      assert [%{id: first}, %{id: second}] =
+               Payments.list_payments_page(sort_by: :reference, sort_dir: :asc).entries
+
+      assert first == a.id
+      assert second == b.id
+    end
+
+    test "sorts by status (alphabetically, since it's stored as a string)" do
+      failed = payment_fixture(status: :failed)
+      successful = payment_fixture(status: :successful)
+      pending = payment_fixture(status: :pending)
+
+      assert Payments.list_payments_page(sort_by: :status, sort_dir: :asc).entries
+             |> Enum.map(& &1.id) == [failed.id, pending.id, successful.id]
+    end
+
+    test "defaults to date (inserted_at) descending, unaffected by unknown sort_by" do
+      first = payment_fixture()
+      second = payment_fixture()
+
+      assert [%{id: newest}, %{id: oldest}] =
+               Payments.list_payments_page(sort_by: :bogus).entries
+
+      assert newest == second.id
+      assert oldest == first.id
+    end
+  end
+
+  describe "count_successful_by_course/0" do
+    test "counts only successful payments, keyed by course" do
+      course = course_fixture()
+      payment_fixture(course_id: course.id, status: :successful)
+      payment_fixture(course_id: course.id, status: :successful)
+      payment_fixture(course_id: course.id, status: :pending)
+
+      assert Payments.count_successful_by_course() == %{course.id => 2}
+    end
+  end
+
+  describe "last_paid_at_by_course/0" do
+    test "returns the most recent successful payment's paid_at, keyed by course" do
+      course = course_fixture()
+
+      payment_fixture(
+        course_id: course.id,
+        status: :successful,
+        paid_at: ~U[2026-05-01 10:00:00Z]
+      )
+
+      payment_fixture(
+        course_id: course.id,
+        status: :successful,
+        paid_at: ~U[2026-06-15 10:00:00Z]
+      )
+
+      assert Payments.last_paid_at_by_course() == %{course.id => ~U[2026-06-15 10:00:00Z]}
     end
   end
 

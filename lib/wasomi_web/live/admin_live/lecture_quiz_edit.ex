@@ -15,14 +15,16 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
       Catalog.subscribe_to_lecture_transcript(lecture.id)
     end
 
+    transcript = Catalog.get_lecture_transcript(lecture.id)
+
     {:ok,
      socket
      |> assign(:page_title, "Lecture quiz")
      |> assign(:course_slug, course_slug)
      |> assign(:lecture, lecture)
      |> assign(:document_resources, Enum.filter(lecture.resources, &(&1.kind == :document)))
-     |> assign(:transcript, Catalog.get_lecture_transcript(lecture.id))
-     |> assign(:default_resources, default_resources(lecture))
+     |> assign(:transcript, transcript)
+     |> assign(:default_resources, default_resources(lecture, transcript))
      |> assign(:deleting_question_id, nil)
      |> assign(:confirming_publish_all?, false)
      |> assign(:confirming_delete_all?, false)
@@ -35,7 +37,10 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
   end
 
   def handle_info({:lecture_transcript_updated, transcript}, socket) do
-    {:noreply, assign(socket, :transcript, transcript)}
+    {:noreply,
+     socket
+     |> assign(:transcript, transcript)
+     |> assign(:default_resources, default_resources(socket.assigns.lecture, transcript))}
   end
 
   @impl true
@@ -54,23 +59,22 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
     lecture = socket.assigns.lecture
     resource_keys = params |> Map.get("resources", []) |> List.wrap()
 
-    attrs = %{
-      difficulty: Map.get(params, "difficulty", "mixed"),
-      question_count_requested: parse_count(Map.get(params, "question_count")),
-      resource_selection: resource_keys,
-      source_label: source_label(resource_keys, socket.assigns)
-    }
+    if "video" in resource_keys and !transcript_ready?(socket.assigns.transcript) do
+      {:noreply,
+       put_flash(
+         socket,
+         :error,
+         "The primary video's transcript isn't ready yet — generate it first."
+       )}
+    else
+      attrs = %{
+        difficulty: Map.get(params, "difficulty", "mixed"),
+        question_count_requested: parse_count(Map.get(params, "question_count")),
+        resource_selection: resource_keys,
+        source_label: source_label(resource_keys, socket.assigns)
+      }
 
-    case Assessments.start_lecture_quiz_generation(lecture, socket.assigns.current_user, attrs) do
-      {:ok, _generation} ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "Generating draft questions in the background…")
-         |> reload()}
-
-      {:error, %Ecto.Changeset{} = changeset} ->
-        {:noreply,
-         put_flash(socket, :error, "Could not start generation: #{generation_error(changeset)}")}
+      do_generate(lecture, attrs, socket)
     end
   end
 
@@ -150,13 +154,18 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
                 :if={@lecture.video_asset_id}
                 class="flex items-center justify-between gap-3 rounded-xl border border-black/5 px-4 py-2.5"
               >
-                <label class="flex items-center gap-2 text-sm text-dark">
+                <label class={[
+                  "flex items-center gap-2 text-sm",
+                  transcript_ready?(@transcript) && "text-dark",
+                  !transcript_ready?(@transcript) && "text-muted"
+                ]}>
                   <input
                     type="checkbox"
                     name="resources[]"
                     value="video"
                     checked={"video" in @default_resources}
-                    class="rounded border-black/20 text-primary focus:ring-primary"
+                    disabled={!transcript_ready?(@transcript)}
+                    class="rounded border-black/20 text-primary focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
                   /> Primary video
                   <span class="text-xs text-muted">
                     (uses the transcript, not the raw video — {transcript_status_label(@transcript)})
@@ -444,10 +453,26 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
     assign_lecture_quiz(socket, lecture_quiz)
   end
 
-  defp default_resources(%{video_asset_id: asset_id}) when is_binary(asset_id) and asset_id != "",
-    do: ["video"]
+  defp do_generate(lecture, attrs, socket) do
+    case Assessments.start_lecture_quiz_generation(lecture, socket.assigns.current_user, attrs) do
+      {:ok, _generation} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Generating draft questions in the background…")
+         |> reload()}
 
-  defp default_resources(_lecture), do: []
+      {:error, %Ecto.Changeset{} = changeset} ->
+        {:noreply,
+         put_flash(socket, :error, "Could not start generation: #{generation_error(changeset)}")}
+    end
+  end
+
+  defp default_resources(%{video_asset_id: asset_id}, transcript)
+       when is_binary(asset_id) and asset_id != "" do
+    if transcript_ready?(transcript), do: ["video"], else: []
+  end
+
+  defp default_resources(_lecture, _transcript), do: []
 
   defp draft_questions(lecture_quiz),
     do: Enum.filter(lecture_quiz.questions, &(&1.status == :draft))
@@ -470,6 +495,9 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
 
   defp transcript_needs_generation?(nil), do: true
   defp transcript_needs_generation?(%{status: status}), do: status == :failed
+
+  defp transcript_ready?(%{status: :ready}), do: true
+  defp transcript_ready?(_transcript), do: false
 
   defp source_label(resource_keys, assigns) do
     labels =

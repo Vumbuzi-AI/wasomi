@@ -27,8 +27,9 @@ defmodule WasomiWeb.AdminLive.LectureQuizEditTest do
     %{conn: log_in_user(conn, admin_fixture())}
   end
 
-  test "shows the primary video pre-selected and document resources listed", %{conn: conn} do
+  test "shows the primary video pre-selected once its transcript is ready", %{conn: conn} do
     lecture = lecture_fixture(video_asset_id: "playback-1")
+    Catalog.upsert_lecture_transcript(lecture.id, %{status: :ready, text: "Some text."})
     lecture_resource_fixture(lecture_id: lecture.id, kind: :document, name: "Slides")
 
     {:ok, view, html} = live(conn, edit_path(lecture))
@@ -36,9 +37,18 @@ defmodule WasomiWeb.AdminLive.LectureQuizEditTest do
     assert html =~ "Primary video"
     assert html =~ "Slides"
 
-    assert view
-           |> element(~s(input[name="resources[]"][value="video"]))
-           |> render() =~ "checked"
+    checkbox = view |> element(~s(input[name="resources[]"][value="video"])) |> render()
+    assert checkbox =~ ~s(checked="checked")
+    refute checkbox =~ ~s(disabled="disabled")
+  end
+
+  test "disables the primary video checkbox until its transcript is ready", %{conn: conn} do
+    lecture = lecture_fixture(video_asset_id: "playback-1")
+    {:ok, view, _html} = live(conn, edit_path(lecture))
+
+    checkbox = view |> element(~s(input[name="resources[]"][value="video"])) |> render()
+    assert checkbox =~ ~s(disabled="disabled")
+    refute checkbox =~ ~s(checked="checked")
   end
 
   test "generating with no resources selected shows a friendly error", %{conn: conn} do
@@ -57,9 +67,28 @@ defmodule WasomiWeb.AdminLive.LectureQuizEditTest do
     refute_enqueued(worker: GenerateLectureQuizWorker)
   end
 
+  test "generating with a selected video that has no transcript yet shows a friendly error", %{
+    conn: conn
+  } do
+    lecture = lecture_fixture(video_asset_id: "playback-1")
+    {:ok, view, _html} = live(conn, edit_path(lecture))
+
+    html =
+      view
+      |> render_submit("generate", %{
+        "resources" => ["video"],
+        "difficulty" => "mixed",
+        "question_count" => "10"
+      })
+
+    assert html =~ "transcript isn&#39;t ready yet"
+    refute_enqueued(worker: GenerateLectureQuizWorker)
+  end
+
   test "generating with the video selected creates the quiz, enqueues the worker, and shows progress",
        %{conn: conn} do
     lecture = lecture_fixture(video_asset_id: "playback-1")
+    Catalog.upsert_lecture_transcript(lecture.id, %{status: :ready, text: "Some text."})
     {:ok, view, _html} = live(conn, edit_path(lecture))
 
     html =
@@ -79,6 +108,7 @@ defmodule WasomiWeb.AdminLive.LectureQuizEditTest do
 
   test "clamps an out-of-range question count into the allowed 3..25 window", %{conn: conn} do
     lecture = lecture_fixture(video_asset_id: "playback-1")
+    Catalog.upsert_lecture_transcript(lecture.id, %{status: :ready, text: "Some text."})
     {:ok, view, _html} = live(conn, edit_path(lecture))
 
     view

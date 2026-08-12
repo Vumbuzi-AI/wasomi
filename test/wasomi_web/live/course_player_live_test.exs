@@ -44,6 +44,61 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
     assert has_element?(view, "#mark-lecture-complete")
   end
 
+  test "resources and FAQ for the current lecture are rendered to enrolled learners", %{
+    conn: conn,
+    user: user
+  } do
+    course = course_fixture(status: :published)
+    module = course_module_fixture(course_id: course.id)
+    lecture = lecture_fixture(module_id: module.id)
+
+    resource =
+      lecture_resource_fixture(
+        lecture_id: lecture.id,
+        kind: :link,
+        name: "Slides",
+        url: "https://example.com/slides",
+        storage_key: nil,
+        byte_size: nil,
+        content_type: nil
+      )
+
+    question =
+      lecture_question_fixture(
+        lecture_id: lecture.id,
+        question: "Why does this matter?",
+        answer: "Because it does."
+      )
+
+    {:ok, pending} = Enrollments.create_pending_enrollment(user, course)
+    {:ok, _active} = Enrollments.activate_enrollment(pending)
+
+    assert {:ok, view, html} = live(conn, ~p"/learn/courses/#{course.slug}")
+
+    assert has_element?(view, "#lecture-resources a", "Slides")
+
+    assert has_element?(
+             view,
+             "a[href='#{~p"/learn/resources/#{resource.id}/download"}']"
+           )
+
+    assert html =~ question.question
+    assert html =~ question.answer
+  end
+
+  test "a lecture with no resources or FAQ shows neither panel", %{conn: conn, user: user} do
+    course = course_fixture(status: :published)
+    module = course_module_fixture(course_id: course.id)
+    lecture_fixture(module_id: module.id)
+    {:ok, pending} = Enrollments.create_pending_enrollment(user, course)
+    {:ok, _active} = Enrollments.activate_enrollment(pending)
+
+    assert {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
+
+    refute has_element?(view, "#lecture-resources")
+    refute has_element?(view, "#lecture-faq")
+  end
+
   test "an already-enrolled learner keeps access after the course is archived", %{
     conn: conn,
     user: user
@@ -515,6 +570,43 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
 
       {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}/preview")
       refute has_element?(view, "#course-certificates")
+    end
+
+    test "resources and FAQ render identically in preview mode" do
+      conn = build_conn() |> log_in_user(admin_fixture())
+      course = course_fixture(status: :draft)
+      module = course_module_fixture(course_id: course.id, position: 1)
+      lecture = lecture_fixture(module_id: module.id, position: 1)
+
+      resource =
+        lecture_resource_fixture(
+          lecture_id: lecture.id,
+          kind: :link,
+          name: "Slides",
+          url: "https://example.com/slides",
+          storage_key: nil,
+          byte_size: nil,
+          content_type: nil
+        )
+
+      question =
+        lecture_question_fixture(
+          lecture_id: lecture.id,
+          question: "Why does this matter?",
+          answer: "Because it does."
+        )
+
+      assert {:ok, view, html} = live(conn, ~p"/admin/courses/#{course.slug}/preview")
+
+      assert has_element?(view, "#lecture-resources a", "Slides")
+
+      assert has_element?(
+               view,
+               "a[href='#{~p"/learn/resources/#{resource.id}/download?preview=true"}']"
+             )
+
+      assert html =~ question.question
+      assert html =~ question.answer
     end
   end
 end

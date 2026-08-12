@@ -90,6 +90,19 @@ defmodule WasomiWeb.CoursePlayerLive do
 
   defp playback_url_path(lecture_id, false), do: ~p"/media/lectures/#{lecture_id}/playback"
 
+  # Same trust boundary as `playback_url_path/2` above — `preview=true` is
+  # only ever honored server-side (WasomiWeb.ResourceController) after
+  # confirming the session user is actually an admin.
+  defp resource_download_path(resource_id, true),
+    do: ~p"/learn/resources/#{resource_id}/download?preview=true"
+
+  defp resource_download_path(resource_id, false),
+    do: ~p"/learn/resources/#{resource_id}/download"
+
+  defp resource_icon(:document), do: "hero-document-text"
+  defp resource_icon(:video), do: "hero-film"
+  defp resource_icon(:link), do: "hero-link"
+
   @impl true
   def handle_event("select-lecture", %{"id" => id}, socket) do
     lecture = find_lecture(socket.assigns.course, id)
@@ -654,6 +667,63 @@ defmodule WasomiWeb.CoursePlayerLive do
                     >
                       Watch at least 80% of this lecture to unlock this button.
                     </p>
+                  </div>
+
+                  <div
+                    :if={@current_lecture.resources != []}
+                    id="lecture-resources"
+                    class="border-t border-black/5 bg-white p-8 lg:p-10"
+                  >
+                    <h3 class="text-xs font-medium uppercase tracking-widest text-muted">
+                      Resources
+                    </h3>
+                    <ul class="mt-4 space-y-2.5">
+                      <li :for={resource <- @current_lecture.resources}>
+                        <.link
+                          href={resource_download_path(resource.id, @preview?)}
+                          target={if resource.kind == :link, do: "_blank"}
+                          class="flex items-center gap-3 rounded-xl border border-black/5 px-4 py-3 text-sm text-body transition hover:border-primary/40 hover:bg-mint/40 hover:text-dark"
+                        >
+                          <span class="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-mint text-primary">
+                            <.icon name={resource_icon(resource.kind)} class="h-4 w-4" />
+                          </span>
+                          <span class="min-w-0 flex-1 truncate font-medium">{resource.name}</span>
+                          <.icon
+                            name={
+                              if resource.kind == :link,
+                                do: "hero-arrow-top-right-on-square",
+                                else: "hero-arrow-down-tray"
+                            }
+                            class="h-4 w-4 shrink-0 text-muted"
+                          />
+                        </.link>
+                      </li>
+                    </ul>
+                  </div>
+
+                  <div
+                    :if={@current_lecture.questions != []}
+                    id="lecture-faq"
+                    class="border-t border-black/5 bg-white p-8 lg:p-10"
+                  >
+                    <h3 class="text-xs font-medium uppercase tracking-widest text-muted">
+                      Common learner questions
+                    </h3>
+                    <div class="mt-4 space-y-3">
+                      <details
+                        :for={question <- @current_lecture.questions}
+                        class="group rounded-2xl border border-black/5 px-5 [&_summary::-webkit-details-marker]:hidden"
+                      >
+                        <summary class="flex cursor-pointer list-none items-center justify-between gap-3 py-4 text-sm font-medium text-dark">
+                          {question.question}
+                          <.icon
+                            name="hero-plus"
+                            class="h-4 w-4 shrink-0 text-primary transition group-open:rotate-45"
+                          />
+                        </summary>
+                        <p class="pb-4 text-sm text-body">{question.answer}</p>
+                      </details>
+                    </div>
                   </div>
                 <% else %>
                   <div class="grid min-h-80 place-items-center bg-white p-8 text-center text-muted">

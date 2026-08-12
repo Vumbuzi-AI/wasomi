@@ -572,6 +572,17 @@ defmodule Wasomi.Catalog do
   def get_lecture!(id), do: Repo.get!(Lecture, id)
 
   @doc """
+  Gets a single lecture resource, with its lecture preloaded.
+
+  Raises `Ecto.NoResultsError` if the LectureResource does not exist.
+  """
+  def get_lecture_resource!(id) do
+    LectureResource
+    |> Repo.get!(id)
+    |> Repo.preload(:lecture)
+  end
+
+  @doc """
   Creates a lecture.
 
   ## Examples

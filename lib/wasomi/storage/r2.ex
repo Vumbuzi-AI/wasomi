@@ -172,6 +172,14 @@ defmodule Wasomi.Storage.R2 do
     end
   end
 
+  @impl true
+  def download_url(key) do
+    case public_url(key) do
+      nil -> {:error, :r2_not_configured}
+      url -> {:ok, url}
+    end
+  end
+
   defp public_url(key) do
     case Application.get_env(:wasomi, :r2_public_url) do
       base when is_binary(base) and base != "" ->

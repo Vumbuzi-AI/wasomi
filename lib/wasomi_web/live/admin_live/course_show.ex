@@ -481,6 +481,13 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                         </span>
                       </span>
                       <span class="flex shrink-0 items-center gap-1.5">
+                        <.link
+                          navigate={~p"/admin/courses/#{@course.slug}/lectures/#{lecture.id}/quiz"}
+                          class="grid h-8 w-8 place-items-center rounded-full text-muted transition hover:bg-mint hover:text-primary"
+                          title="Lecture quiz"
+                        >
+                          <.icon name="hero-sparkles" class="h-4 w-4" />
+                        </.link>
                         <button
                           type="button"
                           phx-click={JS.push("edit_lecture", value: %{id: lecture.id})}

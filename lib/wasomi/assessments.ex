@@ -17,8 +17,20 @@ defmodule Wasomi.Assessments do
   import Ecto.Query, warn: false
 
   alias Wasomi.Accounts.User
-  alias Wasomi.Assessments.{Question, Quiz, QuizGeneration, QuizSubmission}
+
+  alias Wasomi.Assessments.{
+    LectureQuiz,
+    LectureQuizGeneration,
+    LectureQuizQuestion,
+    Question,
+    Quiz,
+    QuizGeneration,
+    QuizSubmission
+  }
+
+  alias Wasomi.Assessments.Workers.GenerateLectureQuizWorker
   alias Wasomi.Catalog.CourseModule
+  alias Wasomi.Catalog.Lecture
   alias Wasomi.Repo
 
   ## Quizzes
@@ -529,4 +541,231 @@ defmodule Wasomi.Assessments do
 
     :reordered
   end
+
+  ## Lecture quizzes
+
+  @doc """
+  Gets the quiz for a lecture, if one exists. A lecture has at most one quiz.
+  """
+  def get_lecture_quiz(%Lecture{id: lecture_id}), do: get_lecture_quiz(lecture_id)
+  def get_lecture_quiz(lecture_id), do: Repo.get_by(LectureQuiz, lecture_id: lecture_id)
+
+  def get_lecture_quiz_with_questions!(id) do
+    questions_query = from(question in LectureQuizQuestion, order_by: [asc: question.position])
+
+    options_query =
+      from(option in Wasomi.Assessments.LectureQuizQuestionOption,
+        order_by: [asc: option.position]
+      )
+
+    LectureQuiz
+    |> Repo.get!(id)
+    |> Repo.preload([:lecture, questions: {questions_query, question_options: options_query}])
+  end
+
+  @doc """
+  Gets or creates the quiz for a lecture, so the admin resource-picker
+  doesn't need a separate "create the quiz" step before it can start a
+  generation.
+  """
+  def ensure_lecture_quiz(%Lecture{} = lecture) do
+    case get_lecture_quiz(lecture.id) do
+      nil -> create_lecture_quiz(lecture, %{title: "#{lecture.title} quiz"})
+      quiz -> {:ok, quiz}
+    end
+  end
+
+  def create_lecture_quiz(%Lecture{} = lecture, attrs) do
+    %LectureQuiz{}
+    |> LectureQuiz.changeset(Map.put(attrs, :lecture_id, lecture.id))
+    |> Repo.insert()
+  end
+
+  def get_lecture_quiz_question!(id), do: Repo.get!(LectureQuizQuestion, id)
+
+  def create_lecture_quiz_question(%LectureQuiz{} = quiz, attrs) do
+    %LectureQuizQuestion{lecture_quiz_id: quiz.id}
+    |> LectureQuizQuestion.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  def delete_lecture_quiz_question(%LectureQuizQuestion{} = question), do: Repo.delete(question)
+
+  @doc """
+  Marks a draft lecture-quiz question as reviewed and visible to learners.
+  """
+  def publish_lecture_quiz_question(%LectureQuizQuestion{} = question) do
+    question
+    |> Ecto.Changeset.change(status: :published)
+    |> Repo.update()
+  end
+
+  @doc """
+  Publishes every still-`:draft` question on this lecture quiz in one
+  statement, same "review the whole batch at once" convenience as
+  `publish_all_drafts/1`.
+  """
+  def publish_all_lecture_quiz_drafts(%LectureQuiz{id: lecture_quiz_id}) do
+    LectureQuizQuestion
+    |> where([q], q.lecture_quiz_id == ^lecture_quiz_id and q.status == :draft)
+    |> Repo.update_all(set: [status: :published])
+  end
+
+  @doc """
+  Deletes every still-`:draft` question on this lecture quiz, regardless of
+  which generation batch (if any) created them.
+  """
+  def discard_all_lecture_quiz_drafts(%LectureQuiz{id: lecture_quiz_id}) do
+    LectureQuizQuestion
+    |> where([q], q.lecture_quiz_id == ^lecture_quiz_id and q.status == :draft)
+    |> Repo.delete_all()
+  end
+
+  @doc """
+  Starts a lecture-quiz generation: ensures the lecture has a quiz row,
+  records the admin's resource/difficulty/count choices, and enqueues
+  `Wasomi.Assessments.Workers.GenerateLectureQuizWorker` to do the actual
+  drafting in the background.
+  """
+  def start_lecture_quiz_generation(%Lecture{} = lecture, %User{} = user, attrs) do
+    with {:ok, quiz} <- ensure_lecture_quiz(lecture),
+         {:ok, generation} <- create_lecture_quiz_generation(quiz, user, attrs) do
+      GenerateLectureQuizWorker.enqueue(generation.id)
+      {:ok, generation}
+    end
+  end
+
+  def create_lecture_quiz_generation(%LectureQuiz{} = quiz, %User{} = user, attrs) do
+    %LectureQuizGeneration{}
+    |> LectureQuizGeneration.changeset(
+      Map.merge(attrs, %{lecture_quiz_id: quiz.id, requested_by_id: user.id, status: :pending})
+    )
+    |> Repo.insert()
+  end
+
+  def get_lecture_quiz_generation!(id), do: Repo.get!(LectureQuizGeneration, id)
+
+  @doc """
+  Loads the lecture a generation's source text should be read from, without
+  the caller needing to know it's reached through `lecture_quiz`.
+  """
+  def get_lecture_for_generation!(%LectureQuizGeneration{} = generation) do
+    generation
+    |> Repo.preload(lecture_quiz: :lecture)
+    |> Map.fetch!(:lecture_quiz)
+    |> Map.fetch!(:lecture)
+  end
+
+  def list_lecture_quiz_generations(%LectureQuiz{id: lecture_quiz_id}) do
+    LectureQuizGeneration
+    |> where([g], g.lecture_quiz_id == ^lecture_quiz_id)
+    |> order_by([g], desc: g.inserted_at, desc: g.id)
+    |> Repo.all()
+  end
+
+  @doc """
+  Subscribes the caller to generation status updates for this lecture quiz,
+  so an open admin LiveView can react without polling.
+  """
+  def subscribe_to_lecture_quiz_generation(%LectureQuiz{id: lecture_quiz_id}) do
+    Phoenix.PubSub.subscribe(Wasomi.PubSub, lecture_quiz_generation_topic(lecture_quiz_id))
+  end
+
+  def mark_lecture_quiz_generation_processing(%LectureQuizGeneration{} = generation) do
+    {:ok, updated} = update_lecture_quiz_generation(generation, %{status: :processing})
+    broadcast_lecture_quiz_generation(updated)
+    updated
+  end
+
+  def mark_lecture_quiz_generation_failed(%LectureQuizGeneration{} = generation, error_message) do
+    {:ok, updated} =
+      update_lecture_quiz_generation(generation, %{status: :failed, error_message: error_message})
+
+    broadcast_lecture_quiz_generation(updated)
+    updated
+  end
+
+  @doc """
+  Inserts one `:draft` question (with options) per generated item, appended
+  after the lecture quiz's existing questions, then marks the generation
+  `:ready` — same "skip malformed items, only fail the batch if none landed"
+  behavior as `create_draft_questions_and_mark_ready/2`.
+  """
+  def create_lecture_quiz_draft_questions_and_mark_ready(
+        %LectureQuizGeneration{} = generation,
+        drafts
+      )
+      when is_list(drafts) do
+    quiz = Repo.get!(LectureQuiz, generation.lecture_quiz_id)
+    starting_position = next_lecture_quiz_question_position(quiz)
+
+    {created, _next_position} =
+      Enum.reduce(drafts, {[], starting_position}, fn draft, {acc, position} ->
+        case create_lecture_quiz_question(
+               quiz,
+               lecture_quiz_question_attrs(draft, position, generation.id)
+             ) do
+          {:ok, question} -> {[question | acc], position + 1}
+          {:error, _changeset} -> {acc, position}
+        end
+      end)
+
+    created = Enum.reverse(created)
+
+    if created == [] do
+      {:error, :no_valid_questions_generated}
+    else
+      {:ok, updated} =
+        update_lecture_quiz_generation(generation, %{
+          status: :ready,
+          questions_generated_count: length(created)
+        })
+
+      broadcast_lecture_quiz_generation(updated)
+      {:ok, length(created)}
+    end
+  end
+
+  defp next_lecture_quiz_question_position(%LectureQuiz{id: lecture_quiz_id}) do
+    LectureQuizQuestion
+    |> where([q], q.lecture_quiz_id == ^lecture_quiz_id)
+    |> select([q], max(q.position))
+    |> Repo.one()
+    |> case do
+      nil -> 1
+      max -> max + 1
+    end
+  end
+
+  defp lecture_quiz_question_attrs(%{prompt: prompt, options: options}, position, generation_id) do
+    %{
+      prompt: prompt,
+      status: :draft,
+      position: position,
+      lecture_quiz_generation_id: generation_id,
+      question_options:
+        options
+        |> Enum.with_index(1)
+        |> Enum.map(fn {option, idx} ->
+          %{label: option.label, correct: option.correct, position: idx}
+        end)
+    }
+  end
+
+  defp update_lecture_quiz_generation(%LectureQuizGeneration{} = generation, attrs) do
+    generation
+    |> LectureQuizGeneration.changeset(attrs)
+    |> Repo.update()
+  end
+
+  defp broadcast_lecture_quiz_generation(%LectureQuizGeneration{} = generation) do
+    Phoenix.PubSub.broadcast(
+      Wasomi.PubSub,
+      lecture_quiz_generation_topic(generation.lecture_quiz_id),
+      {:lecture_quiz_generation_updated, generation}
+    )
+  end
+
+  defp lecture_quiz_generation_topic(lecture_quiz_id),
+    do: "lecture_quiz_generation:lecture_quiz:#{lecture_quiz_id}"
 end

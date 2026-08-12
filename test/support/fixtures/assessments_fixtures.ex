@@ -98,4 +98,45 @@ defmodule Wasomi.AssessmentsFixtures do
     {:ok, generation} = Assessments.create_generation(quiz, user, source_filename)
     generation
   end
+
+  @doc """
+  Generate a lecture quiz, defaulting to a freshly created lecture when none
+  is given.
+  """
+  def lecture_quiz_fixture(attrs \\ %{}) do
+    attrs = Map.new(attrs)
+    lecture = Map.get_lazy(attrs, :lecture, fn -> Wasomi.CatalogFixtures.lecture_fixture() end)
+
+    {:ok, quiz} =
+      attrs
+      |> Map.delete(:lecture)
+      |> Enum.into(%{title: "some lecture quiz"})
+      |> then(&Assessments.create_lecture_quiz(lecture, &1))
+
+    quiz
+  end
+
+  @doc """
+  Generate a lecture quiz generation record, defaulting to a freshly created
+  lecture quiz and user, and a "primary video" resource selection, when none
+  are given.
+  """
+  def lecture_quiz_generation_fixture(attrs \\ %{}) do
+    attrs = Map.new(attrs)
+    quiz = Map.get_lazy(attrs, :lecture_quiz, fn -> lecture_quiz_fixture() end)
+    user = Map.get_lazy(attrs, :user, fn -> Wasomi.AccountsFixtures.user_fixture() end)
+
+    {:ok, generation} =
+      attrs
+      |> Map.drop([:lecture_quiz, :user])
+      |> Enum.into(%{
+        difficulty: :mixed,
+        question_count_requested: 10,
+        resource_selection: ["video"],
+        source_label: "Primary video transcript"
+      })
+      |> then(&Assessments.create_lecture_quiz_generation(quiz, user, &1))
+
+    generation
+  end
 end

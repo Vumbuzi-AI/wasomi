@@ -279,6 +279,19 @@ defmodule WasomiWeb.AdminLiveTest do
       assert html =~ "cover.jpg"
     end
 
+    test "links each lecture to its own lecture-quiz page", %{conn: conn} do
+      course = course_fixture()
+      module = course_module_fixture(course_id: course.id)
+      lecture = lecture_fixture(module_id: module.id, position: 1)
+
+      {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
+
+      assert has_element?(
+               view,
+               ~s(a[href="/admin/courses/#{course.slug}/lectures/#{lecture.id}/quiz"])
+             )
+    end
+
     test "shows a draft-question reminder badge only when a module has unreviewed drafts", %{
       conn: conn
     } do

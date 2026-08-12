@@ -35,6 +35,7 @@ config :wasomi,
   pdf_extractor: Wasomi.PdfExtractorMock,
   question_generator: Wasomi.QuestionGeneratorMock,
   transcriber: Wasomi.TranscriberMock,
+  lecture_resource_reader: Wasomi.LectureResourceReaderMock,
   paystack_secret_key: "test_paystack_secret",
   paystack_callback_url: "http://www.example.com/payments/paystack/callback",
   openai_api_key: "test_openai_key"

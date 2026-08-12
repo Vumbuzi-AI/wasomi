@@ -275,24 +275,38 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
     assert Catalog.get_lecture!(lecture.id).video_asset_id == "old-playback-id"
   end
 
-  test "the resources panel wires up the upload/link toggle hook and add-link attaches a resource",
-       %{conn: conn} do
+  test "switching to the link panel and saving a link keeps the link panel selected", %{
+    conn: conn
+  } do
     course = course_fixture()
     course_module = course_module_fixture(course_id: course.id)
 
     {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
     render_click(view, "new_lecture", %{"module-id" => to_string(course_module.id)})
 
-    # Regression guard: this hook attribute is what drives the "Upload
-    # files" / "Add link" toggle and the "Save link" button client-side —
-    # it was previously missing from the markup entirely, silently
-    # disabling both controls with no server-side error to surface.
-    assert has_element?(view, "#lecture-resources[phx-hook='R2ResourceUpload']")
+    assert has_element?(view, "button[phx-value-mode='upload'][aria-pressed='true']")
 
-    resources = element(view, "#lecture-resources")
-    html = render_hook(resources, "add-link", %{"url" => "https://example.com/slides.pdf"})
+    view |> element("button[phx-value-mode='link']") |> render_click()
+
+    assert has_element?(view, "button[phx-value-mode='link'][aria-pressed='true']")
+    assert has_element?(view, "button[phx-value-mode='upload'][aria-pressed='false']")
+
+    view
+    |> element("#add-link-url")
+    |> render_change(%{"url" => "https://example.com/slides.pdf"})
+
+    html =
+      view
+      |> element("#add-link-form button")
+      |> render_click()
 
     assert html =~ "https://example.com/slides.pdf"
     refute html =~ "No resources added yet."
+
+    # Regression guard: adding a link used to re-render the resources
+    # section back to its hardcoded server template, which silently reset
+    # the toggle to "Upload files" every single time a link was saved.
+    assert has_element?(view, "button[phx-value-mode='link'][aria-pressed='true']")
+    assert has_element?(view, "button[phx-value-mode='upload'][aria-pressed='false']")
   end
 end

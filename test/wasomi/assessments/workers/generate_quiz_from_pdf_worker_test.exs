@@ -2,6 +2,7 @@ defmodule Wasomi.Assessments.Workers.GenerateQuizFromPDFWorkerTest do
   use Wasomi.DataCase
 
   import Wasomi.AssessmentsFixtures
+  import Wasomi.CatalogFixtures
   import Mox
 
   alias Wasomi.Assessments
@@ -181,5 +182,61 @@ defmodule Wasomi.Assessments.Workers.GenerateQuizFromPDFWorkerTest do
     expect(Wasomi.AssessmentsStorageMock, :delete, fn ^key -> :ok end)
 
     assert :ok = Oban.Testing.perform_job(GenerateQuizFromPDFWorker, args(generation), [])
+  end
+
+  describe "seeding from this module's lecture quizzes" do
+    test "passes existing lecture-quiz question prompts to the generator and drops exact-text duplicates from the result" do
+      module = course_module_fixture()
+      lecture = lecture_fixture(module_id: module.id)
+      lecture_quiz = lecture_quiz_fixture(lecture: lecture)
+      lecture_generation = lecture_quiz_generation_fixture(lecture_quiz: lecture_quiz)
+
+      {:ok, 1} =
+        Assessments.create_lecture_quiz_draft_questions_and_mark_ready(lecture_generation, [
+          draft_question_attrs(%{prompt: "Existing lecture question?"})
+        ])
+
+      Assessments.publish_all_lecture_quiz_drafts(lecture_quiz)
+
+      quiz = quiz_fixture(module: module)
+      generation = quiz_generation_fixture(quiz: quiz)
+
+      stub_storage_download()
+      expect(Wasomi.PdfExtractorMock, :extract_text, fn _binary -> {:ok, "Training text."} end)
+
+      expect(Wasomi.QuestionGeneratorMock, :generate_questions, fn _text, opts ->
+        assert Keyword.get(opts, :avoid_duplicating) == ["Existing lecture question?"]
+
+        {:ok,
+         [
+           draft_question_attrs(%{prompt: "Existing lecture question?"}),
+           draft_question_attrs(%{prompt: "A brand new synthesis question?"})
+         ]}
+      end)
+
+      assert :ok = Oban.Testing.perform_job(GenerateQuizFromPDFWorker, args(generation), [])
+
+      prompts =
+        quiz.id
+        |> Assessments.get_quiz_with_questions!()
+        |> Map.fetch!(:questions)
+        |> Enum.map(& &1.prompt)
+
+      assert prompts == ["A brand new synthesis question?"]
+    end
+
+    test "seeds an empty list when the module has no lecture quizzes yet" do
+      generation = quiz_generation_fixture()
+
+      stub_storage_download()
+      expect(Wasomi.PdfExtractorMock, :extract_text, fn _binary -> {:ok, "Training text."} end)
+
+      expect(Wasomi.QuestionGeneratorMock, :generate_questions, fn _text, opts ->
+        assert Keyword.get(opts, :avoid_duplicating) == []
+        {:ok, [draft_question_attrs()]}
+      end)
+
+      assert :ok = Oban.Testing.perform_job(GenerateQuizFromPDFWorker, args(generation), [])
+    end
   end
 end

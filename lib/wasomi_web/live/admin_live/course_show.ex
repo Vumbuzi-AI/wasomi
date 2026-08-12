@@ -91,23 +91,32 @@ defmodule WasomiWeb.AdminLive.CourseShow do
   end
 
   def handle_event("generate_quiz", %{"module-id" => module_id}, socket) do
-    module = Catalog.get_course_module!(module_id)
+    module = Enum.find(socket.assigns.course.modules, &(to_string(&1.id) == to_string(module_id)))
 
-    quiz =
-      Assessments.get_quiz_for_module(module) ||
-        with {:ok, quiz} <- Assessments.create_quiz(module, %{title: "#{module.title} Quiz"}) do
-          quiz
-        end
+    if module_ready_for_quiz_generation?(module, socket.assigns.lecture_quiz_question_counts) do
+      quiz =
+        Assessments.get_quiz_for_module(module) ||
+          with {:ok, quiz} <- Assessments.create_quiz(module, %{title: "#{module.title} Quiz"}) do
+            quiz
+          end
 
-    case quiz do
-      %Assessments.Quiz{id: quiz_id} ->
-        course_slug = socket.assigns.course.slug
+      case quiz do
+        %Assessments.Quiz{id: quiz_id} ->
+          course_slug = socket.assigns.course.slug
 
-        {:noreply,
-         push_navigate(socket, to: ~p"/admin/courses/#{course_slug}/quizzes/#{quiz_id}/edit")}
+          {:noreply,
+           push_navigate(socket, to: ~p"/admin/courses/#{course_slug}/quizzes/#{quiz_id}/edit")}
 
-      _ ->
-        {:noreply, put_flash(socket, :error, "Could not create a quiz for this module.")}
+        {:error, _changeset} ->
+          {:noreply, put_flash(socket, :error, "Could not create a quiz for this module.")}
+      end
+    else
+      {:noreply,
+       put_flash(
+         socket,
+         :error,
+         "Generate a quiz for every lecture in this module before generating the module quiz."
+       )}
     end
   end
 
@@ -237,6 +246,14 @@ defmodule WasomiWeb.AdminLive.CourseShow do
       Assessments.count_published_questions_by_module(course.id)
     )
     |> assign(:quizzes_by_module, Assessments.get_quizzes_by_module(course.id))
+    |> assign(
+      :lecture_quiz_question_counts,
+      Assessments.count_lecture_quiz_questions_by_lecture(course.id)
+    )
+  end
+
+  defp module_ready_for_quiz_generation?(module, lecture_quiz_question_counts) do
+    Enum.all?(module.lectures, &Map.has_key?(lecture_quiz_question_counts, &1.id))
   end
 
   @impl true
@@ -556,8 +573,21 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                     >
                       <.icon name="hero-plus-circle" class="h-4 w-4" /> Add lecture
                     </button>
+                    <span
+                      :if={
+                        is_nil(Map.get(@quizzes_by_module, module.id)) and
+                          not module_ready_for_quiz_generation?(module, @lecture_quiz_question_counts)
+                      }
+                      class="inline-flex items-center gap-1.5 text-sm font-medium text-muted"
+                      title="Every lecture in this module needs its own generated lecture quiz first"
+                    >
+                      <.icon name="hero-sparkles" class="h-4 w-4" /> Generate quiz (AI)
+                    </span>
                     <button
-                      :if={is_nil(Map.get(@quizzes_by_module, module.id))}
+                      :if={
+                        is_nil(Map.get(@quizzes_by_module, module.id)) and
+                          module_ready_for_quiz_generation?(module, @lecture_quiz_question_counts)
+                      }
                       type="button"
                       phx-click={JS.push("generate_quiz", value: %{"module-id" => module.id})}
                       class="inline-flex items-center gap-1.5 text-sm font-medium text-primary transition hover:text-dark"
@@ -565,6 +595,15 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                       <.icon name="hero-sparkles" class="h-4 w-4" /> Generate quiz (AI)
                     </button>
                   </div>
+                  <p
+                    :if={
+                      is_nil(Map.get(@quizzes_by_module, module.id)) and
+                        not module_ready_for_quiz_generation?(module, @lecture_quiz_question_counts)
+                    }
+                    class="mt-1.5 text-xs text-muted"
+                  >
+                    Generate a quiz for every lecture in this module before generating the module quiz.
+                  </p>
                 </div>
               </div>
             </article>

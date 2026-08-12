@@ -397,6 +397,59 @@ defmodule WasomiWeb.AdminLiveTest do
       assert_raise Ecto.NoResultsError, fn -> Wasomi.Assessments.get_quiz!(quiz.id) end
     end
 
+    test "the module-quiz generate button is disabled until every lecture has its own quiz", %{
+      conn: conn
+    } do
+      course = course_fixture()
+      module = course_module_fixture(course_id: course.id, title: "Module One")
+      first = lecture_fixture(module_id: module.id, position: 1)
+      second = lecture_fixture(module_id: module.id, position: 2)
+
+      {:ok, view, html} = live(conn, ~p"/admin/courses/#{course.slug}")
+
+      refute has_element?(view, "button", "Generate quiz (AI)")
+      assert html =~ "Generate a quiz for every lecture in this module"
+
+      quiz = lecture_quiz_fixture(lecture: first)
+      generation = lecture_quiz_generation_fixture(lecture_quiz: quiz)
+
+      {:ok, 1} =
+        Wasomi.Assessments.create_lecture_quiz_draft_questions_and_mark_ready(generation, [
+          draft_question_attrs()
+        ])
+
+      {:ok, view, html} = live(conn, ~p"/admin/courses/#{course.slug}")
+      refute has_element?(view, "button", "Generate quiz (AI)")
+      assert html =~ "Generate a quiz for every lecture in this module"
+
+      second_quiz = lecture_quiz_fixture(lecture: second)
+      second_generation = lecture_quiz_generation_fixture(lecture_quiz: second_quiz)
+
+      {:ok, 1} =
+        Wasomi.Assessments.create_lecture_quiz_draft_questions_and_mark_ready(
+          second_generation,
+          [draft_question_attrs()]
+        )
+
+      {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
+      assert has_element?(view, "button", "Generate quiz (AI)")
+    end
+
+    test "generating a module quiz server-side rejects a not-yet-ready module", %{conn: conn} do
+      course = course_fixture()
+      module = course_module_fixture(course_id: course.id, title: "Module One")
+      lecture_fixture(module_id: module.id, position: 1)
+
+      {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
+
+      html =
+        view
+        |> render_click("generate_quiz", %{"module-id" => module.id})
+
+      assert html =~ "Generate a quiz for every lecture in this module"
+      assert Wasomi.Assessments.get_quiz_for_module(module) == nil
+    end
+
     test "cancelling the delete-quiz confirmation leaves the quiz intact", %{conn: conn} do
       course = course_fixture()
       module = course_module_fixture(course_id: course.id, title: "Module One")

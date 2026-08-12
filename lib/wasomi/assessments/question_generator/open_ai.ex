@@ -59,12 +59,16 @@ defmodule Wasomi.Assessments.QuestionGenerator.OpenAI do
     min_count = Keyword.get(opts, :min_count, 8)
     max_count = Keyword.get(opts, :max_count, 20)
     difficulty = Keyword.get(opts, :difficulty)
+    avoid_duplicating = Keyword.get(opts, :avoid_duplicating, [])
 
     body = %{
       "model" => model(),
       "messages" => [
         %{"role" => "system", "content" => system_prompt()},
-        %{"role" => "user", "content" => user_prompt(text, min_count, max_count, difficulty)}
+        %{
+          "role" => "user",
+          "content" => user_prompt(text, min_count, max_count, difficulty, avoid_duplicating)
+        }
       ],
       "response_format" => %{
         "type" => "json_schema",
@@ -91,7 +95,7 @@ defmodule Wasomi.Assessments.QuestionGenerator.OpenAI do
     """
   end
 
-  defp user_prompt(text, min_count, max_count, difficulty) do
+  defp user_prompt(text, min_count, max_count, difficulty, avoid_duplicating) do
     source = String.slice(text, 0, @max_source_chars)
 
     """
@@ -112,7 +116,7 @@ defmodule Wasomi.Assessments.QuestionGenerator.OpenAI do
     #{difficulty_instruction(difficulty)}
     - Never invent facts not present in the document, and never write a
       question that can be answered from general knowledge alone.
-
+    #{seed_questions_instruction(avoid_duplicating)}
     Question format:
     - Most questions should be multiple-choice with exactly four options,
       exactly one marked correct: true and the rest correct: false.
@@ -148,6 +152,23 @@ defmodule Wasomi.Assessments.QuestionGenerator.OpenAI do
     - Mix difficulty: include some questions that check basic recall of key
       facts, and some that require connecting or applying concepts from the
       document.
+    """
+  end
+
+  defp seed_questions_instruction([]), do: ""
+
+  defp seed_questions_instruction(prompts) do
+    list = Enum.map_join(prompts, "\n", &"- #{&1}")
+
+    """
+
+    This module's individual lectures already have these quiz questions:
+    #{list}
+
+    Build on top of that existing coverage rather than re-deriving it —
+    write broader, module-level synthesis questions that connect ideas
+    across lectures instead of restating any of the above, and never reuse
+    one of the above questions verbatim.
     """
   end
 

@@ -79,6 +79,42 @@ defmodule Wasomi.Assessments do
   end
 
   @doc """
+  Counts lecture-quiz questions (any status) for every lecture in a course,
+  keyed by `lecture_id`. Lectures with no lecture quiz, or no questions
+  generated yet, are simply absent from the result — callers should use
+  `Map.has_key?/2` to ask "has this lecture's quiz actually been generated,"
+  not `Map.get/3` with a `0` default.
+  """
+  def count_lecture_quiz_questions_by_lecture(course_id) do
+    LectureQuizQuestion
+    |> join(:inner, [q], quiz in LectureQuiz, on: quiz.id == q.lecture_quiz_id)
+    |> join(:inner, [q, quiz], lecture in Lecture, on: lecture.id == quiz.lecture_id)
+    |> join(:inner, [q, _quiz, lecture], module in CourseModule,
+      on: module.id == lecture.module_id
+    )
+    |> where([_q, _quiz, _lecture, module], module.course_id == ^course_id)
+    |> group_by([_q, _quiz, lecture, _module], lecture.id)
+    |> select([q, _quiz, lecture, _module], {lecture.id, count(q.id)})
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  @doc """
+  Lists the prompt text of every `:published` lecture-quiz question across
+  every lecture in a module, so module-quiz generation can seed its prompt
+  with what's already been asked at the lecture level instead of
+  re-deriving (and duplicating) the same coverage.
+  """
+  def list_lecture_quiz_question_prompts_for_module(module_id) do
+    LectureQuizQuestion
+    |> join(:inner, [q], quiz in LectureQuiz, on: quiz.id == q.lecture_quiz_id)
+    |> join(:inner, [q, quiz], lecture in Lecture, on: lecture.id == quiz.lecture_id)
+    |> where([q, _quiz, lecture], lecture.module_id == ^module_id and q.status == :published)
+    |> select([q], q.prompt)
+    |> Repo.all()
+  end
+
+  @doc """
   Gets every quiz belonging to a course, keyed by `module_id`, so the
   course-curriculum view can show "this module already has a quiz" without
   an N+1 lookup per module.

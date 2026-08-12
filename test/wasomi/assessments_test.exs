@@ -808,6 +808,57 @@ defmodule Wasomi.AssessmentsTest do
     end
   end
 
+  describe "count_lecture_quiz_questions_by_lecture/1 and seed prompts for module generation" do
+    test "counts are keyed by lecture id and absent for lectures with no generated quiz yet" do
+      course = course_fixture()
+      module = course_module_fixture(course_id: course.id)
+      with_quiz = lecture_fixture(module_id: module.id, position: 1)
+      without_quiz = lecture_fixture(module_id: module.id, position: 2)
+
+      quiz = lecture_quiz_fixture(lecture: with_quiz)
+      generation = lecture_quiz_generation_fixture(lecture_quiz: quiz)
+
+      {:ok, 2} =
+        Assessments.create_lecture_quiz_draft_questions_and_mark_ready(generation, [
+          draft_question_attrs(%{prompt: "First question"}),
+          draft_question_attrs(%{prompt: "Second question"})
+        ])
+
+      counts = Assessments.count_lecture_quiz_questions_by_lecture(course.id)
+
+      assert counts[with_quiz.id] == 2
+      refute Map.has_key?(counts, without_quiz.id)
+    end
+
+    test "list_lecture_quiz_question_prompts_for_module/1 returns only published prompts across the module's lectures" do
+      module = course_module_fixture()
+      first = lecture_fixture(module_id: module.id, position: 1)
+      second = lecture_fixture(module_id: module.id, position: 2)
+
+      first_quiz = lecture_quiz_fixture(lecture: first)
+      first_generation = lecture_quiz_generation_fixture(lecture_quiz: first_quiz)
+
+      {:ok, 1} =
+        Assessments.create_lecture_quiz_draft_questions_and_mark_ready(first_generation, [
+          draft_question_attrs(%{prompt: "Published on lecture one"})
+        ])
+
+      Assessments.publish_all_lecture_quiz_drafts(first_quiz)
+
+      second_quiz = lecture_quiz_fixture(lecture: second)
+      second_generation = lecture_quiz_generation_fixture(lecture_quiz: second_quiz)
+
+      {:ok, 1} =
+        Assessments.create_lecture_quiz_draft_questions_and_mark_ready(second_generation, [
+          draft_question_attrs(%{prompt: "Still a draft on lecture two"})
+        ])
+
+      prompts = Assessments.list_lecture_quiz_question_prompts_for_module(module.id)
+
+      assert prompts == ["Published on lecture one"]
+    end
+  end
+
   describe "lecture_quiz_ready_for_learners?/1 and submit_lecture_quiz/3" do
     setup do
       quiz = lecture_quiz_fixture(passing_score_percent: 50)

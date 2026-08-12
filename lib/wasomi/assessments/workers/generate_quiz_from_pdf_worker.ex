@@ -50,6 +50,26 @@ defmodule Wasomi.Assessments.Workers.GenerateQuizFromPDFWorker do
     end
   end
 
+  def perform(%Oban.Job{
+        attempt: attempt,
+        max_attempts: max_attempts,
+        args: %{"generation_id" => generation_id, "resource_selection" => selection}
+      }) do
+    generation = Assessments.get_generation!(generation_id)
+
+    case run_resources(generation, selection) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        if attempt >= max_attempts do
+          Assessments.mark_generation_failed(generation, inspect(reason))
+        end
+
+        {:error, reason}
+    end
+  end
+
   defp run(generation, key) do
     Assessments.mark_generation_processing(generation)
     quiz = Assessments.get_quiz!(generation.quiz_id)
@@ -70,6 +90,60 @@ defmodule Wasomi.Assessments.Workers.GenerateQuizFromPDFWorker do
       :ok
     end
   end
+
+  defp run_resources(generation, selection) do
+    Assessments.mark_generation_processing(generation)
+    quiz = Assessments.get_quiz!(generation.quiz_id)
+    seed_prompts = Assessments.list_lecture_quiz_question_prompts_for_module(quiz.module_id)
+
+    with {:ok, text} <- gather_module_text(selection),
+         {min_count, max_count} = question_count_range(text),
+         {:ok, drafts} <-
+           question_generator().generate_questions(text,
+             min_count: min_count,
+             max_count: max_count,
+             avoid_duplicating: seed_prompts
+           ),
+         fresh_drafts = reject_duplicate_prompts(drafts, seed_prompts),
+         {:ok, _count} <-
+           Assessments.create_draft_questions_and_mark_ready(generation, fresh_drafts) do
+      :ok
+    end
+  end
+
+  defp gather_module_text(keys) when is_list(keys) do
+    keys
+    |> Enum.reduce_while({:ok, []}, fn key, {:ok, acc} ->
+      case source_text(key) do
+        {:ok, text} -> {:cont, {:ok, [text | acc]}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      {:ok, texts} -> {:ok, texts |> Enum.reverse() |> Enum.join("\n\n---\n\n")}
+      error -> error
+    end
+  end
+
+  defp source_text("video:" <> lecture_id_str) do
+    lecture_id = String.to_integer(lecture_id_str)
+
+    case Wasomi.Catalog.get_lecture_transcript(lecture_id) do
+      %{status: :ready, text: text} -> {:ok, text}
+      %{status: status} -> {:error, {:transcript_not_ready, status}}
+      nil -> {:error, :transcript_not_ready}
+    end
+  end
+
+  defp source_text("doc:" <> resource_id_str) do
+    resource_id = String.to_integer(resource_id_str)
+
+    resource_id
+    |> Wasomi.Catalog.get_lecture_resource!()
+    |> resource_reader().extract_text()
+  end
+
+  defp source_text(_key), do: {:error, :invalid_resource_key}
 
   defp reject_duplicate_prompts(drafts, seed_prompts) do
     seen = MapSet.new(seed_prompts, &normalize_prompt/1)
@@ -108,5 +182,13 @@ defmodule Wasomi.Assessments.Workers.GenerateQuizFromPDFWorker do
         :wasomi,
         :question_generator,
         Wasomi.Assessments.QuestionGenerator.OpenAI
+      )
+
+  defp resource_reader,
+    do:
+      Application.get_env(
+        :wasomi,
+        :lecture_resource_reader,
+        Wasomi.Assessments.LectureResourceReader.Storage
       )
 end

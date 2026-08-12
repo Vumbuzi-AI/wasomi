@@ -589,7 +589,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                       class="inline-flex cursor-not-allowed items-center gap-1.5 rounded-full bg-neutral-100 px-4 py-1.5 text-sm font-medium text-muted"
                       title="Every lecture in this module needs its own generated lecture quiz first"
                     >
-                      <.icon name="hero-sparkles" class="h-4 w-4" /> Add module quiz
+                      Add module quiz
                     </span>
                     <button
                       :if={
@@ -600,7 +600,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                       phx-click={JS.push("generate_quiz", value: %{"module-id" => module.id})}
                       class="inline-flex items-center gap-1.5 rounded-full bg-dark px-4 py-1.5 text-sm font-medium text-white transition hover:bg-primary"
                     >
-                      <.icon name="hero-sparkles" class="h-4 w-4" /> Add module quiz
+                      Add module quiz
                     </button>
                   </div>
                   <p

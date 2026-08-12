@@ -557,6 +557,13 @@ defmodule Wasomi.Catalog do
     |> Repo.all()
   end
 
+  def list_lectures_for_module(module_id) do
+    Lecture
+    |> where([lecture], lecture.module_id == ^module_id)
+    |> order_by([lecture], asc: lecture.position)
+    |> Repo.all()
+  end
+
   @doc """
   Gets a single lecture.
 

@@ -115,6 +115,20 @@ defmodule Wasomi.Assessments do
   end
 
   @doc """
+  Checks if every lecture in a module has a lecture quiz.
+  """
+  def module_ready_for_quiz_generation?(%Wasomi.Catalog.CourseModule{} = module) do
+    lectures = Wasomi.Catalog.list_lectures_for_module(module.id)
+    lectures != [] and Enum.all?(lectures, fn l -> get_lecture_quiz(l.id) != nil end)
+  end
+
+  def module_ready_for_quiz_generation?(module_id) when is_integer(module_id) or is_binary(module_id) do
+    lectures = Wasomi.Catalog.list_lectures_for_module(module_id)
+    lectures != [] and Enum.all?(lectures, fn l -> get_lecture_quiz(l.id) != nil end)
+  end
+
+
+  @doc """
   Gets every quiz belonging to a course, keyed by `module_id`, so the
   course-curriculum view can show "this module already has a quiz" without
   an N+1 lookup per module.
@@ -242,9 +256,20 @@ defmodule Wasomi.Assessments do
   to learners.
   """
   def publish_question(%Question{} = question) do
-    question
-    |> Ecto.Changeset.change(status: :published)
-    |> Repo.update()
+    Repo.transaction(fn ->
+      {:ok, updated_question} =
+        question
+        |> Ecto.Changeset.change(status: :published)
+        |> Repo.update()
+
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      Quiz
+      |> where([q], q.id == ^question.quiz_id)
+      |> Repo.update_all(set: [active: true, published_at: now])
+
+      updated_question
+    end)
   end
 
   @doc """
@@ -454,9 +479,18 @@ defmodule Wasomi.Assessments do
   action rather than clicking Publish on each question individually.
   """
   def publish_all_drafts(%Quiz{id: quiz_id}) do
-    Question
-    |> where([q], q.quiz_id == ^quiz_id and q.status == :draft)
-    |> Repo.update_all(set: [status: :published])
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    {count, _} =
+      Question
+      |> where([q], q.quiz_id == ^quiz_id and q.status == :draft)
+      |> Repo.update_all(set: [status: :published, updated_at: now])
+
+    Quiz
+    |> where([q], q.id == ^quiz_id)
+    |> Repo.update_all(set: [active: true, published_at: now])
+
+    {count, nil}
   end
 
   @doc """
@@ -743,13 +777,63 @@ defmodule Wasomi.Assessments do
     |> Repo.insert()
   end
 
-  def get_lecture_quiz_question!(id), do: Repo.get!(LectureQuizQuestion, id)
-
   def create_lecture_quiz_question(%LectureQuiz{} = quiz, attrs) do
     %LectureQuizQuestion{lecture_quiz_id: quiz.id}
     |> LectureQuizQuestion.changeset(attrs)
     |> Repo.insert()
   end
+
+  def change_lecture_quiz_question(%LectureQuizQuestion{} = question, attrs \\ %{}) do
+    LectureQuizQuestion.changeset(question, attrs)
+  end
+
+  def update_lecture_quiz_question(%LectureQuizQuestion{} = question, attrs) do
+    question
+    |> LectureQuizQuestion.changeset(attrs)
+    |> Repo.update()
+  end
+
+  def reorder_lecture_quiz_questions(%LectureQuiz{id: lecture_quiz_id}, question_ids)
+      when is_list(question_ids) do
+    with {:ok, question_ids} <- normalize_ids(question_ids) do
+      Repo.transaction(fn ->
+        questions =
+          LectureQuizQuestion
+          |> where([question], question.lecture_quiz_id == ^lecture_quiz_id)
+          |> order_by([question], asc: question.position)
+          |> lock("FOR UPDATE")
+          |> Repo.all()
+
+        if Enum.sort(Enum.map(questions, & &1.id)) == Enum.sort(question_ids) do
+          persist_lecture_quiz_question_order(questions, question_ids)
+        else
+          Repo.rollback(:invalid_order)
+        end
+      end)
+    end
+  end
+
+  defp persist_lecture_quiz_question_order(questions, target_ids) do
+    questions
+    |> Enum.with_index(1)
+    |> Enum.each(fn {question, idx} ->
+      question
+      |> Ecto.Changeset.change(position: -idx)
+      |> Repo.update!()
+    end)
+
+    target_ids
+    |> Enum.with_index(1)
+    |> Enum.each(fn {id, new_pos} ->
+      LectureQuizQuestion
+      |> where([q], q.id == ^id)
+      |> Repo.update_all(set: [position: new_pos])
+    end)
+
+    :ok
+  end
+
+  def get_lecture_quiz_question!(id), do: Repo.get!(LectureQuizQuestion, id)
 
   def delete_lecture_quiz_question(%LectureQuizQuestion{} = question), do: Repo.delete(question)
 

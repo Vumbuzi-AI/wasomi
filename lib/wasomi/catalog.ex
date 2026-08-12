@@ -712,17 +712,43 @@ defmodule Wasomi.Catalog do
 
   Used by `Wasomi.Catalog.Workers.TranscribeLecture` to move a transcript
   through `:pending` -> `:processing` -> `:ready`/`:failed` without needing
-  to look up whether a row already exists first.
+  to look up whether a row already exists first. Broadcasts the update so
+  an open admin LiveView (e.g. the lecture-quiz resource picker) can react
+  without polling.
   """
   def upsert_lecture_transcript(lecture_id, attrs) do
-    %LectureTranscript{}
-    |> LectureTranscript.changeset(Map.put(attrs, :lecture_id, lecture_id))
-    |> Repo.insert(
-      on_conflict: {:replace, [:status, :text, :error, :updated_at]},
-      conflict_target: :lecture_id,
-      returning: true
+    result =
+      %LectureTranscript{}
+      |> LectureTranscript.changeset(Map.put(attrs, :lecture_id, lecture_id))
+      |> Repo.insert(
+        on_conflict: {:replace, [:status, :text, :error, :updated_at]},
+        conflict_target: :lecture_id,
+        returning: true
+      )
+
+    with {:ok, transcript} <- result do
+      broadcast_lecture_transcript(transcript)
+    end
+
+    result
+  end
+
+  @doc """
+  Subscribes the caller to transcript status updates for this lecture.
+  """
+  def subscribe_to_lecture_transcript(lecture_id) do
+    Phoenix.PubSub.subscribe(Wasomi.PubSub, lecture_transcript_topic(lecture_id))
+  end
+
+  defp broadcast_lecture_transcript(%LectureTranscript{lecture_id: lecture_id} = transcript) do
+    Phoenix.PubSub.broadcast(
+      Wasomi.PubSub,
+      lecture_transcript_topic(lecture_id),
+      {:lecture_transcript_updated, transcript}
     )
   end
+
+  defp lecture_transcript_topic(lecture_id), do: "lecture_transcript:lecture:#{lecture_id}"
 
   def lecture_resource_count(%Lecture{resources: resources}) when is_list(resources),
     do: length(resources)

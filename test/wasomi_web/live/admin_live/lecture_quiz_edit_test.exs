@@ -93,6 +93,69 @@ defmodule WasomiWeb.AdminLive.LectureQuizEditTest do
     assert generation.question_count_requested == 25
   end
 
+  describe "generating a transcript for the primary video" do
+    test "offers a Generate transcript button when the lecture has none yet", %{conn: conn} do
+      lecture = lecture_fixture(video_asset_id: "playback-1")
+      {:ok, view, html} = live(conn, edit_path(lecture))
+
+      assert html =~ "Generate transcript"
+      assert html =~ "transcript not started yet"
+
+      view
+      |> element("button[phx-click='generate_transcript']")
+      |> render_click()
+
+      transcript = Catalog.get_lecture_transcript(lecture.id)
+      assert transcript.status == :pending
+      assert_enqueued(worker: Wasomi.Catalog.Workers.TranscribeLecture)
+    end
+
+    test "offers a Retry transcript button when the previous attempt failed", %{conn: conn} do
+      lecture = lecture_fixture(video_asset_id: "playback-1")
+      Catalog.upsert_lecture_transcript(lecture.id, %{status: :failed, error: "boom"})
+
+      {:ok, view, html} = live(conn, edit_path(lecture))
+
+      assert html =~ "Retry transcript"
+
+      view
+      |> element("button[phx-click='generate_transcript']")
+      |> render_click()
+
+      assert Catalog.get_lecture_transcript(lecture.id).status == :pending
+    end
+
+    test "hides the button and shows a spinner while a transcript is in progress", %{conn: conn} do
+      lecture = lecture_fixture(video_asset_id: "playback-1")
+      Catalog.upsert_lecture_transcript(lecture.id, %{status: :processing})
+
+      {:ok, _view, html} = live(conn, edit_path(lecture))
+
+      refute html =~ "Generate transcript"
+      assert html =~ "Transcribing…"
+    end
+
+    test "hides the button once the transcript is ready", %{conn: conn} do
+      lecture = lecture_fixture(video_asset_id: "playback-1")
+      Catalog.upsert_lecture_transcript(lecture.id, %{status: :ready, text: "Some text."})
+
+      {:ok, _view, html} = live(conn, edit_path(lecture))
+
+      refute html =~ "Generate transcript"
+      refute html =~ "Transcribing…"
+      assert html =~ "transcript ready"
+    end
+
+    test "updates live when the transcript worker finishes", %{conn: conn} do
+      lecture = lecture_fixture(video_asset_id: "playback-1")
+      {:ok, view, _html} = live(conn, edit_path(lecture))
+
+      Catalog.upsert_lecture_transcript(lecture.id, %{status: :ready, text: "Finished."})
+
+      assert render(view) =~ "transcript ready"
+    end
+  end
+
   describe "reviewing draft questions" do
     setup do
       lecture = lecture_fixture(video_asset_id: "playback-1")

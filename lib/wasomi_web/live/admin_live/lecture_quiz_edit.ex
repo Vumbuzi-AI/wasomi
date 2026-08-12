@@ -3,14 +3,17 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
 
   alias Wasomi.Assessments
   alias Wasomi.Catalog
+  alias Wasomi.Catalog.Workers.TranscribeLecture
 
   @impl true
   def mount(%{"course_slug" => course_slug, "lecture_id" => lecture_id}, _session, socket) do
     lecture = load_lecture!(lecture_id, course_slug)
     lecture_quiz = Assessments.get_lecture_quiz(lecture.id)
 
-    if connected?(socket) && lecture_quiz,
-      do: Assessments.subscribe_to_lecture_quiz_generation(lecture_quiz)
+    if connected?(socket) do
+      if lecture_quiz, do: Assessments.subscribe_to_lecture_quiz_generation(lecture_quiz)
+      Catalog.subscribe_to_lecture_transcript(lecture.id)
+    end
 
     {:ok,
      socket
@@ -31,7 +34,22 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
     {:noreply, reload(socket)}
   end
 
+  def handle_info({:lecture_transcript_updated, transcript}, socket) do
+    {:noreply, assign(socket, :transcript, transcript)}
+  end
+
   @impl true
+  def handle_event("generate_transcript", _params, socket) do
+    lecture = socket.assigns.lecture
+    {:ok, transcript} = Catalog.upsert_lecture_transcript(lecture.id, %{status: :pending})
+    TranscribeLecture.enqueue(lecture.id)
+
+    {:noreply,
+     socket
+     |> assign(:transcript, transcript)
+     |> put_flash(:info, "Generating transcript in the background…")}
+  end
+
   def handle_event("generate", params, socket) do
     lecture = socket.assigns.lecture
     resource_keys = params |> Map.get("resources", []) |> List.wrap()
@@ -128,21 +146,40 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
             <fieldset class="space-y-2">
               <legend class="text-sm font-medium text-dark">Resources</legend>
 
-              <label
+              <div
                 :if={@lecture.video_asset_id}
-                class="flex items-center gap-2 rounded-xl border border-black/5 px-4 py-2.5 text-sm text-dark"
+                class="flex items-center justify-between gap-3 rounded-xl border border-black/5 px-4 py-2.5"
               >
-                <input
-                  type="checkbox"
-                  name="resources[]"
-                  value="video"
-                  checked={"video" in @default_resources}
-                  class="rounded border-black/20 text-primary focus:ring-primary"
-                /> Primary video
-                <span class="text-xs text-muted">
-                  (uses the transcript, not the raw video — {transcript_status_label(@transcript)})
+                <label class="flex items-center gap-2 text-sm text-dark">
+                  <input
+                    type="checkbox"
+                    name="resources[]"
+                    value="video"
+                    checked={"video" in @default_resources}
+                    class="rounded border-black/20 text-primary focus:ring-primary"
+                  /> Primary video
+                  <span class="text-xs text-muted">
+                    (uses the transcript, not the raw video — {transcript_status_label(@transcript)})
+                  </span>
+                </label>
+                <button
+                  :if={transcript_needs_generation?(@transcript)}
+                  type="button"
+                  phx-click="generate_transcript"
+                  class="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-black/10 px-3 py-1.5 text-xs font-medium text-dark transition hover:border-primary hover:text-primary"
+                >
+                  <.icon name="hero-document-text" class="h-3.5 w-3.5" />
+                  {if @transcript && @transcript.status == :failed,
+                    do: "Retry transcript",
+                    else: "Generate transcript"}
+                </button>
+                <span
+                  :if={@transcript && @transcript.status in [:pending, :processing]}
+                  class="inline-flex shrink-0 items-center gap-1.5 text-xs text-muted"
+                >
+                  <.icon name="hero-arrow-path" class="h-3.5 w-3.5 animate-spin" /> Transcribing…
                 </span>
-              </label>
+              </div>
 
               <label
                 :for={resource <- @document_resources}
@@ -430,6 +467,9 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
   defp transcript_status_label(%{status: :ready}), do: "transcript ready"
   defp transcript_status_label(%{status: status}), do: "transcript #{status}"
   defp transcript_status_label(nil), do: "transcript not started yet"
+
+  defp transcript_needs_generation?(nil), do: true
+  defp transcript_needs_generation?(%{status: status}), do: status == :failed
 
   defp source_label(resource_keys, assigns) do
     labels =

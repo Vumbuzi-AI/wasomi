@@ -507,9 +507,10 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
             <div>
               <h2 class="text-xl font-semibold text-dark">Questions</h2>
               <p :if={@lecture_quiz} class="mt-0.5 text-xs text-body">
-                {length(@lecture_quiz.questions)} question(s) {if draft_questions(@lecture_quiz) != [],
-                                                                  do:
-                                                                    "· #{length(draft_questions(@lecture_quiz))} draft(s)"}
+                {length(@lecture_quiz.questions)} question(s)
+                <span :if={draft_questions(@lecture_quiz) != []}>
+                  · {length(draft_questions(@lecture_quiz))} draft(s)
+                </span>
               </p>
             </div>
 

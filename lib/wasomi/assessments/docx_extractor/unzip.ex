@@ -50,15 +50,23 @@ defmodule Wasomi.Assessments.DocxExtractor.Unzip do
     |> String.replace("&quot;", "\"")
     |> String.replace("&apos;", "'")
     |> then(
-      &Regex.replace(~r/&#x([0-9a-fA-F]+);/, &1, fn _, hex ->
-        <<String.to_integer(hex, 16)::utf8>>
+      &Regex.replace(~r/&#x([0-9a-fA-F]+);/, &1, fn full, hex ->
+        codepoint_to_utf8(String.to_integer(hex, 16), full)
       end)
     )
     |> then(
-      &Regex.replace(~r/&#(\d+);/, &1, fn _, dec ->
-        <<String.to_integer(dec)::utf8>>
+      &Regex.replace(~r/&#(\d+);/, &1, fn full, dec ->
+        codepoint_to_utf8(String.to_integer(dec), full)
       end)
     )
     |> String.replace("&amp;", "&")
   end
+
+  defp codepoint_to_utf8(cp, original) when cp in 0..0x10FFFF do
+    <<cp::utf8>>
+  rescue
+    ArgumentError -> original
+  end
+
+  defp codepoint_to_utf8(_cp, original), do: original
 end

@@ -51,7 +51,8 @@ defmodule Wasomi.Assessments.LectureResourceReader.Storage do
   end
 
   defp download(url) do
-    opts = [retry: :transient, max_retries: 3, receive_timeout: 60_000] ++ req_options()
+    opts =
+      Keyword.merge([retry: :transient, max_retries: 3, receive_timeout: 60_000], req_options())
 
     case Req.get(url, opts) do
       {:ok, %{status: status, body: body}} when status in 200..299 -> {:ok, body}

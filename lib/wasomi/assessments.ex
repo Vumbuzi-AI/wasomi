@@ -165,18 +165,21 @@ defmodule Wasomi.Assessments do
 
     quiz_ids = Map.keys(quiz_titles)
 
-    QuizSubmission
-    |> where([s], s.quiz_id in ^quiz_ids)
-    |> order_by([s], asc: s.user_id, asc: s.quiz_id, desc: s.submitted_at, desc: s.id)
-    |> Repo.all()
-    |> Enum.uniq_by(&{&1.user_id, &1.quiz_id})
-    |> Enum.group_by(& &1.user_id, fn submission ->
-      %{
-        quiz_title: Map.fetch!(quiz_titles, submission.quiz_id),
-        score_percent: submission.score_percent,
-        passed: submission.passed
-      }
-    end)
+    if quiz_ids == [],
+      do: %{},
+      else:
+        QuizSubmission
+        |> where([s], s.quiz_id in ^quiz_ids)
+        |> order_by([s], asc: s.user_id, asc: s.quiz_id, desc: s.submitted_at, desc: s.id)
+        |> Repo.all()
+        |> Enum.uniq_by(&{&1.user_id, &1.quiz_id})
+        |> Enum.group_by(& &1.user_id, fn submission ->
+          %{
+            quiz_title: Map.fetch!(quiz_titles, submission.quiz_id),
+            score_percent: submission.score_percent,
+            passed: submission.passed
+          }
+        end)
   end
 
   @doc """

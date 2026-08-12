@@ -126,21 +126,29 @@ defmodule Wasomi.Assessments.Workers.GenerateQuizFromPDFWorker do
   end
 
   defp source_text("video:" <> lecture_id_str) do
-    lecture_id = String.to_integer(lecture_id_str)
+    case Integer.parse(lecture_id_str) do
+      {lecture_id, ""} ->
+        case Wasomi.Catalog.get_lecture_transcript(lecture_id) do
+          %{status: :ready, text: text} -> {:ok, text}
+          %{status: status} -> {:error, {:transcript_not_ready, status}}
+          nil -> {:error, :transcript_not_ready}
+        end
 
-    case Wasomi.Catalog.get_lecture_transcript(lecture_id) do
-      %{status: :ready, text: text} -> {:ok, text}
-      %{status: status} -> {:error, {:transcript_not_ready, status}}
-      nil -> {:error, :transcript_not_ready}
+      _ ->
+        {:error, :invalid_resource_key}
     end
   end
 
   defp source_text("doc:" <> resource_id_str) do
-    resource_id = String.to_integer(resource_id_str)
+    case Integer.parse(resource_id_str) do
+      {resource_id, ""} ->
+        resource_id
+        |> Wasomi.Catalog.get_lecture_resource!()
+        |> resource_reader().extract_text()
 
-    resource_id
-    |> Wasomi.Catalog.get_lecture_resource!()
-    |> resource_reader().extract_text()
+      _ ->
+        {:error, :invalid_resource_key}
+    end
   end
 
   defp source_text(_key), do: {:error, :invalid_resource_key}

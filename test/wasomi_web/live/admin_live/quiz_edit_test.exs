@@ -204,7 +204,8 @@ defmodule WasomiWeb.AdminLive.QuizEditTest do
     assert length(Assessments.get_quiz_with_questions!(quiz.id).questions) == 2
   end
 
-  test "publishing a draft question or all drafts activates the quiz and marks questions published", %{conn: conn} do
+  test "publishing a draft question or all drafts activates the quiz and marks questions published",
+       %{conn: conn} do
     quiz = ready_quiz_fixture(%{active: false})
     first = question_fixture(%{quiz: quiz, status: :draft, position: 1})
     _second = question_fixture(%{quiz: quiz, status: :draft, position: 2})
@@ -606,14 +607,18 @@ defmodule WasomiWeb.AdminLive.QuizEditTest do
     quiz
   end
 
-  test "disables module quiz generation controls and displays tooltip warning when lectures lack a lecture quiz", %{
-    conn: conn
-  } do
+  test "disables module quiz generation controls and displays tooltip warning when lectures lack a lecture quiz",
+       %{
+         conn: conn
+       } do
     quiz = quiz_fixture()
     {:ok, view, _html} = live(conn, edit_path(quiz))
 
     assert render(view) =~ "Module Quiz Generation Locked"
-    assert render(view) =~ "Every lecture in this module must have a generated lecture quiz before generating the module quiz."
+
+    assert render(view) =~
+             "Every lecture in this module must have a generated lecture quiz before generating the module quiz."
+
     assert has_element?(view, "#generate-questions-form button[disabled]")
   end
 

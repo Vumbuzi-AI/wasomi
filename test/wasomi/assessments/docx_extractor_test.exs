@@ -26,7 +26,9 @@ defmodule Wasomi.Assessments.DocxExtractorTest do
       {:ok, {~c"mem", docx_binary}} = :zip.create(~c"mem", files, [:memory])
 
       assert {:ok, text} = Unzip.extract_text(docx_binary)
-      assert text == "First paragraph continued & extended.\n\nSecond paragraph with <special> characters."
+
+      assert text ==
+               "First paragraph continued & extended.\n\nSecond paragraph with <special> characters."
     end
 
     test "returns error for missing word/document.xml in zip" do

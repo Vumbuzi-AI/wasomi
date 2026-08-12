@@ -242,7 +242,11 @@ defmodule Wasomi.Assessments.Workers.GenerateQuizFromPDFWorkerTest do
     test "generates module quiz from selected module resources (video transcript and document)" do
       module = course_module_fixture()
       lecture = lecture_fixture(module_id: module.id, video_asset_id: "asset_123")
-      Wasomi.Catalog.upsert_lecture_transcript(lecture.id, %{status: :ready, text: "Video transcript text."})
+
+      Wasomi.Catalog.upsert_lecture_transcript(lecture.id, %{
+        status: :ready,
+        text: "Video transcript text."
+      })
 
       resource =
         lecture_resource_fixture(

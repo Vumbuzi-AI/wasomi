@@ -36,8 +36,7 @@ defmodule Wasomi.Assessments.DocxExtractor.Unzip do
     Regex.scan(~r/<w:p\b[^>]*>(.*?)<\/w:p>/s, xml_content)
     |> Enum.map(fn [_, p_content] ->
       Regex.scan(~r/<w:t\b[^>]*>(.*?)<\/w:t>/s, p_content)
-      |> Enum.map(fn [_, t_text] -> decode_xml_entities(t_text) end)
-      |> Enum.join("")
+      |> Enum.map_join("", fn [_, t_text] -> decode_xml_entities(t_text) end)
       |> String.trim()
     end)
     |> Enum.reject(&(&1 == ""))
@@ -50,6 +49,16 @@ defmodule Wasomi.Assessments.DocxExtractor.Unzip do
     |> String.replace("&gt;", ">")
     |> String.replace("&quot;", "\"")
     |> String.replace("&apos;", "'")
+    |> then(
+      &Regex.replace(~r/&#x([0-9a-fA-F]+);/, &1, fn _, hex ->
+        <<String.to_integer(hex, 16)::utf8>>
+      end)
+    )
+    |> then(
+      &Regex.replace(~r/&#(\d+);/, &1, fn _, dec ->
+        <<String.to_integer(dec)::utf8>>
+      end)
+    )
     |> String.replace("&amp;", "&")
   end
 end

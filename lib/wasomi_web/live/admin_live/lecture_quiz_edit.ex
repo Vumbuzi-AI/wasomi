@@ -395,7 +395,8 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
                     class="shrink-0 rounded border-black/20 text-primary focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
                   />
                   <span class="truncate">
-                    Primary video <span class="text-xs text-muted">({transcript_status_label(@transcript)})</span>
+                    Primary video
+                    <span class="text-xs text-muted">({transcript_status_label(@transcript)})</span>
                   </span>
                 </label>
                 <button
@@ -506,7 +507,9 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
             <div>
               <h2 class="text-xl font-semibold text-dark">Questions</h2>
               <p :if={@lecture_quiz} class="mt-0.5 text-xs text-body">
-                {length(@lecture_quiz.questions)} question(s) {if draft_questions(@lecture_quiz) != [], do: "· #{length(draft_questions(@lecture_quiz))} draft(s)"}
+                {length(@lecture_quiz.questions)} question(s) {if draft_questions(@lecture_quiz) != [],
+                                                                  do:
+                                                                    "· #{length(draft_questions(@lecture_quiz))} draft(s)"}
               </p>
             </div>
 
@@ -615,12 +618,16 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
           </div>
 
           <section
-            :if={is_nil(@lecture_quiz) or (@lecture_quiz.questions == [] and is_nil(@new_question_form))}
+            :if={
+              is_nil(@lecture_quiz) or (@lecture_quiz.questions == [] and is_nil(@new_question_form))
+            }
             id="empty-quiz"
             class="rounded-3xl border border-dashed border-black/10 bg-white p-10 text-center"
           >
             <p class="font-medium text-dark">This lecture quiz has no questions yet.</p>
-            <p class="mt-1 text-sm text-body">Add your first question manually or generate from lecture resources above.</p>
+            <p class="mt-1 text-sm text-body">
+              Add your first question manually or generate from lecture resources above.
+            </p>
             <div class="mt-5 flex justify-center">
               <button
                 type="button"
@@ -677,8 +684,6 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
     </.admin_layout>
     """
   end
-
-
 
   attr :status, :atom, required: true
   attr :generated_count, :integer, default: nil

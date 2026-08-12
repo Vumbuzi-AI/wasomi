@@ -319,14 +319,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
     quiz = socket.assigns.quiz
     user = socket.assigns.current_user
 
-    if not socket.assigns.module_ready? do
-      {:noreply,
-       put_flash(
-         socket,
-         :error,
-         "Every lecture in this module must have a generated lecture quiz before generating the module quiz."
-       )}
-    else
+    if socket.assigns.module_ready? do
       resource_keys = params |> Map.get("resources", []) |> List.wrap()
 
       pdf_results =
@@ -344,7 +337,8 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
                |> assign(:generations, Assessments.list_generations_for_quiz(quiz))}
 
             [{:error, reason}] ->
-              {:noreply, put_flash(socket, :error, "Could not start generation: #{inspect(reason)}")}
+              {:noreply,
+               put_flash(socket, :error, "Could not start generation: #{inspect(reason)}")}
           end
 
         resource_keys != [] ->
@@ -368,6 +362,13 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
              "Select at least one module resource or upload a PDF document."
            )}
       end
+    else
+      {:noreply,
+       put_flash(
+         socket,
+         :error,
+         "Every lecture in this module must have a generated lecture quiz before generating the module quiz."
+       )}
     end
   end
 
@@ -633,7 +634,9 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
                           disabled={not @module_ready?}
                           class="shrink-0 rounded border-black/20 text-primary focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
                         />
-                        <span class="min-w-0 flex-1 truncate font-medium" title={resource.name}>{resource.name}</span>
+                        <span class="min-w-0 flex-1 truncate font-medium" title={resource.name}>
+                          {resource.name}
+                        </span>
                       </label>
 
                       <p
@@ -664,7 +667,11 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
                           !@module_ready? && "cursor-not-allowed bg-neutral-200 text-muted"
                         ]}>
                           <.icon name="hero-document-arrow-up" class="h-4 w-4" /> Select file
-                          <.live_file_input upload={@uploads.source_pdf} disabled={not @module_ready?} class="sr-only" />
+                          <.live_file_input
+                            upload={@uploads.source_pdf}
+                            disabled={not @module_ready?}
+                            class="sr-only"
+                          />
                         </label>
                       </div>
 
@@ -678,7 +685,9 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
                           </span>
                           <div class="min-w-0 flex-1">
                             <div class="flex items-center justify-between gap-2">
-                              <p class="truncate font-medium text-dark text-xs">{entry.client_name}</p>
+                              <p class="truncate font-medium text-dark text-xs">
+                                {entry.client_name}
+                              </p>
                               <span class="shrink-0 text-xs tabular-nums text-muted">
                                 {entry.progress}%
                               </span>
@@ -721,8 +730,16 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
               <div class="flex justify-end pt-2">
                 <button
                   type="submit"
-                  disabled={not @module_ready? or (@selected_resources == [] and @uploads.source_pdf.entries == [])}
-                  title={if not @module_ready?, do: "Every lecture in this module must have a generated lecture quiz before generating the module quiz.", else: "Generate module quiz"}
+                  disabled={
+                    not @module_ready? or
+                      (@selected_resources == [] and @uploads.source_pdf.entries == [])
+                  }
+                  title={
+                    if not @module_ready?,
+                      do:
+                        "Every lecture in this module must have a generated lecture quiz before generating the module quiz.",
+                      else: "Generate module quiz"
+                  }
                   class="inline-flex items-center gap-2 rounded-full bg-dark px-6 py-3 text-sm font-semibold text-white transition hover:bg-primary active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-dark disabled:active:scale-100"
                 >
                   <.icon name="hero-arrow-path" class="h-4 w-4" /> Generate module quiz
@@ -800,7 +817,8 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
             <div>
               <h2 class="text-xl font-semibold text-dark">Questions</h2>
               <p class="mt-0.5 text-xs text-body">
-                {length(@quiz.questions)} question(s) {if draft_questions(@quiz) != [], do: "· #{length(draft_questions(@quiz))} draft(s)"}
+                {length(@quiz.questions)} question(s) {if draft_questions(@quiz) != [],
+                  do: "· #{length(draft_questions(@quiz))} draft(s)"}
               </p>
             </div>
 
@@ -913,7 +931,9 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
             class="rounded-3xl border border-dashed border-black/10 bg-white p-10 text-center"
           >
             <p class="font-medium text-dark">This quiz has no questions yet.</p>
-            <p class="mt-1 text-sm text-body">Add your first question manually or generate from resources above.</p>
+            <p class="mt-1 text-sm text-body">
+              Add your first question manually or generate from resources above.
+            </p>
             <div class="mt-5 flex justify-center">
               <button
                 type="button"
@@ -1004,7 +1024,9 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
       end)
 
     module_ready? = Assessments.module_ready_for_quiz_generation?(quiz.module_id)
-    lectures = Catalog.list_lectures_for_module(quiz.module_id) |> Wasomi.Repo.preload([:resources])
+
+    lectures =
+      Catalog.list_lectures_for_module(quiz.module_id) |> Wasomi.Repo.preload([:resources])
 
     document_resources =
       Enum.flat_map(lectures, fn lecture ->

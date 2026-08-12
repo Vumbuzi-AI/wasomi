@@ -282,11 +282,17 @@ defmodule WasomiWeb.AdminLive.LectureQuizEditTest do
       |> render_submit()
 
       assert render(view) =~ "Question added."
-      quiz = Assessments.get_lecture_quiz_with_questions!(Assessments.get_lecture_quiz(lecture.id).id)
+
+      quiz =
+        Assessments.get_lecture_quiz_with_questions!(Assessments.get_lecture_quiz(lecture.id).id)
+
       assert Enum.any?(quiz.questions, &(&1.prompt == "What is the capital of Kenya?"))
     end
 
-    test "admin can edit and save question prompt and options inline", %{conn: conn, lecture: lecture} do
+    test "admin can edit and save question prompt and options inline", %{
+      conn: conn,
+      lecture: lecture
+    } do
       {:ok, view, _html} = live(conn, edit_path(lecture))
 
       [question] =

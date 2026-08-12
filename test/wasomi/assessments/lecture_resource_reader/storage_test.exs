@@ -22,8 +22,7 @@ defmodule Wasomi.Assessments.LectureResourceReader.StorageTest do
     end)
 
     files = [
-      {~c"word/document.xml",
-       "<w:p><w:t>Extracted DOCX prose.</w:t></w:p>"}
+      {~c"word/document.xml", "<w:p><w:t>Extracted DOCX prose.</w:t></w:p>"}
     ]
 
     {:ok, {~c"mem", docx_binary}} = :zip.create(~c"mem", files, [:memory])

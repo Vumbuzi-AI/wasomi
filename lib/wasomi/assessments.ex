@@ -122,11 +122,11 @@ defmodule Wasomi.Assessments do
     lectures != [] and Enum.all?(lectures, fn l -> get_lecture_quiz(l.id) != nil end)
   end
 
-  def module_ready_for_quiz_generation?(module_id) when is_integer(module_id) or is_binary(module_id) do
+  def module_ready_for_quiz_generation?(module_id)
+      when is_integer(module_id) or is_binary(module_id) do
     lectures = Wasomi.Catalog.list_lectures_for_module(module_id)
     lectures != [] and Enum.all?(lectures, fn l -> get_lecture_quiz(l.id) != nil end)
   end
-
 
   @doc """
   Gets every quiz belonging to a course, keyed by `module_id`, so the
@@ -257,18 +257,21 @@ defmodule Wasomi.Assessments do
   """
   def publish_question(%Question{} = question) do
     Repo.transaction(fn ->
-      {:ok, updated_question} =
-        question
-        |> Ecto.Changeset.change(status: :published)
-        |> Repo.update()
+      case question
+           |> Ecto.Changeset.change(status: :published)
+           |> Repo.update() do
+        {:ok, updated_question} ->
+          now = DateTime.utc_now() |> DateTime.truncate(:second)
 
-      now = DateTime.utc_now() |> DateTime.truncate(:second)
+          Quiz
+          |> where([q], q.id == ^question.quiz_id)
+          |> Repo.update_all(set: [active: true, published_at: now])
 
-      Quiz
-      |> where([q], q.id == ^question.quiz_id)
-      |> Repo.update_all(set: [active: true, published_at: now])
+          updated_question
 
-      updated_question
+        {:error, changeset} ->
+          Repo.rollback(changeset)
+      end
     end)
   end
 

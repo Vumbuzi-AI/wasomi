@@ -62,13 +62,21 @@ defmodule Wasomi.Paginate do
   for anything absent, non-numeric, or less than 1 — the same fallback
   `paginate/3`/`paginate_list/3` apply internally, exposed for LiveViews
   to use while reading `handle_params/3` query strings.
+
+  Query params are always a string or `nil` in practice, but this also
+  accepts an already-parsed integer so it's safe to call defensively.
   """
-  def parse_page(value) do
-    case value && Integer.parse(value) do
+  def parse_page(value) when is_integer(value) and value > 0, do: value
+  def parse_page(value) when is_integer(value), do: 1
+
+  def parse_page(value) when is_binary(value) do
+    case Integer.parse(value) do
       {page, _} when page > 0 -> page
       _ -> 1
     end
   end
+
+  def parse_page(_value), do: 1
 
   defp build(total_count, page, page_size, entries_fn) do
     total_pages = max(ceil(total_count / page_size), 1)

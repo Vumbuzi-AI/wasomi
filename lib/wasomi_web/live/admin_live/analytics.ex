@@ -49,9 +49,15 @@ defmodule WasomiWeb.AdminLive.Analytics do
     {:noreply, push_patch(socket, to: ~p"/admin/analytics?#{raw_query_params(params)}")}
   end
 
-  def handle_event("switch_tab", %{"tab" => tab}, socket) do
-    {:noreply, assign(socket, :active_tab, String.to_existing_atom(tab))}
+  def handle_event("switch_tab", %{"tab" => "overview"}, socket) do
+    {:noreply, assign(socket, :active_tab, :overview)}
   end
+
+  def handle_event("switch_tab", %{"tab" => "revenue"}, socket) do
+    {:noreply, assign(socket, :active_tab, :revenue)}
+  end
+
+  def handle_event("switch_tab", _params, socket), do: {:noreply, socket}
 
   @impl true
   def render(assigns) do

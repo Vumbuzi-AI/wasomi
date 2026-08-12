@@ -152,6 +152,14 @@ defmodule WasomiWeb.AdminLive.AnalyticsTest do
     end
   end
 
+  test "switch_tab ignores an unrecognized tab instead of crashing", %{conn: conn} do
+    {:ok, view, _html} = live(conn, ~p"/admin/analytics")
+
+    html = render_click(view, "switch_tab", %{"tab" => "not_a_real_tab"})
+
+    assert html =~ "Conversion funnel"
+  end
+
   test "clearing filters removes the query params", %{conn: conn} do
     course = course_fixture()
     {:ok, view, _html} = live(conn, ~p"/admin/analytics?course_id=#{course.id}")

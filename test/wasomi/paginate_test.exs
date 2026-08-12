@@ -111,5 +111,11 @@ defmodule Wasomi.PaginateTest do
       assert Paginate.parse_page("0") == 1
       assert Paginate.parse_page("-5") == 1
     end
+
+    test "also accepts an already-parsed integer instead of crashing" do
+      assert Paginate.parse_page(3) == 3
+      assert Paginate.parse_page(0) == 1
+      assert Paginate.parse_page(-5) == 1
+    end
   end
 end

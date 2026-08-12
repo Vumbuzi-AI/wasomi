@@ -573,11 +573,11 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                     </span>
                   </div>
 
-                  <div class="mt-3 flex flex-wrap items-center gap-4">
+                  <div class="mt-3 flex flex-wrap items-center gap-2">
                     <button
                       type="button"
                       phx-click={JS.push("new_lecture", value: %{"module-id" => module.id})}
-                      class="inline-flex items-center gap-1.5 text-sm font-medium text-primary transition hover:text-dark"
+                      class="inline-flex items-center gap-1.5 rounded-full bg-dark px-4 py-1.5 text-sm font-medium text-white transition hover:bg-primary"
                     >
                       <.icon name="hero-plus-circle" class="h-4 w-4" /> Add lecture
                     </button>
@@ -586,10 +586,10 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                         is_nil(Map.get(@quizzes_by_module, module.id)) and
                           not module_ready_for_quiz_generation?(module, @lecture_quiz_question_counts)
                       }
-                      class="inline-flex items-center gap-1.5 text-sm font-medium text-muted"
+                      class="inline-flex cursor-not-allowed items-center gap-1.5 rounded-full bg-neutral-100 px-4 py-1.5 text-sm font-medium text-muted"
                       title="Every lecture in this module needs its own generated lecture quiz first"
                     >
-                      <.icon name="hero-sparkles" class="h-4 w-4" /> Generate quiz (AI)
+                      <.icon name="hero-sparkles" class="h-4 w-4" /> Add module quiz
                     </span>
                     <button
                       :if={
@@ -598,9 +598,9 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                       }
                       type="button"
                       phx-click={JS.push("generate_quiz", value: %{"module-id" => module.id})}
-                      class="inline-flex items-center gap-1.5 text-sm font-medium text-primary transition hover:text-dark"
+                      class="inline-flex items-center gap-1.5 rounded-full bg-dark px-4 py-1.5 text-sm font-medium text-white transition hover:bg-primary"
                     >
-                      <.icon name="hero-sparkles" class="h-4 w-4" /> Generate quiz (AI)
+                      <.icon name="hero-sparkles" class="h-4 w-4" /> Add module quiz
                     </button>
                   </div>
                   <p

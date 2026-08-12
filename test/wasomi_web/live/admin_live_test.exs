@@ -392,7 +392,7 @@ defmodule WasomiWeb.AdminLiveTest do
       module = course_module_fixture(course_id: course.id, title: "Module One")
       {:ok, view, html} = live(conn, ~p"/admin/courses/#{course.slug}")
 
-      assert has_element?(view, "button", "Generate quiz (AI)")
+      assert has_element?(view, "button", "Add module quiz")
       refute html =~ "published"
 
       quiz = quiz_fixture(%{module: module, title: "Module One Quiz"})
@@ -404,7 +404,7 @@ defmodule WasomiWeb.AdminLiveTest do
       assert html =~ "Module One Quiz"
       assert html =~ "1 published"
       assert html =~ "1 to review"
-      refute has_element?(view, "button", "Generate quiz (AI)")
+      refute has_element?(view, "button", "Add module quiz")
       assert has_element?(view, "a[title='Manage quiz']")
     end
 
@@ -432,7 +432,7 @@ defmodule WasomiWeb.AdminLiveTest do
 
       refute has_element?(view, "#delete-quiz-modal")
       refute has_element?(view, "button[title='Delete quiz']")
-      assert has_element?(view, "button", "Generate quiz (AI)")
+      assert has_element?(view, "button", "Add module quiz")
       assert_raise Ecto.NoResultsError, fn -> Wasomi.Assessments.get_quiz!(quiz.id) end
     end
 
@@ -446,7 +446,7 @@ defmodule WasomiWeb.AdminLiveTest do
 
       {:ok, view, html} = live(conn, ~p"/admin/courses/#{course.slug}")
 
-      refute has_element?(view, "button", "Generate quiz (AI)")
+      refute has_element?(view, "button", "Add module quiz")
       assert html =~ "Generate a quiz for every lecture in this module"
 
       quiz = lecture_quiz_fixture(lecture: first)
@@ -458,7 +458,7 @@ defmodule WasomiWeb.AdminLiveTest do
         ])
 
       {:ok, view, html} = live(conn, ~p"/admin/courses/#{course.slug}")
-      refute has_element?(view, "button", "Generate quiz (AI)")
+      refute has_element?(view, "button", "Add module quiz")
       assert html =~ "Generate a quiz for every lecture in this module"
 
       second_quiz = lecture_quiz_fixture(lecture: second)
@@ -471,7 +471,7 @@ defmodule WasomiWeb.AdminLiveTest do
         )
 
       {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
-      assert has_element?(view, "button", "Generate quiz (AI)")
+      assert has_element?(view, "button", "Add module quiz")
     end
 
     test "generating a module quiz server-side rejects a not-yet-ready module", %{conn: conn} do

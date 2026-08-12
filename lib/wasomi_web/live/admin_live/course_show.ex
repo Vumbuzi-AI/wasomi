@@ -541,11 +541,11 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                     </span>
                   </div>
 
-                  <div class="mt-3 flex flex-wrap items-center gap-4">
+                  <div class="mt-3 flex flex-wrap items-center gap-2">
                     <button
                       type="button"
                       phx-click={JS.push("new_lecture", value: %{"module-id" => module.id})}
-                      class="inline-flex items-center gap-1.5 text-sm font-medium text-primary transition hover:text-dark"
+                      class="inline-flex items-center gap-1.5 rounded-full bg-dark px-4 py-1.5 text-sm font-medium text-white transition hover:bg-primary"
                     >
                       <.icon name="hero-plus-circle" class="h-4 w-4" /> Add lecture
                     </button>
@@ -553,9 +553,9 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                       :if={is_nil(Map.get(@quizzes_by_module, module.id))}
                       type="button"
                       phx-click={JS.push("generate_quiz", value: %{"module-id" => module.id})}
-                      class="inline-flex items-center gap-1.5 text-sm font-medium text-primary transition hover:text-dark"
+                      class="inline-flex items-center gap-1.5 rounded-full bg-dark px-4 py-1.5 text-sm font-medium text-white transition hover:bg-primary"
                     >
-                      <.icon name="hero-sparkles" class="h-4 w-4" /> Generate quiz (AI)
+                      <.icon name="hero-sparkles" class="h-4 w-4" /> Add module quiz
                     </button>
                   </div>
                 </div>

@@ -27,7 +27,8 @@ defmodule Wasomi.Paginate do
   stale bookmarked URL after rows are deleted) returns the nearest valid
   page's results instead of an empty page or an error.
   """
-  def paginate(query, page, page_size) when is_integer(page_size) and page_size > 0 do
+  def paginate(query, page, page_size)
+      when is_integer(page) and is_integer(page_size) and page_size > 0 do
     total_count = Repo.aggregate(query, :count)
 
     entries = fn page ->
@@ -51,7 +52,8 @@ defmodule Wasomi.Paginate do
   `Wasomi.Payments.revenue_minor_by_course/0` and friends) rather than one
   join-prone SQL query.
   """
-  def paginate_list(list, page, page_size) when is_list(list) and page_size > 0 do
+  def paginate_list(list, page, page_size)
+      when is_list(list) and is_integer(page) and is_integer(page_size) and page_size > 0 do
     build(length(list), page, page_size, &Enum.slice(list, (&1 - 1) * page_size, page_size))
   end
 

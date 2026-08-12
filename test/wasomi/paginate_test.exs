@@ -57,6 +57,11 @@ defmodule Wasomi.PaginateTest do
     assert page.entries == []
   end
 
+  test "raises for a non-integer page instead of silently misbehaving" do
+    assert_raise FunctionClauseError, fn -> Paginate.paginate(base_query(), "1", 10) end
+    assert_raise FunctionClauseError, fn -> Paginate.paginate(base_query(), nil, 10) end
+  end
+
   describe "paginate_list/3" do
     test "paginates an in-memory list the same way as a query" do
       page = Paginate.paginate_list(Enum.to_list(1..5), 1, 2)
@@ -87,6 +92,11 @@ defmodule Wasomi.PaginateTest do
       assert page.total_count == 0
       assert page.total_pages == 1
       assert page.entries == []
+    end
+
+    test "raises for a non-integer page instead of silently misbehaving" do
+      assert_raise FunctionClauseError, fn -> Paginate.paginate_list([1, 2, 3], "1", 2) end
+      assert_raise FunctionClauseError, fn -> Paginate.paginate_list([1, 2, 3], nil, 2) end
     end
   end
 

@@ -88,6 +88,7 @@ defmodule WasomiWeb.Router do
     end
 
     get "/media/lectures/:id/playback", MediaController, :playback
+    get "/learn/resources/:id/download", ResourceController, :download
     get "/certificates/:id/download", CertificateController, :download
     get "/payments/paystack/callback", PaystackCallbackController, :show
   end

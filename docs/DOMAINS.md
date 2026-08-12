@@ -24,10 +24,13 @@ Schemas:
 - `Wasomi.Catalog.Course` backed by `courses`
 - `Wasomi.Catalog.CourseModule` backed by `modules`
 - `Wasomi.Catalog.Lecture` backed by `lectures`
+- `Wasomi.Catalog.LectureTranscript` backed by `lecture_transcripts`, 1:1 with `Lecture`, kept separate rather than a field on `Lecture` because `update_lecture_content/4` wholesale-deletes/reinserts resources and questions on every save
 
 Responsibility: course content, public catalog ordering, outlines, prices, lecture metadata, and admin CRUD/reordering.
 
 Key functions include `list_published_courses/0`, `get_published_course_by_slug!/1`, `get_course_with_outline!/1`, `format_price/1`, `create_course/1`, `update_course/2`, `reorder_course_modules/2`, `create_course_module/1`, `reorder_module_lectures/2`, and lecture CRUD functions.
+
+`create_lecture_content/3`/`update_lecture_content/4` enqueue `Wasomi.Catalog.Workers.TranscribeLecture` (Oban, `:transcription` queue) whenever a lecture's `video_asset_id` changes to a real value — comparing old vs. new so unrelated edits don't restart transcription. The worker resolves a media download URL from the configured `:media_provider` adapter (`Wasomi.Media.download_url/1` callback) and transcribes it via the configured `:transcriber` adapter (`Wasomi.Catalog.Transcriber` behaviour, default `Wasomi.Catalog.Transcriber.OpenAI`), persisting progress through `get_lecture_transcript/1`/`upsert_lecture_transcript/2`.
 
 Catalog connects to enrollments for access control, payments for checkout amounts, learning for progress, and certificates for completion scopes.
 
@@ -100,6 +103,8 @@ Responsibility: protected video playback URLs, admin upload creation/status, and
 Key functions include `playback_token/4`, `playback_url/4`, `create_upload/4`, `upload_status/3`, and `configured_adapter/0`.
 
 Only admins can create uploads or check upload status. Learner playback requires active enrollment.
+
+The adapter behaviour also has a `download_url/1` callback (signed static-rendition MP4 for Mux) with no admin/enrollment gating in the `Wasomi.Media` context itself — it's called directly by the internal `Wasomi.Catalog.Workers.TranscribeLecture` background job, not from any user-facing action.
 
 ## Notifications
 

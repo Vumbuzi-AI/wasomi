@@ -352,53 +352,6 @@ Hooks.VideoPreview = {
   }
 }
 
-// Drives the "Upload files" / "Add link" mode toggle and the "Save link"
-// button on the lecture resources panel. File uploads themselves go through
-// LiveView's own native upload JS (see WasomiWeb.AdminLive.Components.ResourceUploader) —
-// this hook only ever needs to know which panel is visible and forward the
-// link form to the LectureLive.FormComponent that owns "add-link".
-Hooks.R2ResourceUpload = {
-  mounted() {
-    this.linkInput = this.el.querySelector("[data-role='link']")
-    this.addLinkButton = this.el.querySelector("[data-role='add-link']")
-    this.modeButtons = Array.from(this.el.querySelectorAll("[data-role='resource-mode']"))
-    this.modePanels = Array.from(this.el.querySelectorAll("[data-role='resource-panel']"))
-    this.uploadTarget = this.el.getAttribute("phx-target")
-
-    this.modeButtons.forEach(button => {
-      button.addEventListener("click", () => this.setMode(button.dataset.mode))
-    })
-    this.setMode("upload")
-
-    this.addLinkButton.addEventListener("click", () => {
-      const url = this.linkInput.value.trim()
-      if (!url) return
-      this.pushUp("add-link", {url})
-      this.linkInput.value = ""
-    })
-  },
-
-  setMode(mode) {
-    this.modeButtons.forEach(button => {
-      const active = button.dataset.mode === mode
-      button.setAttribute("aria-pressed", active ? "true" : "false")
-      button.classList.toggle("bg-dark", active)
-      button.classList.toggle("text-white", active)
-      button.classList.toggle("text-muted", !active)
-    })
-    this.modePanels.forEach(panel => {
-      panel.classList.toggle("hidden", panel.dataset.mode !== mode)
-    })
-  },
-
-  pushUp(event, payload) {
-    if (this.uploadTarget) {
-      this.pushEventTo(this.uploadTarget, event, payload)
-    } else {
-      this.pushEvent(event, payload)
-    }
-  }
-}
 function titleCaseFromFilename(filename) {
   return filename
     .replace(/\.[^/.]+$/, "")

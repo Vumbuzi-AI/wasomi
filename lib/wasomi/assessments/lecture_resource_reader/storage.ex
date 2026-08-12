@@ -35,17 +35,16 @@ defmodule Wasomi.Assessments.LectureResourceReader.Storage do
       |> String.downcase()
 
     cond do
-      ext == ".docx" or String.starts_with?(binary, "PK\x03\x04") ->
+      ext == ".docx" or match?(<<"PK", 0x03, 0x04, _::binary>>, binary) ->
         docx_extractor().extract_text(binary)
 
-      ext == ".pdf" or String.starts_with?(binary, "%PDF-") ->
+      ext == ".pdf" or match?(<<"%PDF-", _::binary>>, binary) ->
         pdf_extractor().extract_text(binary)
 
       true ->
-        if String.starts_with?(binary, "PK") do
-          docx_extractor().extract_text(binary)
-        else
-          pdf_extractor().extract_text(binary)
+        case binary do
+          <<"PK", _::binary>> -> docx_extractor().extract_text(binary)
+          _ -> pdf_extractor().extract_text(binary)
         end
     end
   end

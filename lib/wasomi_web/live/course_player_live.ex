@@ -440,19 +440,18 @@ defmodule WasomiWeb.CoursePlayerLive do
                 <div class="p-8 lg:p-10">
                   <div class="flex flex-wrap items-center justify-between gap-4 border-b border-black/5 pb-6">
                     <div>
-                      <span class="inline-flex items-center gap-2 rounded-full bg-mint px-3 py-1 text-xs font-semibold uppercase tracking-wider text-primary">
-                        <.icon name="hero-academic-cap" class="h-4 w-4" />
+                      <h2 class="text-2xl font-semibold tracking-tight text-dark">
                         Module {@current_quiz.module.position} Quiz
-                      </span>
-                      <h2 class="mt-2 text-2xl font-semibold tracking-tight text-dark">
-                        {@current_quiz.module.title}
                       </h2>
-                      <p class="mt-1 text-sm text-muted">
-                        Passing requirement:
-                        <span class="font-semibold text-primary">
-                          {@current_quiz.quiz.passing_score_percent}% score
-                        </span>
+                      <p class="mt-1 text-sm font-medium text-dark/70">
+                        {@current_quiz.module.title}
                       </p>
+                    </div>
+                    <div>
+                      <span class="inline-flex items-center gap-2 rounded-full bg-mint px-3.5 py-1.5 text-xs font-semibold uppercase tracking-wider text-primary">
+                        <.icon name="hero-academic-cap" class="h-4 w-4" />
+                        Passing requirement: {@current_quiz.quiz.passing_score_percent}% score
+                      </span>
                     </div>
                   </div>
 
@@ -505,53 +504,48 @@ defmodule WasomiWeb.CoursePlayerLive do
                     </div>
 
                     <% q_results = question_results(@current_quiz.questions, @quiz_answers) %>
-                    <div :if={q_results != []} class="mt-6 space-y-3">
-                      <h4 class="text-xs font-semibold uppercase tracking-wider text-muted">
+                    <div :if={q_results != []} class="mt-8 space-y-4">
+                      <h4 class="text-lg font-bold tracking-tight text-dark">
                         Question Breakdown
                       </h4>
-                      <div
-                        :for={r <- q_results}
-                        class={[
-                          "rounded-2xl border p-5",
-                          if(r.correct?,
-                            do: "border-green-200 bg-green-50",
-                            else: "border-red-200 bg-red-50"
-                          )
-                        ]}
-                      >
-                        <div class="flex items-start gap-3">
-                          <div class={[
-                            "mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full text-white",
-                            if(r.correct?, do: "bg-green-500", else: "bg-red-500")
-                          ]}>
-                            <.icon
-                              name={if r.correct?, do: "hero-check", else: "hero-x-mark"}
-                              class="h-3 w-3"
-                            />
-                          </div>
-                          <div class="min-w-0 flex-1">
-                            <p class="text-sm font-medium text-dark">{r.question.prompt}</p>
-                            <p class={[
-                              "mt-1.5 text-sm",
-                              if(r.correct?, do: "text-green-700", else: "text-red-600")
+                      <ol class="divide-y divide-black/5 border-t border-black/5">
+                        <li
+                          :for={{r, idx} <- Enum.with_index(q_results, 1)}
+                          class="py-4"
+                        >
+                          <div class="flex items-start gap-3">
+                            <div class={[
+                              "mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full text-white",
+                              if(r.correct?, do: "bg-green-500", else: "bg-red-500")
                             ]}>
-                              Your answer: {(r.selected_option && r.selected_option.label) || "—"}
-                            </p>
-                            <p
-                              :if={!r.correct? && r.correct_option}
-                              class="mt-1 text-sm font-medium text-green-700"
-                            >
-                              Correct answer: {r.correct_option.label}
-                            </p>
-                            <p
-                              :if={r.question.explanation && r.question.explanation != ""}
-                              class="mt-2 text-xs text-body/70"
-                            >
-                              {r.question.explanation}
-                            </p>
+                              <.icon
+                                name={if r.correct?, do: "hero-check", else: "hero-x-mark"}
+                                class="h-3.5 w-3.5 stroke-[2.5]"
+                              />
+                            </div>
+                            <div class="min-w-0 flex-1">
+                              <p class="text-sm font-semibold text-dark">
+                                {idx}. {r.question.prompt}
+                              </p>
+                              <p class="mt-1 text-sm text-dark/70">
+                                Your answer: <span class={if(r.correct?, do: "font-medium text-green-700", else: "font-medium text-red-600")}>{(r.selected_option && r.selected_option.label) || "—"}</span>
+                              </p>
+                              <p
+                                :if={!r.correct? && r.correct_option}
+                                class="mt-1 text-sm font-medium text-green-700"
+                              >
+                                Correct answer: {r.correct_option.label}
+                              </p>
+                              <p
+                                :if={r.question.explanation && r.question.explanation != ""}
+                                class="mt-2 text-xs text-body/70"
+                              >
+                                {r.question.explanation}
+                              </p>
+                            </div>
                           </div>
-                        </div>
-                      </div>
+                        </li>
+                      </ol>
                     </div>
                   <% else %>
                     <% question = Enum.at(@current_quiz.questions, @current_question_index) %>

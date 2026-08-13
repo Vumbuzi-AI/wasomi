@@ -151,11 +151,13 @@ defmodule WasomiWeb.CoursePlayerLive do
                   List.first(user_submissions)
                 end
 
+              quiz_answers = if existing_submission, do: existing_submission.answers, else: %{}
+
               {:noreply,
                socket
                |> assign(:current_lecture, nil)
                |> assign(:current_quiz, %{quiz: quiz, module: module, questions: questions})
-               |> assign(:quiz_answers, %{})
+               |> assign(:quiz_answers, quiz_answers)
                |> assign(:quiz_result, existing_submission)
                |> assign(:current_question_index, 0)
                |> assign(
@@ -499,6 +501,56 @@ defmodule WasomiWeb.CoursePlayerLive do
                         >
                           Retake Quiz
                         </button>
+                      </div>
+                    </div>
+
+                    <% q_results = question_results(@current_quiz.questions, @quiz_answers) %>
+                    <div :if={q_results != []} class="mt-6 space-y-3">
+                      <h4 class="text-xs font-semibold uppercase tracking-wider text-muted">
+                        Question Breakdown
+                      </h4>
+                      <div
+                        :for={r <- q_results}
+                        class={[
+                          "rounded-2xl border p-5",
+                          if(r.correct?,
+                            do: "border-green-200 bg-green-50",
+                            else: "border-red-200 bg-red-50"
+                          )
+                        ]}
+                      >
+                        <div class="flex items-start gap-3">
+                          <div class={[
+                            "mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full text-white",
+                            if(r.correct?, do: "bg-green-500", else: "bg-red-500")
+                          ]}>
+                            <.icon
+                              name={if r.correct?, do: "hero-check", else: "hero-x-mark"}
+                              class="h-3 w-3"
+                            />
+                          </div>
+                          <div class="min-w-0 flex-1">
+                            <p class="text-sm font-medium text-dark">{r.question.prompt}</p>
+                            <p class={[
+                              "mt-1.5 text-sm",
+                              if(r.correct?, do: "text-green-700", else: "text-red-600")
+                            ]}>
+                              Your answer: {(r.selected_option && r.selected_option.label) || "—"}
+                            </p>
+                            <p
+                              :if={!r.correct? && r.correct_option}
+                              class="mt-1 text-sm font-medium text-green-700"
+                            >
+                              Correct answer: {r.correct_option.label}
+                            </p>
+                            <p
+                              :if={r.question.explanation && r.question.explanation != ""}
+                              class="mt-2 text-xs text-body/70"
+                            >
+                              {r.question.explanation}
+                            </p>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   <% else %>
@@ -1036,4 +1088,19 @@ defmodule WasomiWeb.CoursePlayerLive do
   defp preview_result?(%{preview?: preview?}), do: preview?
   defp preview_result?(%Wasomi.Assessments.QuizSubmission{}), do: false
   defp preview_result?(_), do: false
+
+  defp question_results(questions, answers) do
+    Enum.map(questions, fn question ->
+      selected_id = Map.get(answers, to_string(question.id))
+      selected_option = Enum.find(question.question_options, &(to_string(&1.id) == selected_id))
+      correct_option = Enum.find(question.question_options, & &1.correct)
+
+      %{
+        question: question,
+        selected_option: selected_option,
+        correct_option: correct_option,
+        correct?: selected_option != nil and selected_option.correct
+      }
+    end)
+  end
 end

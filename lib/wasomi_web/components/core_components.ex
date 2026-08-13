@@ -16,6 +16,7 @@ defmodule WasomiWeb.CoreComponents do
   """
   use Phoenix.Component
   use Gettext, backend: WasomiWeb.Gettext
+  use WasomiWeb, :verified_routes
 
   alias Phoenix.HTML.Form
   alias Phoenix.HTML.FormField
@@ -522,15 +523,15 @@ defmodule WasomiWeb.CoreComponents do
   end
 
   @doc """
-  Renders a design-system styled input for authentication surfaces.
-
-  Matches the Wasomi design tokens (see `design.md`): `Outfit` type,
-  `border-black/10` hairlines, `text-dark` text, and a `focus:border-primary`
-  accent. Used by the log in / sign up pages.
+  Renders a design-system styled, icon-prefixed input for authentication
+  surfaces (log in / sign up). `type="password"` automatically gets a
+  show/hide toggle, wired up by the `TogglePassword` JS hook.
 
   ## Examples
 
-      <.auth_input field={@form[:email]} type="email" label="Email" required />
+      <.auth_input field={@form[:email]} type="email" label="Email address" required>
+        <:icon><.icon name="hero-envelope" class="h-5 w-5" /></:icon>
+      </.auth_input>
   """
   attr :id, :any, default: nil
   attr :name, :any
@@ -546,6 +547,7 @@ defmodule WasomiWeb.CoreComponents do
 
   attr :errors, :list, default: []
   attr :rest, :global, include: ~w(autocomplete placeholder readonly required)
+  slot :icon, required: true
 
   def auth_input(%{field: %Phoenix.HTML.FormField{} = field} = assigns) do
     errors = if Phoenix.Component.used_input?(field), do: field.errors, else: []
@@ -559,25 +561,129 @@ defmodule WasomiWeb.CoreComponents do
   end
 
   def auth_input(assigns) do
+    assigns = assign(assigns, :toggle?, assigns.type == "password")
+
     ~H"""
     <div>
-      <label :if={@label} for={@id} class="mb-2 block text-sm font-medium text-dark">
+      <label :if={@label} for={@id} class="mb-2 block text-sm font-semibold text-dark">
         {@label}
       </label>
-      <input
-        type={@type}
-        name={@name}
-        id={@id}
-        value={Phoenix.HTML.Form.normalize_value(@type, @value)}
+      <div
+        id={@toggle? && "#{@id}-wrap"}
+        phx-hook={@toggle? && "TogglePassword"}
         class={[
-          "block w-full rounded-2xl border bg-white px-5 py-3.5 text-dark outline-none transition",
-          "placeholder:text-muted focus:ring-4 focus:ring-primary/10",
-          @errors == [] && "border-black/10 focus:border-primary",
-          @errors != [] && "border-rose-400 focus:border-rose-400"
+          "flex items-center gap-2 rounded-lg border bg-white px-3.5 py-3 transition",
+          "focus-within:ring-4 focus-within:ring-primary/10",
+          @errors == [] && "border-black/15 focus-within:border-primary",
+          @errors != [] && "border-rose-400 focus-within:border-rose-400"
         ]}
-        {@rest}
-      />
+      >
+        <span class="shrink-0 text-muted">{render_slot(@icon)}</span>
+        <input
+          type={@type}
+          name={@name}
+          id={@id}
+          value={Phoenix.HTML.Form.normalize_value(@type, @value)}
+          class="w-full border-0 bg-transparent p-0 font-medium text-dark outline-none placeholder:font-medium placeholder:text-muted focus:outline-none focus:ring-0"
+          {@rest}
+        />
+        <button
+          :if={@toggle?}
+          type="button"
+          data-role="toggle"
+          aria-label="Show password"
+          class="shrink-0 text-muted transition hover:text-dark"
+        >
+          <svg
+            data-role="eye"
+            class="h-4 w-4"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z" /><circle cx="12" cy="12" r="3" />
+          </svg>
+        </button>
+      </div>
       <.error :for={msg <- @errors}>{msg}</.error>
+    </div>
+    """
+  end
+
+  @doc """
+  Renders the shared split-screen shell for the log in / sign up pages: a
+  fixed navy brand panel on the left, and a "Back to home" link plus a
+  Log in/Sign up tab toggle above the caller's form content on the right.
+  """
+  attr :active, :atom, required: true, values: [:login, :register]
+  slot :inner_block, required: true
+
+  def auth_shell(assigns) do
+    ~H"""
+    <div class="grid min-h-screen lg:grid-cols-2">
+      <div class="relative hidden flex-col justify-center bg-dark px-12 py-16 lg:sticky lg:top-0 lg:flex lg:h-screen xl:px-20">
+        <a href="/" class="inline-flex items-center">
+          <img src="/images/logo-reversed.png" alt="Wasomi" class="h-9 w-auto" />
+        </a>
+        <h1 class="mt-10 text-5xl font-bold leading-[1.05] text-white">
+          Learn today. Use it at work tomorrow.
+        </h1>
+        <p class="mt-6 max-w-md text-white/70">
+          Access practical GS1 learning, save your progress and continue from any device.
+        </p>
+      </div>
+
+      <div class="flex flex-col px-6 py-6 sm:px-12 lg:py-8">
+        <div class="flex justify-end">
+          <a
+            href="/"
+            class="inline-flex items-center gap-2 text-sm font-semibold text-dark transition hover:text-primary"
+          >
+            <svg
+              class="h-4 w-4"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" />
+            </svg>
+            Back to home
+          </a>
+        </div>
+
+        <div class="mx-auto mt-6 w-full max-w-md flex-1">
+          <div class="grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1">
+            <.link
+              navigate={~p"/users/log_in"}
+              class={[
+                "rounded-lg py-2.5 text-center text-sm font-semibold transition",
+                @active == :login && "bg-dark text-white",
+                @active != :login && "text-dark hover:text-primary"
+              ]}
+            >
+              Log in
+            </.link>
+            <.link
+              navigate={~p"/users/register"}
+              class={[
+                "rounded-lg py-2.5 text-center text-sm font-semibold transition",
+                @active == :register && "bg-dark text-white",
+                @active != :register && "text-dark hover:text-primary"
+              ]}
+            >
+              Sign up
+            </.link>
+          </div>
+
+          {render_slot(@inner_block)}
+        </div>
+      </div>
     </div>
     """
   end

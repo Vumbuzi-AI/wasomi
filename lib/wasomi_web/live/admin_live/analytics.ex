@@ -79,8 +79,8 @@ defmodule WasomiWeb.AdminLive.Analytics do
                 class={[
                   "rounded-full px-5 py-2.5 text-sm font-medium transition",
                   if(@active_tab == :overview,
-                    do: "bg-dark text-white",
-                    else: "text-body hover:text-dark"
+                    do: "bg-ink text-white",
+                    else: "text-body hover:text-ink"
                   )
                 ]}
               >
@@ -92,8 +92,8 @@ defmodule WasomiWeb.AdminLive.Analytics do
                 class={[
                   "rounded-full px-5 py-2.5 text-sm font-medium transition",
                   if(@active_tab == :revenue,
-                    do: "bg-dark text-white",
-                    else: "text-body hover:text-dark"
+                    do: "bg-ink text-white",
+                    else: "text-body hover:text-ink"
                   )
                 ]}
               >
@@ -105,13 +105,13 @@ defmodule WasomiWeb.AdminLive.Analytics do
               <.link
                 :if={@has_filters?}
                 patch={~p"/admin/analytics"}
-                class="text-sm font-medium text-primary hover:text-dark"
+                class="text-sm font-medium text-primary hover:text-ink"
               >
                 Clear filters
               </.link>
               <.link
                 href={~p"/admin/exports/quiz_results?#{@export_query}"}
-                class="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:text-dark"
+                class="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:text-ink"
               >
                 <.icon name="hero-document-arrow-down" class="h-4 w-4" /> Export quiz results CSV
               </.link>
@@ -140,7 +140,7 @@ defmodule WasomiWeb.AdminLive.Analytics do
           <div :if={@active_tab == :overview} class="mt-6 space-y-10">
             <div>
               <div class="flex flex-wrap items-baseline justify-between gap-2">
-                <h3 class="text-base font-semibold text-dark">Conversion funnel</h3>
+                <h3 class="text-base font-semibold text-ink">Conversion funnel</h3>
                 <p :if={@funnel_overall_conversion} class="text-sm text-body">
                   <span class="font-semibold text-primary">{@funnel_overall_conversion}%</span>
                   overall, checkout to certificate
@@ -152,7 +152,7 @@ defmodule WasomiWeb.AdminLive.Analytics do
                     <p class="text-xs font-semibold uppercase tracking-wide text-body">
                       {step.step}
                     </p>
-                    <p class="mt-2 text-3xl font-bold text-dark">{step.count}</p>
+                    <p class="mt-2 text-3xl font-bold text-ink">{step.count}</p>
                     <p class="mt-1 text-xs font-medium text-body">
                       {if step.percent_of_previous,
                         do: "#{step.percent_of_previous}% of previous",
@@ -169,7 +169,7 @@ defmodule WasomiWeb.AdminLive.Analytics do
             </div>
 
             <div>
-              <h3 class="text-base font-semibold text-dark">Course leaderboard</h3>
+              <h3 class="text-base font-semibold text-ink">Course leaderboard</h3>
               <p class="mt-1 text-xs text-body">Richest-first. Click a course for detail.</p>
               <.paginated_table
                 page={@scorecards_page.page}
@@ -195,7 +195,7 @@ defmodule WasomiWeb.AdminLive.Analytics do
                         <td class="px-6 py-4">
                           <.link
                             navigate={~p"/admin/courses/#{row.slug}"}
-                            class="font-medium text-dark hover:text-primary"
+                            class="font-medium text-ink hover:text-primary"
                           >
                             {row.title}
                           </.link>
@@ -207,7 +207,7 @@ defmodule WasomiWeb.AdminLive.Analytics do
                         <td class="px-6 py-4">
                           <.rate_bar percent={row.quiz_pass_rate_percent} />
                         </td>
-                        <td class="px-6 py-4 font-semibold text-dark">
+                        <td class="px-6 py-4 font-semibold text-ink">
                           {Payments.format_minor(row.revenue_minor)}
                         </td>
                       </tr>

@@ -31,7 +31,7 @@ defmodule WasomiWeb.CoursesTakenLive do
         <div class="flex flex-wrap items-end justify-between gap-4">
           <div>
             <p class="text-sm font-semibold uppercase tracking-wider text-primary">My courses</p>
-            <h1 class="mt-2 text-3xl font-semibold text-dark">Courses you're taking.</h1>
+            <h1 class="mt-2 text-3xl font-semibold text-ink">Courses you're taking.</h1>
           </div>
           <span :if={@course_cards != []} class="text-sm text-muted">
             {pluralize(length(@course_cards), "course")}
@@ -59,13 +59,13 @@ defmodule WasomiWeb.CoursesTakenLive do
           <span class="mx-auto grid h-14 w-14 place-items-center rounded-full bg-mint text-primary">
             <.icon name="hero-academic-cap" class="h-7 w-7" />
           </span>
-          <h3 class="mt-5 text-xl font-semibold text-dark">You haven't enrolled yet.</h3>
+          <h3 class="mt-5 text-xl font-semibold text-ink">You haven't enrolled yet.</h3>
           <p class="mx-auto mt-2 max-w-lg text-body">
             Enroll in a course and it will appear here as soon as payment is confirmed.
           </p>
           <.link
             navigate={~p"/courses"}
-            class="mt-6 inline-flex rounded-full bg-dark px-6 py-3 font-medium text-white transition hover:bg-primary"
+            class="mt-6 inline-flex rounded-full bg-ink px-6 py-3 font-medium text-white transition hover:bg-primary"
           >
             Browse courses
           </.link>

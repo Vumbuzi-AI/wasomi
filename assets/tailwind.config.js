@@ -15,7 +15,13 @@ module.exports = {
     extend: {
       colors: {
         primary: "#f97316",
-        dark: "#0a0a0a",
+        dark: "#012c6a",
+        // Near-black, used for admin/app surfaces (dashboard, courses,
+        // students, payments, analytics) that predate — and are visually
+        // distinct from — the navy-branded public marketing site. `dark`
+        // itself became the marketing navy accent; this keeps the admin
+        // area's original neutral black instead of inheriting that navy.
+        ink: "#0a0a0a",
         body: "#404040",
         muted: "#a3a3a3",
         secondary: "#1a1a1a",
@@ -31,9 +37,27 @@ module.exports = {
           "0%": { opacity: "0", transform: "translateY(4px)" },
           "100%": { opacity: "1", transform: "translateY(0)" },
         },
+        "fade-up": {
+          "0%": { opacity: "0", transform: "translateY(16px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
+        },
+        "image-in": {
+          "0%": { opacity: "0", transform: "scale(1.08) translateX(12px)" },
+          "100%": { opacity: "1", transform: "scale(1) translateX(0)" },
+        },
+        float: {
+          "0%, 100%": { transform: "translateY(0)" },
+          "50%": { transform: "translateY(-6px)" },
+        },
       },
       animation: {
         "checklist-in": "checklist-in 0.25s ease-out forwards",
+        // Same cubic-bezier as `.animate-fade-in` in app.css, so on-load and
+        // on-reveal content share one easing curve — just a bigger rise than
+        // checklist-in's 4px, sized for headline-level content.
+        "fade-up": "fade-up 0.6s cubic-bezier(0.2, 0, 0, 1) forwards",
+        "image-in": "image-in 0.8s cubic-bezier(0.2, 0, 0, 1) forwards",
+        float: "float 5s cubic-bezier(0.45, 0, 0.55, 1) infinite",
       },
     },
   },

@@ -66,7 +66,7 @@ defmodule WasomiWeb.AdminLive.Students do
             <.search_input value={@search} placeholder="Search name, email or phone" />
             <.link
               href={~p"/admin/exports/enrollments"}
-              class="group relative grid h-11 w-11 place-items-center rounded-full border border-black/10 bg-white text-dark transition hover:border-primary hover:text-primary"
+              class="group relative grid h-11 w-11 place-items-center rounded-full border border-black/10 bg-white text-ink transition hover:border-primary hover:text-primary"
               aria-label="Export all enrollments as CSV"
             >
               <.icon name="hero-document-arrow-down" class="h-5 w-5" />
@@ -119,7 +119,7 @@ defmodule WasomiWeb.AdminLive.Students do
                     <td class="px-6 py-4">
                       <.link
                         navigate={~p"/admin/students/#{row.user.id}"}
-                        class="font-medium text-dark hover:text-primary"
+                        class="font-medium text-ink hover:text-primary"
                       >
                         {row.user.name || "Learner"}
                       </.link>
@@ -128,7 +128,7 @@ defmodule WasomiWeb.AdminLive.Students do
                     <td class="px-6 py-4 text-body">{row.user.phone || "—"}</td>
                     <td class="px-6 py-4"><.status_badge status={row.user.role} /></td>
                     <td class="px-6 py-4 text-body">{row.courses}</td>
-                    <td class="px-6 py-4 font-semibold text-dark">
+                    <td class="px-6 py-4 font-semibold text-ink">
                       {Payments.format_minor(row.spent_minor)}
                     </td>
                     <td class="px-6 py-4 text-body">{format_date(row.user.inserted_at)}</td>

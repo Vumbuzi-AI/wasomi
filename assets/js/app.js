@@ -46,24 +46,30 @@ const R2Uploader = (entries, onViewError) => {
   })
 }
 
-const SIDEBAR_COLLAPSED_KEY = "admin-sidebar-collapsed"
+const SIDEBAR_COLLAPSED_KEY_PREFIX = "sidebar-collapsed:"
 
+// Shared by both the admin and learner sidebars — finds its own `.app-sidebar`
+// ancestor rather than a hardcoded id, and persists collapsed state per
+// sidebar (keyed by that sidebar's own DOM id) so toggling one doesn't
+// affect the other.
 Hooks.SidebarToggle = {
   mounted() {
-    const sidebar = document.getElementById("admin-sidebar")
+    const sidebar = this.el.closest(".app-sidebar")
     if (!sidebar) return
+
+    const storageKey = SIDEBAR_COLLAPSED_KEY_PREFIX + (sidebar.id || "default")
 
     const setTitle = isCollapsed => {
       this.el.title = isCollapsed ? "Expand sidebar" : "Collapse sidebar"
     }
 
-    const collapsed = localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true"
+    const collapsed = localStorage.getItem(storageKey) === "true"
     sidebar.classList.toggle("is-collapsed", collapsed)
     setTitle(collapsed)
 
     this.el.addEventListener("click", () => {
       const isCollapsed = sidebar.classList.toggle("is-collapsed")
-      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, isCollapsed)
+      localStorage.setItem(storageKey, isCollapsed)
       setTitle(isCollapsed)
     })
   }
@@ -542,6 +548,69 @@ Hooks.PdfDownload = {
       link.click()
       link.remove()
       URL.revokeObjectURL(url)
+    })
+  }
+}
+
+// Plays a one-shot entrance the first time the element scrolls into view.
+// `data-reveal="fade-up"` (default) just plays the fade-up keyframe.
+// `data-reveal="settle-float"` transitions the element's own tilt/offset
+// utility classes to rest, then — once that transition finishes — starts
+// the slow, subtle `float` loop so it doesn't fight the entrance motion.
+// `data-reveal="stagger"` just adds `in-view` to the element itself, so
+// children can key off it (e.g. `group-[.in-view]:animate-fade-up` with a
+// per-child `animation-delay`) for a cascading, timeline-style reveal.
+Hooks.RevealOnScroll = {
+  mounted() {
+    const variant = this.el.dataset.reveal || "fade-up"
+
+    this.observer = new IntersectionObserver(
+      entries => {
+        entries.forEach(entry => {
+          if (!entry.isIntersecting) return
+          this.observer.unobserve(this.el)
+
+          if (variant === "settle-float") {
+            this.el.classList.remove("opacity-0", "-translate-x-12", "-rotate-6")
+            this.el.classList.add("opacity-100", "translate-x-0", "rotate-0")
+            this.el.addEventListener(
+              "transitionend",
+              () => this.el.classList.add("animate-float"),
+              {once: true}
+            )
+          } else if (variant === "stagger") {
+            this.el.classList.add("in-view")
+          } else {
+            this.el.classList.add("animate-fade-up")
+          }
+        })
+      },
+      {threshold: 0.2}
+    )
+
+    this.observer.observe(this.el)
+  },
+
+  destroyed() {
+    this.observer?.disconnect()
+  }
+}
+
+const EYE_OPEN = '<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"/><circle cx="12" cy="12" r="3"/>'
+const EYE_CLOSED = '<path d="M17.9 17.9A10.6 10.6 0 0 1 12 19c-7 0-11-7-11-7a19.4 19.4 0 0 1 4.2-5.1M9.9 4.2A9.4 9.4 0 0 1 12 4c7 0 11 7 11 7a19.4 19.4 0 0 1-2.6 3.6M14.1 14.1a3 3 0 1 1-4.2-4.2"/><line x1="1" y1="1" x2="23" y2="23"/>'
+
+Hooks.TogglePassword = {
+  mounted() {
+    this.input = this.el.querySelector("input")
+    this.button = this.el.querySelector("[data-role='toggle']")
+    this.eye = this.el.querySelector("[data-role='eye']")
+    if (!this.input || !this.button || !this.eye) return
+
+    this.button.addEventListener("click", () => {
+      const showing = this.input.type === "text"
+      this.input.type = showing ? "password" : "text"
+      this.eye.innerHTML = showing ? EYE_OPEN : EYE_CLOSED
+      this.button.setAttribute("aria-label", showing ? "Show password" : "Hide password")
     })
   }
 }

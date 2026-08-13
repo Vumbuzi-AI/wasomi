@@ -61,9 +61,15 @@ defmodule Wasomi.Catalog do
     page = Keyword.get(opts, :page, 1)
     page_size = Keyword.get(opts, :page_size, 9)
 
-    opts
-    |> filtered_courses_query()
-    |> Paginate.paginate(page, page_size)
+    result =
+      opts
+      |> filtered_courses_query()
+      |> Paginate.paginate(page, page_size)
+
+    # Cheap at a page_size of ~9: lets any caller show duration/lecture
+    # counts (via `duration_seconds/1` / `lecture_count/1`) without needing
+    # its own preload step.
+    %{result | entries: Repo.preload(result.entries, modules: :lectures)}
   end
 
   defp filtered_courses_query(opts) do

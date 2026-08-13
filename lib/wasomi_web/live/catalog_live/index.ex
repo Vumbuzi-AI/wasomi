@@ -4,13 +4,41 @@ defmodule WasomiWeb.CatalogLive.Index do
   import WasomiWeb.HomeComponents
 
   alias Wasomi.Catalog
+  alias Wasomi.Paginate
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok,
+    {:ok, assign(socket, :page_title, "Courses")}
+  end
+
+  @impl true
+  def handle_params(params, _url, socket) do
+    search = params["search"] || ""
+    page_number = Paginate.parse_page(params["page"])
+
+    page =
+      Catalog.list_courses_page(status: :published, search: search, page: page_number)
+
+    {:noreply,
      socket
-     |> assign(:page_title, "Courses")
-     |> assign(:courses, Catalog.list_published_courses())}
+     |> assign(:search, search)
+     |> assign(:page, page)}
+  end
+
+  @impl true
+  def handle_event("search", %{"search" => search}, socket) do
+    {:noreply, push_patch(socket, to: courses_path(search, 1))}
+  end
+
+  defp courses_path(search, page) do
+    params =
+      %{search: search, page: page}
+      |> Enum.reject(fn
+        {:page, 1} -> true
+        {_key, value} -> value in [nil, ""]
+      end)
+
+    ~p"/courses?#{params}"
   end
 
   @impl true
@@ -20,64 +48,80 @@ defmodule WasomiWeb.CatalogLive.Index do
       <.home_header current_user={@current_user} />
 
       <main>
-        <section class="bg-gradient-to-b from-mint via-white to-soft py-20 lg:py-28">
+        <section class="bg-white py-20 lg:py-28">
           <div class="mx-auto max-w-container px-5 lg:px-8">
             <div class="mx-auto max-w-2xl text-center">
-              <span class="rounded-full bg-mint px-3 py-1 text-sm font-medium text-primary">
-                Practical learning
-              </span>
-              <h1 class="mt-6 text-4xl font-semibold leading-[1.1] text-dark sm:text-5xl lg:text-6xl">
-                Build the human skills that move technical work forward.
+              <h1 class="text-4xl font-semibold leading-[1.1] text-dark sm:text-5xl lg:text-6xl">
+                Explore all GS1 courses
               </h1>
               <p class="mt-6 text-lg text-body">
-                Focused, video-based courses for technology professionals who want to communicate
-                clearly, present confidently, and lead with influence.
+                Compare course outcomes, duration, lessons and price before opening the full course
+                page.
+              </p>
+
+              <form
+                phx-change="search"
+                class="mx-auto mt-8 flex max-w-md items-center gap-2 rounded-full border border-black/10 bg-white px-5 py-3 shadow-sm focus-within:border-dark"
+              >
+                <svg
+                  class="h-5 w-5 shrink-0 text-muted"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+                <input
+                  type="search"
+                  name="search"
+                  value={@search}
+                  placeholder="Search courses…"
+                  phx-debounce="300"
+                  class="w-full border-0 bg-transparent p-0 text-sm text-dark placeholder:text-muted focus:outline-none focus:ring-0"
+                />
+              </form>
+
+              <p class="mt-4 text-sm text-muted">
+                {@page.total_count} {ngettext("course", "courses", @page.total_count)}
               </p>
             </div>
 
-            <div
-              :if={@courses != []}
-              id="published-courses"
-              class="mt-14 grid gap-7 md:grid-cols-2 lg:grid-cols-3"
+            <.paginated_table
+              page={@page.page}
+              total_pages={@page.total_pages}
+              path_fn={&courses_path(@search, &1)}
             >
-              <.link
-                :for={course <- @courses}
-                navigate={~p"/courses/#{course.slug}"}
-                class="group block overflow-hidden rounded-3xl border border-black/5 bg-white transition hover:shadow-xl"
+              <div
+                :if={@page.entries != []}
+                id="published-courses"
+                class="mt-14 grid gap-7 md:grid-cols-2 lg:grid-cols-3"
               >
-                <div class="overflow-hidden bg-mint">
-                  <img
-                    src={course.thumbnail_key}
-                    alt=""
-                    class="h-56 w-full object-cover transition duration-500 group-hover:scale-105"
-                  />
-                </div>
-                <div class="p-6">
-                  <div class="flex items-center justify-between gap-4">
-                    <span class="rounded-full bg-mint px-3 py-1 text-sm font-medium text-primary">
-                      Communication
-                    </span>
-                    <span class="text-sm font-semibold text-dark">
-                      {Catalog.format_price(course)}
-                    </span>
-                  </div>
-                  <h2 class="mt-5 text-xl font-semibold text-dark">{course.title}</h2>
-                  <span class="mt-6 inline-flex items-center gap-2 font-medium text-primary">
-                    View course <.icon name="hero-arrow-right-mini" class="h-4 w-4" />
-                  </span>
-                </div>
-              </.link>
-            </div>
+                <WasomiWeb.HomeComponents.course_card :for={course <- @page.entries} course={course} />
+              </div>
 
-            <div
-              :if={@courses == []}
-              id="empty-catalog"
-              class="mx-auto mt-14 max-w-xl rounded-3xl border border-black/5 bg-white p-10 text-center"
-            >
-              <.icon name="hero-academic-cap" class="h-10 w-10 text-primary" />
-              <h2 class="mt-4 text-xl font-semibold">New courses are on the way.</h2>
-              <p class="mt-2 text-body">Check back soon for Wasomi's first learning experience.</p>
-            </div>
+              <div
+                :if={@page.entries == [] and @search != ""}
+                id="empty-catalog"
+                class="mx-auto mt-14 max-w-xl rounded-3xl border border-black/5 bg-white p-10 text-center"
+              >
+                <.icon name="hero-magnifying-glass" class="h-10 w-10 text-primary" />
+                <h2 class="mt-4 text-xl font-semibold">No courses match "{@search}".</h2>
+                <p class="mt-2 text-body">Try a different search, or explore all courses.</p>
+              </div>
+
+              <div
+                :if={@page.entries == [] and @search == ""}
+                id="empty-catalog"
+                class="mx-auto mt-14 max-w-xl rounded-3xl border border-black/5 bg-white p-10 text-center"
+              >
+                <.icon name="hero-academic-cap" class="h-10 w-10 text-primary" />
+                <h2 class="mt-4 text-xl font-semibold">New courses are on the way.</h2>
+                <p class="mt-2 text-body">Check back soon for Wasomi's first learning experience.</p>
+              </div>
+            </.paginated_table>
           </div>
         </section>
       </main>

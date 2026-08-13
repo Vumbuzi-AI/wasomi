@@ -6,97 +6,155 @@ defmodule WasomiWeb.UserRegistrationLive do
 
   def render(assigns) do
     ~H"""
-    <div class="flex min-h-[calc(100vh-4rem)] items-center justify-center bg-gradient-to-b from-mint via-white to-white px-5 py-16">
-      <div class="grid w-full max-w-5xl overflow-hidden rounded-3xl border border-black/5 bg-white shadow-xl lg:grid-cols-2">
-        <div class="relative hidden lg:block">
-          <img
-            src={~p"/images/signup.jpg"}
-            alt="Students learning on Wasomi"
-            class="h-full w-full object-cover"
-          />
-          <div class="absolute inset-0 bg-gradient-to-t from-dark/80 via-dark/20 to-transparent">
-          </div>
-          <div class="absolute inset-x-0 bottom-0 p-10">
-            <span class="rounded-full bg-mint px-3 py-1 text-sm font-medium text-primary">
-              Join Wasomi
-            </span>
-            <h2 class="mt-4 text-3xl font-semibold leading-[1.15] text-white">
-              Start learning the skills that move you forward.
-            </h2>
-            <p class="mt-3 text-white/80">
-              Create an account to enroll in courses, track your progress, and earn certificates.
-            </p>
-          </div>
-        </div>
+    <.auth_shell active={:register}>
+      <h1 class="mt-8 text-4xl font-semibold text-dark">Create your account</h1>
+      <p class="mt-2 text-body">Join Wasomi and start your first learning path.</p>
 
-        <div class="p-8 sm:p-10">
-          <div class="text-center">
-            <a href="/" class="inline-flex items-center gap-2.5">
-              <span class="grid h-10 w-10 place-items-center rounded-[10px] bg-primary">
-                <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none">
-                  <path
-                    d="M5 18V8l7 7 7-7v10"
-                    stroke="#fff"
-                    stroke-width="2.3"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  />
-                </svg>
-              </span>
-            </a>
-            <h1 class="mt-6 text-3xl font-semibold text-dark">Register for an account</h1>
-            <p class="mt-2 text-body">
-              Already registered?
-              <.link navigate={~p"/users/log_in"} class="font-medium text-primary hover:underline">
-                Log in
-              </.link>
-              to your account now.
-            </p>
-          </div>
+      <.form
+        for={@form}
+        id="registration_form"
+        phx-submit="save"
+        phx-change="validate"
+        phx-trigger-action={@trigger_submit}
+        action={~p"/users/log_in?_action=registered"}
+        method="post"
+        class="mt-8 space-y-5"
+      >
+        <p
+          :if={@check_errors}
+          class="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-600"
+        >
+          Oops, something went wrong! Please check the errors below.
+        </p>
 
-          <.form
-            for={@form}
-            id="registration_form"
-            phx-submit="save"
-            phx-change="validate"
-            phx-trigger-action={@trigger_submit}
-            action={~p"/users/log_in?_action=registered"}
-            method="post"
-            class="mt-8 space-y-5"
+        <.auth_input
+          field={@form[:name]}
+          type="text"
+          label="Full name"
+          placeholder="Enter your full name"
+          required
+        >
+          <:icon>
+            <svg
+              class="h-4 w-4"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" />
+            </svg>
+          </:icon>
+        </.auth_input>
+
+        <.auth_input
+          field={@form[:email]}
+          type="email"
+          label="Email address"
+          placeholder="you@example.com"
+          required
+        >
+          <:icon>
+            <svg
+              class="h-4 w-4"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <rect x="2" y="4" width="20" height="16" rx="2" /><polyline points="2 6 12 13 22 6" />
+            </svg>
+          </:icon>
+        </.auth_input>
+
+        <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
+          <.auth_input
+            field={@form[:password]}
+            type="password"
+            label="Password"
+            placeholder="Min. 6 characters"
+            required
           >
-            <p
-              :if={@check_errors}
-              class="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-600"
-            >
-              Oops, something went wrong! Please check the errors below.
-            </p>
+            <:icon>
+              <svg
+                class="h-4 w-4"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <rect x="3" y="11" width="18" height="10" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              </svg>
+            </:icon>
+          </.auth_input>
 
-            <.auth_input field={@form[:name]} type="text" label="Name" required />
-            <.auth_input field={@form[:email]} type="email" label="Email" required />
-            <.auth_input field={@form[:password]} type="password" label="Password" required />
-
-            <button
-              type="submit"
-              phx-disable-with="Creating account..."
-              class="group inline-flex w-full items-center justify-center gap-2 rounded-full bg-dark px-6 py-3.5 font-medium text-white transition hover:bg-primary phx-submit-loading:opacity-75"
-            >
-              Create an account
-              <span class="grid h-7 w-7 place-items-center rounded-full bg-primary text-white transition group-hover:bg-dark">
-                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none">
-                  <path
-                    d="M5 12h14m-6-6 6 6-6 6"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  />
-                </svg>
-              </span>
-            </button>
-          </.form>
+          <.auth_input
+            field={@form[:password_confirmation]}
+            type="password"
+            label="Confirm password"
+            placeholder="Repeat"
+            required
+          >
+            <:icon>
+              <svg
+                class="h-4 w-4"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <rect x="3" y="11" width="18" height="10" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              </svg>
+            </:icon>
+          </.auth_input>
         </div>
-      </div>
-    </div>
+
+        <label class="flex items-center gap-2.5 text-sm font-medium text-dark">
+          <input
+            type="checkbox"
+            required
+            class="h-4 w-4 rounded border-black/20 text-primary focus:ring-primary/30"
+          /> I agree to the terms and privacy policy
+        </label>
+
+        <button
+          type="submit"
+          phx-disable-with="Creating account..."
+          class="group inline-flex w-full items-center justify-center gap-2 rounded-full bg-slate-100 px-6 py-3.5 font-semibold text-dark transition hover:bg-dark hover:text-white phx-submit-loading:opacity-75"
+        >
+          Create account
+          <svg
+            class="h-4 w-4"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" />
+          </svg>
+        </button>
+      </.form>
+
+      <p class="mt-6 text-center text-sm text-body">
+        Already have an account?
+        <.link
+          navigate={~p"/users/log_in"}
+          class="font-semibold text-dark underline hover:text-primary"
+        >
+          Log in
+        </.link>
+      </p>
+    </.auth_shell>
     """
   end
 

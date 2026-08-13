@@ -30,7 +30,7 @@ defmodule WasomiWeb.UserRegistrationLiveTest do
         |> element("#registration_form")
         |> render_change(user: %{"email" => "with spaces", "password" => "short"})
 
-      assert result =~ "Register"
+      assert result =~ "Create your account"
       assert result =~ "must have the @ sign and no spaces"
       assert result =~ "should be at least 6 character"
     end
@@ -74,7 +74,7 @@ defmodule WasomiWeb.UserRegistrationLiveTest do
 
       {:ok, _login_live, login_html} =
         lv
-        |> element(~s|main a:fl-contains("Log in")|)
+        |> element(~s|main p a:fl-contains("Log in")|)
         |> render_click()
         |> follow_redirect(conn, ~p"/users/log_in")
 

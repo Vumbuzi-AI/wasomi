@@ -27,7 +27,7 @@ defmodule WasomiWeb.CourseLive.FormComponent do
             type="button"
             phx-click="publish_course"
             phx-target={@myself}
-            class="rounded-full bg-dark px-4 py-2 text-sm font-medium text-white transition hover:bg-primary"
+            class="rounded-full bg-ink px-4 py-2 text-sm font-medium text-white transition hover:bg-primary"
           >
             Publish course
           </button>
@@ -37,7 +37,7 @@ defmodule WasomiWeb.CourseLive.FormComponent do
             type="button"
             phx-click="unpublish_course"
             phx-target={@myself}
-            class="rounded-full border border-black/10 px-4 py-2 text-sm font-medium text-dark transition hover:border-primary hover:text-primary"
+            class="rounded-full border border-black/10 px-4 py-2 text-sm font-medium text-ink transition hover:border-primary hover:text-primary"
           >
             Unpublish
           </button>
@@ -47,7 +47,7 @@ defmodule WasomiWeb.CourseLive.FormComponent do
             type="button"
             phx-click="confirm_archive_course"
             phx-target={@myself}
-            class="rounded-full border border-black/10 px-4 py-2 text-sm font-medium text-dark transition hover:border-red-400 hover:text-red-500"
+            class="rounded-full border border-black/10 px-4 py-2 text-sm font-medium text-ink transition hover:border-red-400 hover:text-red-500"
           >
             Archive
           </button>
@@ -55,7 +55,7 @@ defmodule WasomiWeb.CourseLive.FormComponent do
       </div>
 
       <div :if={@publish_checklist}>
-        <p class="mt-4 text-sm font-semibold text-dark">This course isn't ready to publish yet:</p>
+        <p class="mt-4 text-sm font-semibold text-ink">This course isn't ready to publish yet:</p>
         <.publish_checklist stages={@publish_checklist} />
       </div>
 

@@ -41,7 +41,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
           class="space-y-4 rounded-2xl border border-black/5 bg-soft/40 p-4 sm:p-5"
         >
           <div>
-            <h3 class="font-semibold text-dark">Lecture video</h3>
+            <h3 class="font-semibold text-ink">Lecture video</h3>
             <p class="mt-1 text-sm text-muted">
               The file uploads directly to Mux. Wasomi stores only the signed playback ID once
               processing is complete.
@@ -67,7 +67,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
 
             <div :if={@video_upload_state == :idle} class="space-y-2">
               <.icon name="hero-arrow-up-tray" class="mx-auto h-6 w-6 text-muted" />
-              <p class="text-sm font-medium text-dark">Drop a video here, or click to choose one</p>
+              <p class="text-sm font-medium text-ink">Drop a video here, or click to choose one</p>
               <p class="text-xs text-muted">MP4, MOV or WebM</p>
             </div>
 
@@ -77,7 +77,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
                 phx-click="remove-video"
                 phx-target={@myself}
                 aria-label="Remove selected video"
-                class="pointer-events-auto absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full bg-dark text-white opacity-0 transition-[opacity,transform] duration-150 ease-out hover:bg-rose-600 group-hover:opacity-100 active:scale-[0.96]"
+                class="pointer-events-auto absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full bg-ink text-white opacity-0 transition-[opacity,transform] duration-150 ease-out hover:bg-rose-600 group-hover:opacity-100 active:scale-[0.96]"
               >
                 <.icon name="hero-x-mark" class="h-4 w-4" />
               </button>
@@ -101,7 +101,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
                   </div>
                 </div>
                 <div class="min-w-0 flex-1 text-left">
-                  <p class="truncate text-sm font-medium text-dark">{@video_filename}</p>
+                  <p class="truncate text-sm font-medium text-ink">{@video_filename}</p>
                   <p class="text-xs text-muted">{format_file_size(@video_size)}</p>
                 </div>
               </div>
@@ -138,7 +138,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
         >
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h3 class="font-semibold text-dark">Resources</h3>
+              <h3 class="font-semibold text-ink">Resources</h3>
               <p class="mt-1 text-sm text-muted">
                 Add documents, videos, or useful links for learners.
               </p>
@@ -159,8 +159,8 @@ defmodule WasomiWeb.LectureLive.FormComponent do
                 class={[
                   "rounded-full px-3 py-1.5 text-xs font-semibold transition",
                   if(@resource_mode == :upload,
-                    do: "bg-dark text-white",
-                    else: "text-muted hover:text-dark"
+                    do: "bg-ink text-white",
+                    else: "text-muted hover:text-ink"
                   )
                 ]}
               >
@@ -177,8 +177,8 @@ defmodule WasomiWeb.LectureLive.FormComponent do
                 class={[
                   "rounded-full px-3 py-1.5 text-xs font-semibold transition",
                   if(@resource_mode == :link,
-                    do: "bg-dark text-white",
-                    else: "text-muted hover:text-dark"
+                    do: "bg-ink text-white",
+                    else: "text-muted hover:text-ink"
                   )
                 ]}
               >
@@ -209,7 +209,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
                 form="add-link-form"
                 required
                 placeholder="https://example.com/reading"
-                class="w-full min-w-0 flex-1 rounded-xl border border-black/10 bg-white px-3 py-2.5 text-sm text-dark focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                class="w-full min-w-0 flex-1 rounded-xl border border-black/10 bg-white px-3 py-2.5 text-sm text-ink focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
               />
               <button
                 type="submit"
@@ -237,7 +237,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
                 <.icon name={resource_icon(resource.kind)} class="h-4 w-4" />
               </span>
               <div class="min-w-0 flex-1">
-                <p class="truncate text-sm font-medium text-dark">{resource.name}</p>
+                <p class="truncate text-sm font-medium text-ink">{resource.name}</p>
                 <p class="truncate text-xs text-muted">
                   {resource.content_type || resource.url}
                 </p>
@@ -272,7 +272,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
         <section class="space-y-4 rounded-2xl border border-black/5 bg-white p-4 sm:p-5">
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h3 class="font-semibold text-dark">Common learner questions</h3>
+              <h3 class="font-semibold text-ink">Common learner questions</h3>
               <p class="mt-1 text-sm text-muted">
                 Answer questions learners are likely to ask before or during the lecture.
               </p>
@@ -298,7 +298,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
             class="rounded-xl border border-black/5 bg-soft/40 p-3 sm:p-4"
           >
             <div class="flex items-start justify-between gap-3">
-              <p class="text-sm font-semibold text-dark">Question {index + 1}</p>
+              <p class="text-sm font-semibold text-ink">Question {index + 1}</p>
               <button
                 type="button"
                 phx-click="remove-question"
@@ -315,14 +315,14 @@ defmodule WasomiWeb.LectureLive.FormComponent do
                 value={question.question}
                 placeholder="What should learners know?"
                 required
-                class="w-full rounded-xl border border-black/10 bg-white px-3 py-2.5 text-sm text-dark focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                class="w-full rounded-xl border border-black/10 bg-white px-3 py-2.5 text-sm text-ink focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
               />
               <textarea
                 name={"questions[#{index}][answer]"}
                 rows="3"
                 placeholder="Write a clear answer..."
                 required
-                class="w-full rounded-xl border border-black/10 bg-white px-3 py-2.5 text-sm text-dark focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                class="w-full rounded-xl border border-black/10 bg-white px-3 py-2.5 text-sm text-ink focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
               >{question.answer}</textarea>
             </div>
           </div>

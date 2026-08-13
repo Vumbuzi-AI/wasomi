@@ -356,14 +356,14 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
 
         <header>
           <p class="text-sm font-semibold uppercase tracking-wider text-primary">Lecture quiz</p>
-          <h1 class="mt-2 text-3xl font-semibold text-dark">{@lecture.title}</h1>
+          <h1 class="mt-2 text-3xl font-semibold text-ink">{@lecture.title}</h1>
           <p class="mt-2 text-body">
             Edit questions inline and drag to reorder. Published questions are live immediately for learners.
           </p>
         </header>
 
         <section class="rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
-          <h2 class="text-lg font-semibold text-dark">Generate questions</h2>
+          <h2 class="text-lg font-semibold text-ink">Generate questions</h2>
           <p class="mt-1 text-sm text-body">
             Pick which of this lecture's resources should feed the AI, choose difficulty and question count.
           </p>
@@ -375,7 +375,7 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
             class="mt-5 space-y-5"
           >
             <fieldset class="space-y-2 min-w-0">
-              <legend class="text-sm font-medium text-dark">Resources</legend>
+              <legend class="text-sm font-medium text-ink">Resources</legend>
 
               <div
                 :if={@lecture.video_asset_id}
@@ -383,7 +383,7 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
               >
                 <label class={[
                   "flex items-center gap-2 text-sm min-w-0 flex-1 truncate",
-                  transcript_ready?(@transcript) && "text-dark",
+                  transcript_ready?(@transcript) && "text-ink",
                   !transcript_ready?(@transcript) && "text-muted"
                 ]}>
                   <input
@@ -403,7 +403,7 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
                   :if={transcript_needs_generation?(@transcript)}
                   type="button"
                   phx-click="generate_transcript"
-                  class="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-black/10 px-3 py-1.5 text-xs font-medium text-dark transition hover:border-primary hover:text-primary active:scale-[0.96]"
+                  class="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-black/10 px-3 py-1.5 text-xs font-medium text-ink transition hover:border-primary hover:text-primary active:scale-[0.96]"
                 >
                   <.icon name="hero-document-text" class="h-3.5 w-3.5" />
                   {if @transcript && @transcript.status == :failed,
@@ -420,7 +420,7 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
 
               <label
                 :for={resource <- @document_resources}
-                class="flex items-center gap-2 rounded-xl border border-black/5 px-4 py-2.5 text-sm text-dark min-w-0 max-w-full overflow-hidden"
+                class="flex items-center gap-2 rounded-xl border border-black/5 px-4 py-2.5 text-sm text-ink min-w-0 max-w-full overflow-hidden"
               >
                 <input
                   type="checkbox"
@@ -442,7 +442,7 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
 
             <div class="flex flex-wrap items-end gap-4">
               <div>
-                <label for="difficulty" class="block text-sm font-medium text-dark">Difficulty</label>
+                <label for="difficulty" class="block text-sm font-medium text-ink">Difficulty</label>
                 <select
                   id="difficulty"
                   name="difficulty"
@@ -456,7 +456,7 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
               </div>
 
               <div>
-                <label for="question_count" class="block text-sm font-medium text-dark">
+                <label for="question_count" class="block text-sm font-medium text-ink">
                   Number of questions
                 </label>
                 <input
@@ -473,7 +473,7 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
               <button
                 type="submit"
                 disabled={@selected_resources == []}
-                class="inline-flex items-center gap-2 rounded-full bg-dark px-6 py-3 text-sm font-semibold text-white transition hover:bg-primary active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-dark disabled:active:scale-100"
+                class="inline-flex items-center gap-2 rounded-full bg-ink px-6 py-3 text-sm font-semibold text-white transition hover:bg-primary active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-ink disabled:active:scale-100"
               >
                 Generate lecture quiz
               </button>
@@ -486,7 +486,7 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
               class="flex items-center justify-between gap-3 rounded-xl border border-black/5 px-4 py-3 text-sm"
             >
               <div class="min-w-0">
-                <p class="truncate font-medium text-dark">{generation.source_label}</p>
+                <p class="truncate font-medium text-ink">{generation.source_label}</p>
                 <p class="mt-0.5 text-xs text-muted">
                   {Phoenix.Naming.humanize(generation.difficulty)} · {generation.question_count_requested} questions requested
                 </p>
@@ -505,7 +505,7 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
         <section id="questions-section" class="space-y-6">
           <div class="flex flex-wrap items-center justify-between gap-4 border-b border-black/5 pb-4">
             <div>
-              <h2 class="text-xl font-semibold text-dark">Questions</h2>
+              <h2 class="text-xl font-semibold text-ink">Questions</h2>
               <p :if={@lecture_quiz} class="mt-0.5 text-xs text-body">
                 {length(@lecture_quiz.questions)} question(s)
                 <span :if={draft_questions(@lecture_quiz) != []}>
@@ -537,7 +537,7 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
                   id="add-question"
                   type="button"
                   phx-click="new_question"
-                  class="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2 text-sm font-semibold text-white transition hover:bg-dark active:scale-[0.96]"
+                  class="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2 text-sm font-semibold text-white transition hover:bg-ink active:scale-[0.96]"
                 >
                   <.icon name="hero-plus" class="h-4 w-4" /> Add question
                 </button>
@@ -547,7 +547,7 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
                   phx-click="new_question"
                   phx-value-type="true_false"
                   title="Add True/False question"
-                  class="inline-flex items-center rounded-full px-3 py-2 text-xs font-medium text-white/90 transition hover:bg-dark hover:text-white active:scale-[0.96]"
+                  class="inline-flex items-center rounded-full px-3 py-2 text-xs font-medium text-white/90 transition hover:bg-ink hover:text-white active:scale-[0.96]"
                 >
                   T/F
                 </button>
@@ -576,11 +576,11 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
                     type="button"
                     data-sortable-handle
                     title="Drag to reorder"
-                    class="cursor-grab rounded-lg p-2 text-muted hover:bg-neutral-50 hover:text-dark active:cursor-grabbing"
+                    class="cursor-grab rounded-lg p-2 text-muted hover:bg-neutral-50 hover:text-ink active:cursor-grabbing"
                   >
                     <.icon name="hero-bars-3" class="h-5 w-5" />
                   </button>
-                  <h2 class="font-semibold text-dark">Question {index}</h2>
+                  <h2 class="font-semibold text-ink">Question {index}</h2>
                   <span class={[
                     "rounded-full px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wider",
                     question.status == :published && "bg-mint text-primary",
@@ -595,7 +595,7 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
                     type="button"
                     phx-click="publish_question"
                     phx-value-id={question.id}
-                    class="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:text-dark transition active:scale-[0.96]"
+                    class="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:text-ink transition active:scale-[0.96]"
                   >
                     <.icon name="hero-check-circle" class="h-4 w-4" /> Publish
                   </button>
@@ -625,7 +625,7 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
             id="empty-quiz"
             class="rounded-3xl border border-dashed border-black/10 bg-white p-10 text-center"
           >
-            <p class="font-medium text-dark">This lecture quiz has no questions yet.</p>
+            <p class="font-medium text-ink">This lecture quiz has no questions yet.</p>
             <p class="mt-1 text-sm text-body">
               Add your first question manually or generate from lecture resources above.
             </p>
@@ -633,7 +633,7 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
               <button
                 type="button"
                 phx-click="new_question"
-                class="inline-flex items-center gap-2 rounded-full bg-primary px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-dark active:scale-[0.96]"
+                class="inline-flex items-center gap-2 rounded-full bg-primary px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-ink active:scale-[0.96]"
               >
                 <.icon name="hero-plus" class="h-4 w-4" /> Add question
               </button>
@@ -645,7 +645,7 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
             id="new-question"
             class="rounded-3xl border border-primary/20 bg-white p-6 shadow-sm lg:p-8"
           >
-            <h2 class="mb-5 font-semibold text-dark">New question</h2>
+            <h2 class="mb-5 font-semibold text-ink">New question</h2>
             <.question_form form={@new_question_form} question={nil} />
           </section>
         </section>

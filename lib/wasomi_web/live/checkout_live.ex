@@ -118,7 +118,7 @@ defmodule WasomiWeb.CheckoutLive do
             <span class="rounded-full bg-mint px-3 py-1 text-sm font-medium text-primary">
               Secure checkout
             </span>
-            <h1 class="mt-5 text-3xl font-semibold text-dark sm:text-4xl">
+            <h1 class="mt-5 text-3xl font-semibold text-ink sm:text-4xl">
               Enroll in {@course.title}
             </h1>
             <p class="mt-3 text-body">
@@ -126,8 +126,8 @@ defmodule WasomiWeb.CheckoutLive do
             </p>
 
             <div class="mt-8 flex items-center justify-between rounded-2xl bg-soft p-5">
-              <span class="font-medium text-dark">One-time course fee</span>
-              <span class="text-2xl font-semibold text-dark">{Catalog.format_price(@course)}</span>
+              <span class="font-medium text-ink">One-time course fee</span>
+              <span class="text-2xl font-semibold text-ink">{Catalog.format_price(@course)}</span>
             </div>
 
             <div :if={@waiting} id="payment-waiting" class="mt-6 rounded-2xl bg-mint p-5 text-body">
@@ -137,7 +137,7 @@ defmodule WasomiWeb.CheckoutLive do
 
             <form id="checkout-form" phx-submit="pay" class="mt-7 space-y-4">
               <div>
-                <label for="checkout-phone" class="block text-sm font-medium text-dark">
+                <label for="checkout-phone" class="block text-sm font-medium text-ink">
                   M-Pesa phone number
                 </label>
                 <p class="mt-1 text-sm text-body">
@@ -150,7 +150,7 @@ defmodule WasomiWeb.CheckoutLive do
                   value={@phone}
                   placeholder="07XXXXXXXX"
                   required
-                  class="mt-2 w-full rounded-2xl border border-black/10 px-4 py-3 text-dark focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                  class="mt-2 w-full rounded-2xl border border-black/10 px-4 py-3 text-ink focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                 />
                 <p :if={@phone_error} class="mt-1 text-sm font-medium text-rose-600">
                   {@phone_error}
@@ -161,7 +161,7 @@ defmodule WasomiWeb.CheckoutLive do
                 id="pay-with-paystack"
                 type="submit"
                 disabled={@submitting}
-                class="w-full rounded-full bg-dark px-6 py-4 font-medium text-white transition hover:bg-primary disabled:cursor-wait disabled:opacity-60"
+                class="w-full rounded-full bg-ink px-6 py-4 font-medium text-white transition hover:bg-primary disabled:cursor-wait disabled:opacity-60"
               >
                 {if @submitting, do: "Opening Paystack…", else: "Enroll & Pay"}
               </button>

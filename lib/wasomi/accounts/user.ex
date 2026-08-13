@@ -7,6 +7,7 @@ defmodule Wasomi.Accounts.User do
     field :email, :string
     field :phone, :string
     field :password, :string, virtual: true, redact: true
+    field :password_confirmation, :string, virtual: true, redact: true
     field :hashed_password, :string, redact: true
     field :current_password, :string, virtual: true, redact: true
     field :confirmed_at, :utc_datetime
@@ -40,9 +41,10 @@ defmodule Wasomi.Accounts.User do
   """
   def registration_changeset(user, attrs, opts \\ []) do
     user
-    |> cast(attrs, [:name, :email, :password])
+    |> cast(attrs, [:name, :email, :password, :password_confirmation])
     |> validate_name()
     |> validate_email(opts)
+    |> validate_confirmation(:password, message: "does not match password")
     |> validate_password(opts)
   end
 

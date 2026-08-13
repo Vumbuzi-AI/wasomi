@@ -159,7 +159,7 @@ defmodule WasomiWeb.AdminLive.Payments do
             <.search_input value={@search} placeholder={search_placeholder(@tab)} debounce={300} />
             <.link
               href={~p"/admin/exports/payments"}
-              class="group relative grid h-11 w-11 place-items-center rounded-full border border-black/10 bg-white text-dark transition hover:border-primary hover:text-primary"
+              class="group relative grid h-11 w-11 place-items-center rounded-full border border-black/10 bg-white text-ink transition hover:border-primary hover:text-primary"
               aria-label="Export all payments as CSV"
             >
               <.icon name="hero-document-arrow-down" class="h-5 w-5" />
@@ -238,7 +238,7 @@ defmodule WasomiWeb.AdminLive.Payments do
         <div :if={@tab == :payments} class="rounded-3xl border border-black/5 bg-white p-6">
           <div class="flex flex-wrap items-center justify-between gap-4">
             <div>
-              <h2 class="text-xl font-semibold text-dark">Payment transactions</h2>
+              <h2 class="text-xl font-semibold text-ink">Payment transactions</h2>
               <p class="mt-1 text-sm text-body">Every checkout attempt and its current status.</p>
             </div>
             <span class="rounded-full border border-primary/30 bg-mint px-3 py-1 text-xs font-semibold text-primary">
@@ -355,7 +355,7 @@ defmodule WasomiWeb.AdminLive.Payments do
                       <.link
                         :if={payment.user}
                         navigate={~p"/admin/students/#{payment.user_id}"}
-                        class="font-medium text-dark hover:text-primary"
+                        class="font-medium text-ink hover:text-primary"
                       >
                         {payment.user.name || payment.user.email}
                       </.link>
@@ -364,7 +364,7 @@ defmodule WasomiWeb.AdminLive.Payments do
                     <td class="px-6 py-4 text-body">{payment.course && payment.course.title}</td>
                     <td class="px-6 py-4 capitalize text-body">{payment.provider}</td>
                     <td class="px-6 py-4 text-xs text-body">{payment.provider_reference}</td>
-                    <td class="px-6 py-4 font-semibold text-dark">
+                    <td class="px-6 py-4 font-semibold text-ink">
                       {Payments.format_amount(payment)}
                     </td>
                     <td class="px-6 py-4 text-body">{format_date(payment.inserted_at)}</td>
@@ -376,7 +376,7 @@ defmodule WasomiWeb.AdminLive.Payments do
                         phx-click="reconcile"
                         phx-value-id={payment.id}
                         phx-disable-with="Verifying..."
-                        class="rounded-full bg-dark px-4 py-1.5 text-xs font-semibold text-white transition hover:bg-primary disabled:cursor-not-allowed disabled:opacity-40"
+                        class="rounded-full bg-ink px-4 py-1.5 text-xs font-semibold text-white transition hover:bg-primary disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         Reconcile
                       </button>
@@ -405,7 +405,7 @@ defmodule WasomiWeb.AdminLive.Payments do
         <div :if={@tab == :revenue} class="rounded-3xl border border-black/5 bg-white p-6">
           <div class="flex flex-wrap items-center justify-between gap-4">
             <div>
-              <h2 class="text-xl font-semibold text-dark">Course revenue</h2>
+              <h2 class="text-xl font-semibold text-ink">Course revenue</h2>
               <p class="mt-1 text-sm text-body">Revenue grouped by course.</p>
             </div>
             <span class="rounded-full border border-primary/30 bg-mint px-3 py-1 text-xs font-semibold text-primary">
@@ -434,14 +434,14 @@ defmodule WasomiWeb.AdminLive.Payments do
                     <td class="px-6 py-4">
                       <.link
                         navigate={~p"/admin/courses/#{row.course.slug}"}
-                        class="font-medium text-dark hover:text-primary"
+                        class="font-medium text-ink hover:text-primary"
                       >
                         {row.course.title}
                       </.link>
                     </td>
                     <td class="px-6 py-4 text-body">{row.enrolled}</td>
                     <td class="px-6 py-4 text-body">{row.paid}</td>
-                    <td class="px-6 py-4 font-semibold text-dark">
+                    <td class="px-6 py-4 font-semibold text-ink">
                       {Payments.format_minor(row.revenue_minor, row.course.currency)}
                     </td>
                     <td class="px-6 py-4 text-body">{format_date(row.last_paid_at)}</td>
@@ -466,10 +466,10 @@ defmodule WasomiWeb.AdminLive.Payments do
   defp search_placeholder(:payments), do: "Search learner, course or reference"
   defp search_placeholder(:revenue), do: "Search courses"
 
-  defp tab_class(true), do: "bg-dark text-white"
-  defp tab_class(false), do: "text-body hover:text-dark"
+  defp tab_class(true), do: "bg-ink text-white"
+  defp tab_class(false), do: "text-body hover:text-ink"
 
-  defp status_pill_class(true), do: "bg-dark text-white"
+  defp status_pill_class(true), do: "bg-ink text-white"
 
   defp status_pill_class(false),
     do: "border border-black/10 bg-white text-body hover:border-primary hover:text-primary"

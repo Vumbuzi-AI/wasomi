@@ -42,17 +42,16 @@ defmodule WasomiWeb.StudentComponents do
     assigns = assign(assigns, :nav_items, @nav_items)
 
     ~H"""
-    <div class="min-h-screen bg-soft text-dark lg:flex">
+    <div class="min-h-screen bg-soft text-ink lg:flex">
       <%!-- Mobile top bar --%>
       <div class="flex items-center justify-between border-b border-black/5 bg-white px-5 py-4 lg:hidden">
-        <.link navigate={~p"/dashboard"} class="flex items-center gap-3 font-bold text-dark">
-          <span class="grid h-9 w-9 place-items-center rounded-[10px] bg-primary text-white">K</span>
-          <span>Wasomi</span>
+        <.link navigate={~p"/dashboard"} class="flex items-center">
+          <img src={~p"/images/logo.png"} alt="Wasomi" class="h-7 w-auto" />
         </.link>
         <button
           type="button"
           phx-click={JS.toggle(to: "#student-sidebar")}
-          class="grid h-10 w-10 place-items-center rounded-xl border border-black/10 text-dark"
+          class="grid h-10 w-10 place-items-center rounded-xl border border-black/10 text-ink"
         >
           <.icon name="hero-bars-3" class="h-5 w-5" />
         </button>
@@ -61,15 +60,22 @@ defmodule WasomiWeb.StudentComponents do
       <%!-- Sidebar --%>
       <aside
         id="student-sidebar"
-        class="hidden w-full shrink-0 border-b border-black/5 bg-white lg:flex lg:h-screen lg:w-72 lg:flex-col lg:border-b-0 lg:border-r"
+        phx-update="ignore"
+        class="app-sidebar hidden w-full shrink-0 border-b border-black/5 bg-white lg:flex lg:h-screen lg:w-72 lg:flex-col lg:border-b-0 lg:border-r"
       >
-        <div class="hidden px-6 py-7 lg:block">
-          <.link navigate={~p"/dashboard"} class="flex items-center gap-3 font-bold text-dark">
-            <span class="grid h-10 w-10 place-items-center rounded-[10px] bg-primary text-white">
-              K
-            </span>
-            <span class="text-lg">Wasomi</span>
+        <div class="sidebar-header hidden items-center justify-between px-6 py-7 lg:flex">
+          <.link navigate={~p"/dashboard"} class="sidebar-label flex items-center">
+            <img src={~p"/images/logo.png"} alt="Wasomi" class="h-7 w-auto" />
           </.link>
+          <button
+            type="button"
+            id="student-sidebar-toggle"
+            phx-hook="SidebarToggle"
+            class="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-black/10 text-ink transition hover:border-primary hover:text-primary"
+            title="Collapse sidebar"
+          >
+            <.icon name="hero-chevron-double-left" class="sidebar-toggle-icon h-4 w-4" />
+          </button>
         </div>
 
         <nav class="flex-1 space-y-1 px-4 py-4 lg:py-2">
@@ -80,27 +86,32 @@ defmodule WasomiWeb.StudentComponents do
           <.link
             :if={@current_user.role == :admin}
             navigate={~p"/admin"}
-            class="mb-2 flex items-center gap-3 rounded-xl bg-dark px-3 py-2.5 text-sm font-medium text-white transition hover:bg-primary"
+            class="sidebar-row group relative mb-2 flex items-center gap-3 rounded-xl bg-ink px-3 py-2.5 text-sm font-medium text-white transition hover:bg-primary"
           >
-            <.icon name="hero-chart-pie" class="h-5 w-5" /> Admin dashboard
+            <.icon name="hero-chart-pie" class="h-5 w-5 shrink-0" />
+            <span class="sidebar-label inline-block">Admin dashboard</span>
+            <.sidebar_tooltip label="Admin dashboard" />
           </.link>
-          <div class="flex items-center gap-3 rounded-2xl bg-soft px-3 py-3">
+          <div class="sidebar-row group relative flex items-center gap-3 rounded-2xl bg-soft px-3 py-3">
             <span class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-mint font-semibold uppercase text-primary">
               {String.first(@current_user.name || @current_user.email)}
             </span>
-            <div class="min-w-0">
-              <p class="truncate text-sm font-semibold text-dark">
+            <div class="sidebar-label min-w-0">
+              <p class="truncate text-sm font-semibold text-ink">
                 {@current_user.name || "Learner"}
               </p>
               <p class="truncate text-xs text-muted">{@current_user.email}</p>
             </div>
+            <.sidebar_tooltip label={@current_user.name || @current_user.email} />
           </div>
           <.link
             href={~p"/users/log_out"}
             method="delete"
-            class="mt-3 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-body transition hover:bg-soft hover:text-primary"
+            class="sidebar-row group relative mt-3 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-body transition hover:bg-soft hover:text-primary"
           >
-            <.icon name="hero-arrow-left-on-rectangle" class="h-5 w-5" /> Log out
+            <.icon name="hero-arrow-left-on-rectangle" class="h-5 w-5 shrink-0" />
+            <span class="sidebar-label inline-block">Log out</span>
+            <.sidebar_tooltip label="Log out" />
           </.link>
         </div>
       </aside>
@@ -138,20 +149,20 @@ defmodule WasomiWeb.StudentComponents do
           alt=""
           class="h-full w-full object-cover transition duration-500 group-hover:scale-105"
         />
-        <div class="absolute inset-0 bg-gradient-to-t from-dark/55 via-dark/10 to-transparent"></div>
+        <div class="absolute inset-0 bg-gradient-to-t from-ink/55 via-ink/10 to-transparent"></div>
         <span class="absolute left-4 top-4 rounded-full bg-white/95 px-3 py-1 text-xs font-semibold text-primary shadow-sm">
           {progress_label(@card)}
         </span>
         <span
           id={@progress_id}
-          class="absolute right-4 top-4 rounded-full bg-dark/45 px-2.5 py-1 text-xs font-semibold text-white backdrop-blur-sm"
+          class="absolute right-4 top-4 rounded-full bg-ink/45 px-2.5 py-1 text-xs font-semibold text-white backdrop-blur-sm"
         >
           {@card.progress.percent}%
         </span>
       </div>
 
       <div class="flex flex-1 flex-col p-6">
-        <h3 class="text-lg font-semibold leading-snug text-dark">{@card.course.title}</h3>
+        <h3 class="text-lg font-semibold leading-snug text-ink">{@card.course.title}</h3>
         <p :if={@card.resume_lecture} class="mt-2 flex items-start gap-1.5 text-sm text-body">
           <.icon name="hero-play-circle-mini" class="mt-0.5 h-4 w-4 shrink-0 text-primary" />
           <span class="line-clamp-1">Next: {@card.resume_lecture.title}</span>
@@ -174,10 +185,10 @@ defmodule WasomiWeb.StudentComponents do
 
           <.link
             navigate={course_destination(@card)}
-            class="group/btn mt-5 flex items-center justify-between gap-2 rounded-full bg-dark py-1.5 pl-6 pr-1.5 font-medium text-white transition hover:bg-primary"
+            class="group/btn mt-5 flex items-center justify-between gap-2 rounded-full bg-ink py-1.5 pl-6 pr-1.5 font-medium text-white transition hover:bg-primary"
           >
             {course_action(@card)}
-            <span class="grid h-9 w-9 place-items-center rounded-full bg-primary text-white transition group-hover/btn:bg-dark">
+            <span class="grid h-9 w-9 place-items-center rounded-full bg-primary text-white transition group-hover/btn:bg-ink">
               <.icon name="hero-arrow-right-mini" class="h-4 w-4" />
             </span>
           </.link>
@@ -206,16 +217,31 @@ defmodule WasomiWeb.StudentComponents do
     <.link
       navigate={@item.path}
       class={[
-        "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition",
+        "sidebar-row group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition",
         if(@item.key == @active,
           do: "bg-mint text-primary",
           else: "text-body hover:bg-soft hover:text-primary"
         )
       ]}
     >
-      <.icon name={@item.icon} class="h-5 w-5" />
-      {@item.label}
+      <.icon name={@item.icon} class="h-5 w-5 shrink-0" />
+      <span class="sidebar-label inline-block">{@item.label}</span>
+      <.sidebar_tooltip label={@item.label} />
     </.link>
+    """
+  end
+
+  # Shown only while the sidebar is collapsed (see `.sidebar-tooltip` in
+  # app.css) — a plain `title` attribute works too, but browsers impose a
+  # multi-hundred-ms hover delay on those that can't be shortened from CSS,
+  # so icon-only mode gets its own instant, always-fast tooltip instead.
+  attr :label, :string, required: true
+
+  defp sidebar_tooltip(assigns) do
+    ~H"""
+    <span class="sidebar-tooltip pointer-events-none absolute left-full top-1/2 z-50 ml-3 -translate-y-1/2 whitespace-nowrap rounded-lg bg-ink px-2.5 py-1.5 text-xs font-medium text-white shadow-lg">
+      {@label}
+    </span>
     """
   end
 end

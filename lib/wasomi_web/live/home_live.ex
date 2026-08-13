@@ -19,18 +19,18 @@ defmodule WasomiWeb.HomeLive do
   def render(assigns) do
     ~H"""
     <div class="min-h-screen  bg-slate-50 text-slate-900">
+      <.announcement_bar />
       <.home_header current_user={@current_user} />
       <main>
         <.hero />
+        <.about_wasomi />
+        <.gs1_in_action />
         <.top_courses_section courses={@courses} />
-        <.why_choose_us />
-        <.popular_courses courses={@courses} />
-        <.digital_skills />
+        <.gs1_in_workplaces />
+        <.how_it_works />
         <.mentors />
-        <.testimonials />
+        <.certificates />
         <.faqs />
-        <.blog />
-        <.cta />
       </main>
       <.footer />
     </div>

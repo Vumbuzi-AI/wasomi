@@ -375,108 +375,6 @@ Hooks.VideoPreview = {
   }
 }
 
-Hooks.R2ResourceUpload = {
-  mounted() {
-    this.fileInput = this.el.querySelector("[data-role='file']")
-    this.linkInput = this.el.querySelector("[data-role='link']")
-    this.addLinkButton = this.el.querySelector("[data-role='add-link']")
-    this.modeButtons = Array.from(this.el.querySelectorAll("[data-role='resource-mode']"))
-    this.modePanels = Array.from(this.el.querySelectorAll("[data-role='resource-panel']"))
-    this.uploadTarget = this.el.getAttribute("data-target")
-    this.pending = new Map()
-    this.modeButtons.forEach(button => {
-      button.addEventListener("click", () => this.setMode(button.dataset.mode))
-    })
-    this.setMode("upload")
-
-    this.fileInput.addEventListener("change", event => {
-      Array.from(event.target.files || []).forEach(file => {
-        const clientRef = `${Date.now()}-${Math.random().toString(36).slice(2)}`
-        this.pending.set(clientRef, file)
-        this.pushUp("presign-resource", {
-          client_ref: clientRef,
-          filename: file.name,
-          content_type: file.type || "application/octet-stream",
-          size: file.size
-        })
-      })
-      event.target.value = ""
-    })
-
-    this.addLinkButton.addEventListener("click", () => {
-      const url = this.linkInput.value.trim()
-      if (!url) return
-      this.pushUp("add-link", {url})
-      this.linkInput.value = ""
-    })
-
-    this.handleEvent("r2-upload-ready", upload => this.upload(upload))
-  },
-
-  destroyed() {
-    this.pending.clear()
-    this.request?.abort()
-  },
-
-  setMode(mode) {
-    this.modeButtons.forEach(button => {
-      const active = button.dataset.mode === mode
-      button.setAttribute("aria-pressed", active ? "true" : "false")
-      button.classList.toggle("bg-dark", active)
-      button.classList.toggle("text-white", active)
-      button.classList.toggle("text-muted", !active)
-    })
-    this.modePanels.forEach(panel => {
-      panel.classList.toggle("hidden", panel.dataset.mode !== mode)
-    })
-  },
-
-  pushUp(event, payload) {
-    if (this.uploadTarget) {
-      this.pushEventTo(this.uploadTarget, event, payload)
-    } else {
-      this.pushEvent(event, payload)
-    }
-  },
-
-  upload(upload) {
-    const file = this.pending.get(upload.client_ref)
-    if (!file) return
-
-    const request = new XMLHttpRequest()
-    this.request = request
-    request.addEventListener("load", () => {
-      this.pending.delete(upload.client_ref)
-
-      if (request.status >= 200 && request.status < 300) {
-        this.pushUp("resource-uploaded", {
-          client_ref: upload.client_ref,
-          kind: upload.kind,
-          name: file.name,
-          key: upload.key,
-          public_url: upload.public_url,
-          content_type: file.type,
-          byte_size: file.size
-        })
-      } else {
-        this.pushUp("resource-upload-failed", {
-          client_ref: upload.client_ref,
-          message: `Upload failed (${request.status})`
-        })
-      }
-    })
-    request.addEventListener("error", () => {
-      this.pending.delete(upload.client_ref)
-      this.pushUp("resource-upload-failed", {
-        client_ref: upload.client_ref,
-        message: "Upload failed because of a network error"
-      })
-    })
-    request.open("PUT", upload.url)
-    request.setRequestHeader("Content-Type", file.type || "application/octet-stream")
-    request.send(file)
-  }
-}
 function titleCaseFromFilename(filename) {
   return filename
     .replace(/\.[^/.]+$/, "")
@@ -645,6 +543,23 @@ Hooks.PdfDownload = {
       link.remove()
       URL.revokeObjectURL(url)
     })
+  }
+}
+
+Hooks.FlashAutoDismiss = {
+  mounted() {
+    this.schedule()
+  },
+  updated() {
+    this.schedule()
+  },
+  schedule() {
+    window.clearTimeout(this.dismissTimer)
+    const ms = parseInt(this.el.dataset.autoDismissMs, 10) || 5000
+    this.dismissTimer = window.setTimeout(() => this.el.click(), ms)
+  },
+  destroyed() {
+    window.clearTimeout(this.dismissTimer)
   }
 }
 

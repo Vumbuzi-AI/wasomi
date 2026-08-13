@@ -274,4 +274,69 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
 
     assert Catalog.get_lecture!(lecture.id).video_asset_id == "old-playback-id"
   end
+
+  test "switching to the link panel and saving a link keeps the link panel selected", %{
+    conn: conn
+  } do
+    course = course_fixture()
+    course_module = course_module_fixture(course_id: course.id)
+
+    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
+    render_click(view, "new_lecture", %{"module-id" => to_string(course_module.id)})
+
+    assert has_element?(view, "button[phx-value-mode='upload'][aria-pressed='true']")
+
+    view |> element("button[phx-value-mode='link']") |> render_click()
+
+    assert has_element?(view, "button[phx-value-mode='link'][aria-pressed='true']")
+    assert has_element?(view, "button[phx-value-mode='upload'][aria-pressed='false']")
+
+    html =
+      view
+      |> form("#add-link-form", %{"url" => "https://example.com/slides.pdf"})
+      |> render_submit()
+
+    assert html =~ "https://example.com/slides.pdf"
+    refute html =~ "No resources added yet."
+
+    # Regression guard: adding a link used to re-render the resources
+    # section back to its hardcoded server template, which silently reset
+    # the toggle to "Upload files" every single time a link was saved.
+    assert has_element?(view, "button[phx-value-mode='link'][aria-pressed='true']")
+    assert has_element?(view, "button[phx-value-mode='upload'][aria-pressed='false']")
+  end
+
+  test "a link resource's DOM identity survives removing an earlier row", %{conn: conn} do
+    course = course_fixture()
+    course_module = course_module_fixture(course_id: course.id)
+
+    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
+    render_click(view, "new_lecture", %{"module-id" => to_string(course_module.id)})
+
+    view |> element("button[phx-value-mode='link']") |> render_click()
+
+    view
+    |> form("#add-link-form", %{"url" => "https://example.com/first"})
+    |> render_submit()
+
+    html =
+      view
+      |> form("#add-link-form", %{"url" => "https://example.com/second"})
+      |> render_submit()
+
+    # Regression guard: link resources always have storage_key: nil, so
+    # keying their row on list index alone (the old fallback) meant every
+    # link's DOM id silently shifted whenever an earlier row was removed —
+    # a stable per-row id (row_id) must survive that reindex instead.
+    [_first_row_id, second_row_id] =
+      Regex.scan(~r/id="(lecture-resource-[a-f0-9-]+)"/, html) |> Enum.map(&List.last/1)
+
+    view |> element("button[phx-value-index='0']") |> render_click()
+
+    html_after_removal = render(view)
+
+    assert html_after_removal =~ second_row_id
+    refute html_after_removal =~ "https://example.com/first"
+    assert html_after_removal =~ "https://example.com/second"
+  end
 end

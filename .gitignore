@@ -49,3 +49,6 @@ npm-debug.log
 .env
 .env.*
 !.env.example
+
+skills-lock.json
+CLAUDE.md

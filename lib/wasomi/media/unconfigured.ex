@@ -12,4 +12,7 @@ defmodule Wasomi.Media.Unconfigured do
 
   @impl true
   def thumbnail_url(_lecture, _user), do: {:error, :media_provider_not_configured}
+
+  @impl true
+  def download_url(_lecture), do: {:error, :media_provider_not_configured}
 end

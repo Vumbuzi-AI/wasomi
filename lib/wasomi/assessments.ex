@@ -17,8 +17,21 @@ defmodule Wasomi.Assessments do
   import Ecto.Query, warn: false
 
   alias Wasomi.Accounts.User
-  alias Wasomi.Assessments.{Question, Quiz, QuizGeneration, QuizSubmission}
+
+  alias Wasomi.Assessments.{
+    LectureQuiz,
+    LectureQuizGeneration,
+    LectureQuizQuestion,
+    LectureQuizSubmission,
+    Question,
+    Quiz,
+    QuizGeneration,
+    QuizSubmission
+  }
+
+  alias Wasomi.Assessments.Workers.GenerateLectureQuizWorker
   alias Wasomi.Catalog.CourseModule
+  alias Wasomi.Catalog.Lecture
   alias Wasomi.Repo
 
   ## Quizzes
@@ -66,6 +79,56 @@ defmodule Wasomi.Assessments do
   end
 
   @doc """
+  Counts lecture-quiz questions (any status) for every lecture in a course,
+  keyed by `lecture_id`. Lectures with no lecture quiz, or no questions
+  generated yet, are simply absent from the result — callers should use
+  `Map.has_key?/2` to ask "has this lecture's quiz actually been generated,"
+  not `Map.get/3` with a `0` default.
+  """
+  def count_lecture_quiz_questions_by_lecture(course_id) do
+    LectureQuizQuestion
+    |> join(:inner, [q], quiz in LectureQuiz, on: quiz.id == q.lecture_quiz_id)
+    |> join(:inner, [q, quiz], lecture in Lecture, on: lecture.id == quiz.lecture_id)
+    |> join(:inner, [q, _quiz, lecture], module in CourseModule,
+      on: module.id == lecture.module_id
+    )
+    |> where([_q, _quiz, _lecture, module], module.course_id == ^course_id)
+    |> group_by([_q, _quiz, lecture, _module], lecture.id)
+    |> select([q, _quiz, lecture, _module], {lecture.id, count(q.id)})
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  @doc """
+  Lists the prompt text of every `:published` lecture-quiz question across
+  every lecture in a module, so module-quiz generation can seed its prompt
+  with what's already been asked at the lecture level instead of
+  re-deriving (and duplicating) the same coverage.
+  """
+  def list_lecture_quiz_question_prompts_for_module(module_id) do
+    LectureQuizQuestion
+    |> join(:inner, [q], quiz in LectureQuiz, on: quiz.id == q.lecture_quiz_id)
+    |> join(:inner, [q, quiz], lecture in Lecture, on: lecture.id == quiz.lecture_id)
+    |> where([q, _quiz, lecture], lecture.module_id == ^module_id and q.status == :published)
+    |> select([q], q.prompt)
+    |> Repo.all()
+  end
+
+  @doc """
+  Checks if every lecture in a module has a lecture quiz.
+  """
+  def module_ready_for_quiz_generation?(%Wasomi.Catalog.CourseModule{} = module) do
+    lectures = Wasomi.Catalog.list_lectures_for_module(module.id)
+    lectures != [] and Enum.all?(lectures, fn l -> get_lecture_quiz(l.id) != nil end)
+  end
+
+  def module_ready_for_quiz_generation?(module_id)
+      when is_integer(module_id) or is_binary(module_id) do
+    lectures = Wasomi.Catalog.list_lectures_for_module(module_id)
+    lectures != [] and Enum.all?(lectures, fn l -> get_lecture_quiz(l.id) != nil end)
+  end
+
+  @doc """
   Gets every quiz belonging to a course, keyed by `module_id`, so the
   course-curriculum view can show "this module already has a quiz" without
   an N+1 lookup per module.
@@ -77,6 +140,46 @@ defmodule Wasomi.Assessments do
     |> select([q, module], {module.id, q})
     |> Repo.all()
     |> Map.new()
+  end
+
+  @doc """
+  Each enrolled user's latest attempt per module quiz in a course, keyed by
+  `user_id`, as a list of `%{quiz_title:, score_percent:, passed:}` maps —
+  only for quizzes the user has actually attempted at least once (a user
+  absent from the result, or missing a particular quiz from their list,
+  simply hasn't attempted it yet).
+
+  For the admin course view's enrolled-students table: two queries total
+  regardless of student count, so computing this per row doesn't become an
+  N+1 the way calling `list_submissions_for_user/2` per (student, quiz) pair
+  would.
+  """
+  def latest_quiz_scores_by_user(course_id) do
+    quiz_titles =
+      Quiz
+      |> join(:inner, [q], module in CourseModule, on: module.id == q.module_id)
+      |> where([_q, module], module.course_id == ^course_id)
+      |> select([q], {q.id, q.title})
+      |> Repo.all()
+      |> Map.new()
+
+    quiz_ids = Map.keys(quiz_titles)
+
+    if quiz_ids == [],
+      do: %{},
+      else:
+        QuizSubmission
+        |> where([s], s.quiz_id in ^quiz_ids)
+        |> order_by([s], asc: s.user_id, asc: s.quiz_id, desc: s.submitted_at, desc: s.id)
+        |> Repo.all()
+        |> Enum.uniq_by(&{&1.user_id, &1.quiz_id})
+        |> Enum.group_by(& &1.user_id, fn submission ->
+          %{
+            quiz_title: Map.fetch!(quiz_titles, submission.quiz_id),
+            score_percent: submission.score_percent,
+            passed: submission.passed
+          }
+        end)
   end
 
   @doc """
@@ -156,9 +259,23 @@ defmodule Wasomi.Assessments do
   to learners.
   """
   def publish_question(%Question{} = question) do
-    question
-    |> Ecto.Changeset.change(status: :published)
-    |> Repo.update()
+    Repo.transaction(fn ->
+      case question
+           |> Ecto.Changeset.change(status: :published)
+           |> Repo.update() do
+        {:ok, updated_question} ->
+          now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+          Quiz
+          |> where([q], q.id == ^question.quiz_id)
+          |> Repo.update_all(set: [active: true, published_at: now])
+
+          updated_question
+
+        {:error, changeset} ->
+          Repo.rollback(changeset)
+      end
+    end)
   end
 
   @doc """
@@ -368,9 +485,18 @@ defmodule Wasomi.Assessments do
   action rather than clicking Publish on each question individually.
   """
   def publish_all_drafts(%Quiz{id: quiz_id}) do
-    Question
-    |> where([q], q.quiz_id == ^quiz_id and q.status == :draft)
-    |> Repo.update_all(set: [status: :published])
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    {count, _} =
+      Question
+      |> where([q], q.quiz_id == ^quiz_id and q.status == :draft)
+      |> Repo.update_all(set: [status: :published, updated_at: now])
+
+    Quiz
+    |> where([q], q.id == ^quiz_id)
+    |> Repo.update_all(set: [active: true, published_at: now])
+
+    {count, nil}
   end
 
   @doc """
@@ -529,4 +655,369 @@ defmodule Wasomi.Assessments do
 
     :reordered
   end
+
+  ## Lecture quizzes
+
+  @doc """
+  Gets the quiz for a lecture, if one exists. A lecture has at most one quiz.
+  """
+  def get_lecture_quiz(%Lecture{id: lecture_id}), do: get_lecture_quiz(lecture_id)
+  def get_lecture_quiz(lecture_id), do: Repo.get_by(LectureQuiz, lecture_id: lecture_id)
+
+  def get_lecture_quiz_with_questions!(id) do
+    questions_query = from(question in LectureQuizQuestion, order_by: [asc: question.position])
+
+    options_query =
+      from(option in Wasomi.Assessments.LectureQuizQuestionOption,
+        order_by: [asc: option.position]
+      )
+
+    LectureQuiz
+    |> Repo.get!(id)
+    |> Repo.preload([:lecture, questions: {questions_query, question_options: options_query}])
+  end
+
+  @doc """
+  Lists a lecture quiz's `:published` questions with their options, ordered
+  — the only question set a learner should ever be scored against. Mirrors
+  `list_published_questions/1`, minus the extra `quiz.active` check that
+  function has — see the `LectureQuiz` moduledoc for why.
+  """
+  def list_published_lecture_quiz_questions(%LectureQuiz{id: lecture_quiz_id}) do
+    options_query =
+      from(option in Wasomi.Assessments.LectureQuizQuestionOption,
+        order_by: [asc: option.position]
+      )
+
+    LectureQuizQuestion
+    |> where([q], q.lecture_quiz_id == ^lecture_quiz_id and q.status == :published)
+    |> order_by([q], asc: q.position)
+    |> preload(question_options: ^options_query)
+    |> Repo.all()
+  end
+
+  @doc """
+  Whether a lecture quiz has enough reviewed content for a learner to take
+  it — used by `Wasomi.Learning.lecture_unlocked?/3` to decide whether a
+  lecture's quiz should gate the next lecture at all. A quiz with zero
+  published questions (still mid-generation, or awaiting review) never
+  blocks anyone, same as a lecture with no quiz at all.
+  """
+  def lecture_quiz_ready_for_learners?(%LectureQuiz{id: lecture_quiz_id}) do
+    LectureQuizQuestion
+    |> where([q], q.lecture_quiz_id == ^lecture_quiz_id and q.status == :published)
+    |> Repo.exists?()
+  end
+
+  @doc """
+  Scores and records a learner's lecture-quiz attempt. Mirrors `submit_quiz/3`.
+  """
+  def submit_lecture_quiz(%User{} = user, %LectureQuiz{} = quiz, answers) when is_map(answers) do
+    case list_published_lecture_quiz_questions(quiz) do
+      [] ->
+        {:error, :quiz_not_ready}
+
+      questions ->
+        normalized = stringify_answers(answers)
+        correct_count = Enum.count(questions, &lecture_quiz_answer_correct?(&1, normalized))
+        score_percent = round(correct_count / length(questions) * 100)
+        passed = score_percent >= quiz.passing_score_percent
+
+        %LectureQuizSubmission{}
+        |> LectureQuizSubmission.changeset(%{
+          lecture_quiz_id: quiz.id,
+          user_id: user.id,
+          answers: normalized,
+          score_percent: score_percent,
+          passed: passed,
+          submitted_at: DateTime.utc_now() |> DateTime.truncate(:second)
+        })
+        |> Repo.insert()
+    end
+  end
+
+  def list_lecture_quiz_submissions_for_user(%User{id: user_id}, %LectureQuiz{id: lecture_quiz_id}) do
+    LectureQuizSubmission
+    |> where([s], s.user_id == ^user_id and s.lecture_quiz_id == ^lecture_quiz_id)
+    |> order_by([s], desc: s.submitted_at, desc: s.id)
+    |> Repo.all()
+  end
+
+  @doc """
+  Whether a learner has ever passed this lecture quiz, in any attempt.
+  """
+  def passed_lecture_quiz?(%User{id: user_id}, %LectureQuiz{id: lecture_quiz_id}) do
+    LectureQuizSubmission
+    |> where(
+      [s],
+      s.user_id == ^user_id and s.lecture_quiz_id == ^lecture_quiz_id and s.passed == true
+    )
+    |> Repo.exists?()
+  end
+
+  defp lecture_quiz_answer_correct?(
+         %LectureQuizQuestion{id: id, question_options: options},
+         answers
+       ) do
+    case Map.get(answers, to_string(id)) do
+      nil -> false
+      selected -> Enum.any?(options, &(to_string(&1.id) == selected and &1.correct))
+    end
+  end
+
+  @doc """
+  Gets or creates the quiz for a lecture, so the admin resource-picker
+  doesn't need a separate "create the quiz" step before it can start a
+  generation.
+  """
+  def ensure_lecture_quiz(%Lecture{} = lecture) do
+    case get_lecture_quiz(lecture.id) do
+      nil -> create_lecture_quiz(lecture, %{title: "#{lecture.title} quiz"})
+      quiz -> {:ok, quiz}
+    end
+  end
+
+  def create_lecture_quiz(%Lecture{} = lecture, attrs) do
+    %LectureQuiz{}
+    |> LectureQuiz.changeset(Map.put(attrs, :lecture_id, lecture.id))
+    |> Repo.insert()
+  end
+
+  def create_lecture_quiz_question(%LectureQuiz{} = quiz, attrs) do
+    %LectureQuizQuestion{lecture_quiz_id: quiz.id}
+    |> LectureQuizQuestion.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  def change_lecture_quiz_question(%LectureQuizQuestion{} = question, attrs \\ %{}) do
+    LectureQuizQuestion.changeset(question, attrs)
+  end
+
+  def update_lecture_quiz_question(%LectureQuizQuestion{} = question, attrs) do
+    question
+    |> LectureQuizQuestion.changeset(attrs)
+    |> Repo.update()
+  end
+
+  def reorder_lecture_quiz_questions(%LectureQuiz{id: lecture_quiz_id}, question_ids)
+      when is_list(question_ids) do
+    with {:ok, question_ids} <- normalize_ids(question_ids) do
+      Repo.transaction(fn ->
+        questions =
+          LectureQuizQuestion
+          |> where([question], question.lecture_quiz_id == ^lecture_quiz_id)
+          |> order_by([question], asc: question.position)
+          |> lock("FOR UPDATE")
+          |> Repo.all()
+
+        if Enum.sort(Enum.map(questions, & &1.id)) == Enum.sort(question_ids) do
+          persist_lecture_quiz_question_order(questions, question_ids)
+        else
+          Repo.rollback(:invalid_order)
+        end
+      end)
+    end
+  end
+
+  defp persist_lecture_quiz_question_order(questions, target_ids) do
+    questions
+    |> Enum.with_index(1)
+    |> Enum.each(fn {question, idx} ->
+      question
+      |> Ecto.Changeset.change(position: -idx)
+      |> Repo.update!()
+    end)
+
+    target_ids
+    |> Enum.with_index(1)
+    |> Enum.each(fn {id, new_pos} ->
+      LectureQuizQuestion
+      |> where([q], q.id == ^id)
+      |> Repo.update_all(set: [position: new_pos])
+    end)
+
+    :ok
+  end
+
+  def get_lecture_quiz_question!(id), do: Repo.get!(LectureQuizQuestion, id)
+
+  def delete_lecture_quiz_question(%LectureQuizQuestion{} = question), do: Repo.delete(question)
+
+  @doc """
+  Marks a draft lecture-quiz question as reviewed and visible to learners.
+  """
+  def publish_lecture_quiz_question(%LectureQuizQuestion{} = question) do
+    question
+    |> Ecto.Changeset.change(status: :published)
+    |> Repo.update()
+  end
+
+  @doc """
+  Publishes every still-`:draft` question on this lecture quiz in one
+  statement, same "review the whole batch at once" convenience as
+  `publish_all_drafts/1`.
+  """
+  def publish_all_lecture_quiz_drafts(%LectureQuiz{id: lecture_quiz_id}) do
+    LectureQuizQuestion
+    |> where([q], q.lecture_quiz_id == ^lecture_quiz_id and q.status == :draft)
+    |> Repo.update_all(set: [status: :published])
+  end
+
+  @doc """
+  Deletes every still-`:draft` question on this lecture quiz, regardless of
+  which generation batch (if any) created them.
+  """
+  def discard_all_lecture_quiz_drafts(%LectureQuiz{id: lecture_quiz_id}) do
+    LectureQuizQuestion
+    |> where([q], q.lecture_quiz_id == ^lecture_quiz_id and q.status == :draft)
+    |> Repo.delete_all()
+  end
+
+  @doc """
+  Starts a lecture-quiz generation: ensures the lecture has a quiz row,
+  records the admin's resource/difficulty/count choices, and enqueues
+  `Wasomi.Assessments.Workers.GenerateLectureQuizWorker` to do the actual
+  drafting in the background.
+  """
+  def start_lecture_quiz_generation(%Lecture{} = lecture, %User{} = user, attrs) do
+    with {:ok, quiz} <- ensure_lecture_quiz(lecture),
+         {:ok, generation} <- create_lecture_quiz_generation(quiz, user, attrs) do
+      GenerateLectureQuizWorker.enqueue(generation.id)
+      {:ok, generation}
+    end
+  end
+
+  def create_lecture_quiz_generation(%LectureQuiz{} = quiz, %User{} = user, attrs) do
+    %LectureQuizGeneration{}
+    |> LectureQuizGeneration.changeset(
+      Map.merge(attrs, %{lecture_quiz_id: quiz.id, requested_by_id: user.id, status: :pending})
+    )
+    |> Repo.insert()
+  end
+
+  def get_lecture_quiz_generation!(id), do: Repo.get!(LectureQuizGeneration, id)
+
+  @doc """
+  Loads the lecture a generation's source text should be read from, without
+  the caller needing to know it's reached through `lecture_quiz`.
+  """
+  def get_lecture_for_generation!(%LectureQuizGeneration{} = generation) do
+    generation
+    |> Repo.preload(lecture_quiz: :lecture)
+    |> Map.fetch!(:lecture_quiz)
+    |> Map.fetch!(:lecture)
+  end
+
+  def list_lecture_quiz_generations(%LectureQuiz{id: lecture_quiz_id}) do
+    LectureQuizGeneration
+    |> where([g], g.lecture_quiz_id == ^lecture_quiz_id)
+    |> order_by([g], desc: g.inserted_at, desc: g.id)
+    |> Repo.all()
+  end
+
+  @doc """
+  Subscribes the caller to generation status updates for this lecture quiz,
+  so an open admin LiveView can react without polling.
+  """
+  def subscribe_to_lecture_quiz_generation(%LectureQuiz{id: lecture_quiz_id}) do
+    Phoenix.PubSub.subscribe(Wasomi.PubSub, lecture_quiz_generation_topic(lecture_quiz_id))
+  end
+
+  def mark_lecture_quiz_generation_processing(%LectureQuizGeneration{} = generation) do
+    {:ok, updated} = update_lecture_quiz_generation(generation, %{status: :processing})
+    broadcast_lecture_quiz_generation(updated)
+    updated
+  end
+
+  def mark_lecture_quiz_generation_failed(%LectureQuizGeneration{} = generation, error_message) do
+    {:ok, updated} =
+      update_lecture_quiz_generation(generation, %{status: :failed, error_message: error_message})
+
+    broadcast_lecture_quiz_generation(updated)
+    updated
+  end
+
+  @doc """
+  Inserts one `:draft` question (with options) per generated item, appended
+  after the lecture quiz's existing questions, then marks the generation
+  `:ready` — same "skip malformed items, only fail the batch if none landed"
+  behavior as `create_draft_questions_and_mark_ready/2`.
+  """
+  def create_lecture_quiz_draft_questions_and_mark_ready(
+        %LectureQuizGeneration{} = generation,
+        drafts
+      )
+      when is_list(drafts) do
+    quiz = Repo.get!(LectureQuiz, generation.lecture_quiz_id)
+    starting_position = next_lecture_quiz_question_position(quiz)
+
+    {created, _next_position} =
+      Enum.reduce(drafts, {[], starting_position}, fn draft, {acc, position} ->
+        case create_lecture_quiz_question(
+               quiz,
+               lecture_quiz_question_attrs(draft, position, generation.id)
+             ) do
+          {:ok, question} -> {[question | acc], position + 1}
+          {:error, _changeset} -> {acc, position}
+        end
+      end)
+
+    created = Enum.reverse(created)
+
+    if created == [] do
+      {:error, :no_valid_questions_generated}
+    else
+      {:ok, updated} =
+        update_lecture_quiz_generation(generation, %{
+          status: :ready,
+          questions_generated_count: length(created)
+        })
+
+      broadcast_lecture_quiz_generation(updated)
+      {:ok, length(created)}
+    end
+  end
+
+  defp next_lecture_quiz_question_position(%LectureQuiz{id: lecture_quiz_id}) do
+    LectureQuizQuestion
+    |> where([q], q.lecture_quiz_id == ^lecture_quiz_id)
+    |> select([q], max(q.position))
+    |> Repo.one()
+    |> case do
+      nil -> 1
+      max -> max + 1
+    end
+  end
+
+  defp lecture_quiz_question_attrs(%{prompt: prompt, options: options}, position, generation_id) do
+    %{
+      prompt: prompt,
+      status: :draft,
+      position: position,
+      lecture_quiz_generation_id: generation_id,
+      question_options:
+        options
+        |> Enum.with_index(1)
+        |> Enum.map(fn {option, idx} ->
+          %{label: option.label, correct: option.correct, position: idx}
+        end)
+    }
+  end
+
+  defp update_lecture_quiz_generation(%LectureQuizGeneration{} = generation, attrs) do
+    generation
+    |> LectureQuizGeneration.changeset(attrs)
+    |> Repo.update()
+  end
+
+  defp broadcast_lecture_quiz_generation(%LectureQuizGeneration{} = generation) do
+    Phoenix.PubSub.broadcast(
+      Wasomi.PubSub,
+      lecture_quiz_generation_topic(generation.lecture_quiz_id),
+      {:lecture_quiz_generation_updated, generation}
+    )
+  end
+
+  defp lecture_quiz_generation_topic(lecture_quiz_id),
+    do: "lecture_quiz_generation:lecture_quiz:#{lecture_quiz_id}"
 end

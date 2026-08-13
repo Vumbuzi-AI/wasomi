@@ -7,8 +7,8 @@ on:
 
 # Adjust these to match your .tool-versions / mix.exs requirements
 env:
-  ELIXIR_VERSION: "1.17"
-  OTP_VERSION: "27.0"
+  ELIXIR_VERSION: "1.20.2"
+  OTP_VERSION: "29.0.2"
 
 jobs:
   test:

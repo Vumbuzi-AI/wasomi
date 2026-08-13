@@ -58,12 +58,17 @@ defmodule Wasomi.Assessments.QuestionGenerator.OpenAI do
   def generate_questions(text, opts \\ []) when is_binary(text) do
     min_count = Keyword.get(opts, :min_count, 8)
     max_count = Keyword.get(opts, :max_count, 20)
+    difficulty = Keyword.get(opts, :difficulty)
+    avoid_duplicating = Keyword.get(opts, :avoid_duplicating, [])
 
     body = %{
       "model" => model(),
       "messages" => [
         %{"role" => "system", "content" => system_prompt()},
-        %{"role" => "user", "content" => user_prompt(text, min_count, max_count)}
+        %{
+          "role" => "user",
+          "content" => user_prompt(text, min_count, max_count, difficulty, avoid_duplicating)
+        }
       ],
       "response_format" => %{
         "type" => "json_schema",
@@ -90,7 +95,7 @@ defmodule Wasomi.Assessments.QuestionGenerator.OpenAI do
     """
   end
 
-  defp user_prompt(text, min_count, max_count) do
+  defp user_prompt(text, min_count, max_count, difficulty, avoid_duplicating) do
     source = String.slice(text, 0, @max_source_chars)
 
     """
@@ -108,12 +113,10 @@ defmodule Wasomi.Assessments.QuestionGenerator.OpenAI do
     paragraph or idea while other topics go untouched.
 
     Coverage and difficulty:
-    - Mix difficulty: include some questions that check basic recall of key
-      facts, and some that require connecting or applying concepts from the
-      document.
+    #{difficulty_instruction(difficulty)}
     - Never invent facts not present in the document, and never write a
       question that can be answered from general knowledge alone.
-
+    #{seed_questions_instruction(avoid_duplicating)}
     Question format:
     - Most questions should be multiple-choice with exactly four options,
       exactly one marked correct: true and the rest correct: false.
@@ -129,6 +132,43 @@ defmodule Wasomi.Assessments.QuestionGenerator.OpenAI do
     ---
     #{source}
     ---
+    """
+  end
+
+  defp difficulty_instruction(:easy) do
+    "- Keep every question at recall level: key facts, terms, and definitions stated directly in the document."
+  end
+
+  defp difficulty_instruction(:hard) do
+    "- Favor questions that require connecting or applying multiple concepts from the document, not just recalling a single stated fact."
+  end
+
+  defp difficulty_instruction(:medium) do
+    "- Favor straightforward comprehension questions over pure recall or multi-step application."
+  end
+
+  defp difficulty_instruction(_mixed_or_unset) do
+    """
+    - Mix difficulty: include some questions that check basic recall of key
+      facts, and some that require connecting or applying concepts from the
+      document.
+    """
+  end
+
+  defp seed_questions_instruction([]), do: ""
+
+  defp seed_questions_instruction(prompts) do
+    list = Enum.map_join(prompts, "\n", &"- #{&1}")
+
+    """
+
+    This module's individual lectures already have these quiz questions:
+    #{list}
+
+    Build on top of that existing coverage rather than re-deriving it —
+    write broader, module-level synthesis questions that connect ideas
+    across lectures instead of restating any of the above, and never reuse
+    one of the above questions verbatim.
     """
   end
 

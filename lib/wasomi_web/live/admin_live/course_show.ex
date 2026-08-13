@@ -1,7 +1,7 @@
 defmodule WasomiWeb.AdminLive.CourseShow do
   use WasomiWeb, :live_view
 
-  alias Wasomi.{Assessments, Catalog, Enrollments, Payments}
+  alias Wasomi.{Assessments, Catalog, Enrollments, Learning, Payments}
   alias Wasomi.Catalog.{CourseModule, Lecture}
   alias WasomiWeb.CourseLive
   alias WasomiWeb.CourseModuleLive
@@ -91,23 +91,32 @@ defmodule WasomiWeb.AdminLive.CourseShow do
   end
 
   def handle_event("generate_quiz", %{"module-id" => module_id}, socket) do
-    module = Catalog.get_course_module!(module_id)
+    module = Enum.find(socket.assigns.course.modules, &(to_string(&1.id) == to_string(module_id)))
 
-    quiz =
-      Assessments.get_quiz_for_module(module) ||
-        with {:ok, quiz} <- Assessments.create_quiz(module, %{title: "#{module.title} Quiz"}) do
-          quiz
-        end
+    if module_ready_for_quiz_generation?(module, socket.assigns.lecture_quiz_question_counts) do
+      quiz =
+        Assessments.get_quiz_for_module(module) ||
+          with {:ok, quiz} <- Assessments.create_quiz(module, %{title: "#{module.title} Quiz"}) do
+            quiz
+          end
 
-    case quiz do
-      %Assessments.Quiz{id: quiz_id} ->
-        course_slug = socket.assigns.course.slug
+      case quiz do
+        %Assessments.Quiz{id: quiz_id} ->
+          course_slug = socket.assigns.course.slug
 
-        {:noreply,
-         push_navigate(socket, to: ~p"/admin/courses/#{course_slug}/quizzes/#{quiz_id}/edit")}
+          {:noreply,
+           push_navigate(socket, to: ~p"/admin/courses/#{course_slug}/quizzes/#{quiz_id}/edit")}
 
-      _ ->
-        {:noreply, put_flash(socket, :error, "Could not create a quiz for this module.")}
+        {:error, _changeset} ->
+          {:noreply, put_flash(socket, :error, "Could not create a quiz for this module.")}
+      end
+    else
+      {:noreply,
+       put_flash(
+         socket,
+         :error,
+         "Generate a quiz for every lecture in this module before generating the module quiz."
+       )}
     end
   end
 
@@ -217,9 +226,17 @@ defmodule WasomiWeb.AdminLive.CourseShow do
       |> Enum.filter(&(&1.status == :successful))
       |> Map.new(&{&1.user_id, &1})
 
+    completion_percent_by_user = Learning.completion_percent_by_user(course)
+    quiz_scores_by_user = Assessments.latest_quiz_scores_by_user(course.id)
+
     students =
       Enum.map(enrollments, fn enrollment ->
-        %{enrollment: enrollment, payment: Map.get(paid_by_user, enrollment.user_id)}
+        %{
+          enrollment: enrollment,
+          payment: Map.get(paid_by_user, enrollment.user_id),
+          completion_percent: Map.get(completion_percent_by_user, enrollment.user_id, 0),
+          quiz_scores: Map.get(quiz_scores_by_user, enrollment.user_id, [])
+        }
       end)
 
     lecture_count = Enum.sum(Enum.map(course.modules, &length(&1.lectures)))
@@ -237,6 +254,14 @@ defmodule WasomiWeb.AdminLive.CourseShow do
       Assessments.count_published_questions_by_module(course.id)
     )
     |> assign(:quizzes_by_module, Assessments.get_quizzes_by_module(course.id))
+    |> assign(
+      :lecture_quiz_question_counts,
+      Assessments.count_lecture_quiz_questions_by_lecture(course.id)
+    )
+  end
+
+  defp module_ready_for_quiz_generation?(module, lecture_quiz_question_counts) do
+    Enum.all?(module.lectures, &Map.has_key?(lecture_quiz_question_counts, &1.id))
   end
 
   @impl true
@@ -481,6 +506,13 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                         </span>
                       </span>
                       <span class="flex shrink-0 items-center gap-1.5">
+                        <.link
+                          navigate={~p"/admin/courses/#{@course.slug}/lectures/#{lecture.id}/quiz"}
+                          class="grid h-8 w-8 place-items-center rounded-full text-muted transition hover:bg-mint hover:text-primary"
+                          title="Lecture quiz"
+                        >
+                          <.icon name="hero-clipboard-document-check" class="h-4 w-4" />
+                        </.link>
                         <button
                           type="button"
                           phx-click={JS.push("edit_lecture", value: %{id: lecture.id})}
@@ -541,23 +573,45 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                     </span>
                   </div>
 
-                  <div class="mt-3 flex flex-wrap items-center gap-4">
+                  <div class="mt-3 flex flex-wrap items-center gap-2">
                     <button
                       type="button"
                       phx-click={JS.push("new_lecture", value: %{"module-id" => module.id})}
-                      class="inline-flex items-center gap-1.5 text-sm font-medium text-primary transition hover:text-dark"
+                      class="inline-flex items-center gap-1.5 rounded-full bg-dark px-4 py-1.5 text-sm font-medium text-white transition hover:bg-primary"
                     >
                       <.icon name="hero-plus-circle" class="h-4 w-4" /> Add lecture
                     </button>
+                    <span
+                      :if={
+                        is_nil(Map.get(@quizzes_by_module, module.id)) and
+                          not module_ready_for_quiz_generation?(module, @lecture_quiz_question_counts)
+                      }
+                      class="inline-flex cursor-not-allowed items-center gap-1.5 rounded-full bg-neutral-100 px-4 py-1.5 text-sm font-medium text-muted"
+                      title="Every lecture in this module needs its own generated lecture quiz first"
+                    >
+                      Add module quiz
+                    </span>
                     <button
-                      :if={is_nil(Map.get(@quizzes_by_module, module.id))}
+                      :if={
+                        is_nil(Map.get(@quizzes_by_module, module.id)) and
+                          module_ready_for_quiz_generation?(module, @lecture_quiz_question_counts)
+                      }
                       type="button"
                       phx-click={JS.push("generate_quiz", value: %{"module-id" => module.id})}
-                      class="inline-flex items-center gap-1.5 text-sm font-medium text-primary transition hover:text-dark"
+                      class="inline-flex items-center gap-1.5 rounded-full bg-dark px-4 py-1.5 text-sm font-medium text-white transition hover:bg-primary"
                     >
-                      <.icon name="hero-sparkles" class="h-4 w-4" /> Generate quiz (AI)
+                      Add module quiz
                     </button>
                   </div>
+                  <p
+                    :if={
+                      is_nil(Map.get(@quizzes_by_module, module.id)) and
+                        not module_ready_for_quiz_generation?(module, @lecture_quiz_question_counts)
+                    }
+                    class="mt-1.5 text-xs text-muted"
+                  >
+                    Generate a quiz for every lecture in this module before generating the module quiz.
+                  </p>
                 </div>
               </div>
             </article>
@@ -590,6 +644,8 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                 <tr>
                   <th class="py-3 pr-4 font-semibold">Student</th>
                   <th class="py-3 pr-4 font-semibold">Enrolled</th>
+                  <th class="py-3 pr-4 font-semibold">Progress</th>
+                  <th class="py-3 pr-4 font-semibold">Quiz scores</th>
                   <th class="py-3 text-right font-semibold">Paid</th>
                 </tr>
               </thead>
@@ -605,6 +661,30 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                     <p class="text-xs text-muted">{row.enrollment.user.email}</p>
                   </td>
                   <td class="py-3 pr-4 text-body">{format_date(row.enrollment.activated_at)}</td>
+                  <td class="py-3 pr-4">
+                    <div class="flex items-center gap-2">
+                      <div class="h-1.5 w-16 overflow-hidden rounded-full bg-neutral-50">
+                        <div
+                          class="h-full rounded-full bg-primary"
+                          style={"width: #{row.completion_percent}%"}
+                        />
+                      </div>
+                      <span class="text-xs tabular-nums text-body">{row.completion_percent}%</span>
+                    </div>
+                  </td>
+                  <td class="py-3 pr-4">
+                    <p :if={row.quiz_scores == []} class="text-xs text-muted">—</p>
+                    <p
+                      :for={score <- row.quiz_scores}
+                      class={[
+                        "text-xs",
+                        score.passed && "text-primary",
+                        !score.passed && "text-red-600"
+                      ]}
+                    >
+                      {score.quiz_title}: {score.score_percent}%
+                    </p>
+                  </td>
                   <td class="py-3 text-right font-semibold text-dark">
                     {if row.payment, do: Payments.format_amount(row.payment), else: "—"}
                   </td>

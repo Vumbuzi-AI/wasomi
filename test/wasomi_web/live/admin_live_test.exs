@@ -279,6 +279,58 @@ defmodule WasomiWeb.AdminLiveTest do
       assert html =~ "cover.jpg"
     end
 
+    test "shows each enrolled student's completion percent and latest quiz scores", %{
+      conn: conn
+    } do
+      course = course_fixture(status: :published)
+      module = course_module_fixture(course_id: course.id, position: 1)
+      lecture = lecture_fixture(module_id: module.id, position: 1, duration_seconds: 100)
+      learner = user_fixture(name: "Amina Otieno")
+      enrollment_fixture(user_id: learner.id, course_id: course.id, status: :active)
+
+      quiz = quiz_fixture(module: module, title: "Module One Quiz")
+      question = question_fixture(quiz: quiz)
+      correct_option = Enum.find(question.question_options, & &1.correct)
+
+      Wasomi.Learning.record_progress(learner, lecture, lecture.duration_seconds)
+      Wasomi.Assessments.submit_quiz(learner, quiz, %{question.id => correct_option.id})
+
+      {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
+      html = view |> render_click("switch_tab", %{"tab" => "students"})
+
+      assert html =~ "100%"
+      assert html =~ "Module One Quiz: 100%"
+    end
+
+    test "shows a dash for quiz scores and 0% progress for a student who hasn't started", %{
+      conn: conn
+    } do
+      course = course_fixture(status: :published)
+      module = course_module_fixture(course_id: course.id, position: 1)
+      lecture_fixture(module_id: module.id, position: 1, duration_seconds: 100)
+      learner = user_fixture(name: "Brian Kamau")
+      enrollment_fixture(user_id: learner.id, course_id: course.id, status: :active)
+
+      {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
+      html = view |> render_click("switch_tab", %{"tab" => "students"})
+
+      assert html =~ "Brian Kamau"
+      assert html =~ "0%"
+    end
+
+    test "links each lecture to its own lecture-quiz page", %{conn: conn} do
+      course = course_fixture()
+      module = course_module_fixture(course_id: course.id)
+      lecture = lecture_fixture(module_id: module.id, position: 1)
+
+      {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
+
+      assert has_element?(
+               view,
+               ~s(a[href="/admin/courses/#{course.slug}/lectures/#{lecture.id}/quiz"])
+             )
+    end
+
     test "shows a draft-question reminder badge only when a module has unreviewed drafts", %{
       conn: conn
     } do
@@ -340,7 +392,7 @@ defmodule WasomiWeb.AdminLiveTest do
       module = course_module_fixture(course_id: course.id, title: "Module One")
       {:ok, view, html} = live(conn, ~p"/admin/courses/#{course.slug}")
 
-      assert has_element?(view, "button", "Generate quiz (AI)")
+      assert has_element?(view, "button", "Add module quiz")
       refute html =~ "published"
 
       quiz = quiz_fixture(%{module: module, title: "Module One Quiz"})
@@ -352,7 +404,7 @@ defmodule WasomiWeb.AdminLiveTest do
       assert html =~ "Module One Quiz"
       assert html =~ "1 published"
       assert html =~ "1 to review"
-      refute has_element?(view, "button", "Generate quiz (AI)")
+      refute has_element?(view, "button", "Add module quiz")
       assert has_element?(view, "a[title='Manage quiz']")
     end
 
@@ -380,8 +432,61 @@ defmodule WasomiWeb.AdminLiveTest do
 
       refute has_element?(view, "#delete-quiz-modal")
       refute has_element?(view, "button[title='Delete quiz']")
-      assert has_element?(view, "button", "Generate quiz (AI)")
+      assert has_element?(view, "button", "Add module quiz")
       assert_raise Ecto.NoResultsError, fn -> Wasomi.Assessments.get_quiz!(quiz.id) end
+    end
+
+    test "the module-quiz generate button is disabled until every lecture has its own quiz", %{
+      conn: conn
+    } do
+      course = course_fixture()
+      module = course_module_fixture(course_id: course.id, title: "Module One")
+      first = lecture_fixture(module_id: module.id, position: 1)
+      second = lecture_fixture(module_id: module.id, position: 2)
+
+      {:ok, view, html} = live(conn, ~p"/admin/courses/#{course.slug}")
+
+      refute has_element?(view, "button", "Add module quiz")
+      assert html =~ "Generate a quiz for every lecture in this module"
+
+      quiz = lecture_quiz_fixture(lecture: first)
+      generation = lecture_quiz_generation_fixture(lecture_quiz: quiz)
+
+      {:ok, 1} =
+        Wasomi.Assessments.create_lecture_quiz_draft_questions_and_mark_ready(generation, [
+          draft_question_attrs()
+        ])
+
+      {:ok, view, html} = live(conn, ~p"/admin/courses/#{course.slug}")
+      refute has_element?(view, "button", "Add module quiz")
+      assert html =~ "Generate a quiz for every lecture in this module"
+
+      second_quiz = lecture_quiz_fixture(lecture: second)
+      second_generation = lecture_quiz_generation_fixture(lecture_quiz: second_quiz)
+
+      {:ok, 1} =
+        Wasomi.Assessments.create_lecture_quiz_draft_questions_and_mark_ready(
+          second_generation,
+          [draft_question_attrs()]
+        )
+
+      {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
+      assert has_element?(view, "button", "Add module quiz")
+    end
+
+    test "generating a module quiz server-side rejects a not-yet-ready module", %{conn: conn} do
+      course = course_fixture()
+      module = course_module_fixture(course_id: course.id, title: "Module One")
+      lecture_fixture(module_id: module.id, position: 1)
+
+      {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
+
+      html =
+        view
+        |> render_click("generate_quiz", %{"module-id" => module.id})
+
+      assert html =~ "Generate a quiz for every lecture in this module"
+      assert Wasomi.Assessments.get_quiz_for_module(module) == nil
     end
 
     test "cancelling the delete-quiz confirmation leaves the quiz intact", %{conn: conn} do

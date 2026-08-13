@@ -50,6 +50,10 @@ defmodule WasomiWeb.CoreComponents do
         "click-away and Escape are disabled so in-progress form content " <>
         "can't be lost to a stray click or keypress"
 
+  attr :max_width, :string,
+    default: "max-w-3xl",
+    doc: "Tailwind max-width class for the modal panel, e.g. \"max-w-4xl\" for wider content"
+
   slot :inner_block, required: true
 
   def modal(assigns) do
@@ -71,7 +75,7 @@ defmodule WasomiWeb.CoreComponents do
         tabindex="0"
       >
         <div class="flex min-h-full items-center justify-center">
-          <div class="w-full max-w-3xl p-4 sm:p-6 lg:py-8">
+          <div class={["w-full p-4 sm:p-6 lg:py-8", @max_width]}>
             <.focus_wrap
               id={"#{@id}-container"}
               phx-window-keydown={if @dismissable, do: JS.exec("data-cancel", to: "##{@id}")}

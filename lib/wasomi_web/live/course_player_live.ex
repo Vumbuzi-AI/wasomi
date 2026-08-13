@@ -423,17 +423,18 @@ defmodule WasomiWeb.CoursePlayerLive do
 
       lecture ->
         cond do
-          not Learning.watched_enough?(
-            progress_position(socket.assigns.progress, lecture.id),
-            lecture.duration_seconds
-          ) ->
+          not (is_nil(lecture.duration_seconds) or
+                   Learning.watched_enough?(
+                     progress_position(socket.assigns.progress, lecture.id),
+                     lecture.duration_seconds
+                   )) ->
             {:noreply,
              put_flash(socket, :error, "Watch more of this lecture before marking it complete.")}
 
           socket.assigns.preview? ->
             {:noreply,
              socket
-             |> put_preview_progress(lecture.id, :completed, lecture.duration_seconds)
+             |> put_preview_progress(lecture.id, :completed, lecture.duration_seconds || 0)
              |> refresh_progress()
              |> put_flash(:info, "Lecture marked complete — preview only, nothing was saved.")}
 
@@ -1000,7 +1001,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                   </div>
                 <% else %>
                   <%= if @current_lecture do %>
-                    <div class="flex justify-center p-3">
+                    <div :if={@current_lecture.duration_seconds} class="flex justify-center p-3">
                       <div
                         id={"protected-player-#{@current_lecture.id}"}
                         phx-hook="ProtectedVideo"
@@ -1040,10 +1041,11 @@ defmodule WasomiWeb.CoursePlayerLive do
                       </p>
 
                       <% watched_enough? =
-                        Learning.watched_enough?(
-                          progress_position(@progress, @current_lecture.id),
-                          @current_lecture.duration_seconds
-                        ) %>
+                        is_nil(@current_lecture.duration_seconds) or
+                          Learning.watched_enough?(
+                            progress_position(@progress, @current_lecture.id),
+                            @current_lecture.duration_seconds
+                          ) %>
                       <div class="mt-8 flex flex-wrap items-center gap-3">
                         <button
                           :if={progress_status(@progress, @current_lecture.id) != :completed}

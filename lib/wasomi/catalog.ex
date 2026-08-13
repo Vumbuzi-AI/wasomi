@@ -6,10 +6,13 @@ defmodule Wasomi.Catalog do
   import Ecto.Query, warn: false
   alias Wasomi.Repo
 
+  alias Wasomi.Accounts.User
+
   alias Wasomi.Catalog.{
     Course,
     CourseModule,
     Lecture,
+    LectureOverviewGeneration,
     LectureQuestion,
     LectureQuestionSubmission,
     LectureResource,
@@ -204,7 +207,7 @@ defmodule Wasomi.Catalog do
   def duration_seconds(%Course{modules: modules}) when is_list(modules) do
     modules
     |> Enum.flat_map(& &1.lectures)
-    |> Enum.map(& &1.duration_seconds)
+    |> Enum.map(&(&1.duration_seconds || 0))
     |> Enum.sum()
   end
 
@@ -227,11 +230,20 @@ defmodule Wasomi.Catalog do
 
   @doc """
   Preloads a lecture's resources and questions in their persisted display order.
+
+  `force: true` because callers (e.g. `update_lecture_content/4`, right
+  after inserting fresh resources/questions) often pass in a lecture whose
+  `resources`/`questions` are already a *loaded* — if stale — list (e.g.
+  `[]` from before this save), not `%Ecto.Association.NotLoaded{}`.
+  `Repo.preload/2` skips anything it considers already loaded by default,
+  so without forcing it, the caller would get back the same stale list
+  instead of what was just persisted.
   """
   def preload_lecture_content(%Lecture{} = lecture) do
-    Repo.preload(lecture,
-      resources: ordered_resources_query(),
-      questions: ordered_questions_query()
+    Repo.preload(
+      lecture,
+      [resources: ordered_resources_query(), questions: ordered_questions_query()],
+      force: true
     )
   end
 
@@ -650,19 +662,53 @@ defmodule Wasomi.Catalog do
   """
   def update_lecture_content(%Lecture{} = lecture, lecture_attrs, resources, questions)
       when is_list(resources) and is_list(questions) do
-    previous_asset_id = lecture.video_asset_id
+    if has_video_or_resource?(lecture, lecture_attrs, resources) do
+      previous_asset_id = lecture.video_asset_id
 
-    Repo.transaction(fn ->
-      with {:ok, lecture} <- Repo.update(Lecture.changeset(lecture, lecture_attrs)),
-           :ok <- delete_lecture_content(lecture.id),
-           {:ok, _resources} <- insert_resources(lecture.id, resources),
-           {:ok, _questions} <- insert_questions(lecture.id, questions) do
-        preload_lecture_content(lecture)
-      else
-        {:error, %Ecto.Changeset{} = changeset} -> Repo.rollback(changeset)
+      Repo.transaction(fn ->
+        with {:ok, lecture} <- Repo.update(Lecture.changeset(lecture, lecture_attrs)),
+             :ok <- delete_lecture_content(lecture.id),
+             {:ok, _resources} <- insert_resources(lecture.id, resources),
+             {:ok, _questions} <- insert_questions(lecture.id, questions) do
+          preload_lecture_content(lecture)
+        else
+          {:error, %Ecto.Changeset{} = changeset} -> Repo.rollback(changeset)
+        end
+      end)
+      |> maybe_enqueue_transcript(previous_asset_id)
+    else
+      {:error, :video_or_resource_required}
+    end
+  end
+
+  # A lecture must never be fully empty — it needs a video attached, or at
+  # least one resource (document/link/etc.), or both, but not neither.
+  # Checked here rather than inside Lecture.changeset/2 because that
+  # changeset only ever sees the lecture's own fields, never the sibling
+  # resources list these functions already have in hand.
+  #
+  # `existing_lecture` is `nil` for create_lecture_content/3 (nothing to
+  # fall back to) and the current record for update_lecture_content/4 —
+  # an update that doesn't mention video fields at all (e.g. only changing
+  # the title) must still see the lecture's *current* video, not just what
+  # was freshly passed in, or any video-having lecture would fail to save
+  # the moment you touched an unrelated field.
+  defp has_video_or_resource?(existing_lecture \\ nil, lecture_attrs, resources) do
+    has_video_attrs?(existing_lecture, lecture_attrs) or resources != []
+  end
+
+  defp has_video_attrs?(existing_lecture, attrs) do
+    attrs = Map.new(attrs)
+
+    asset_id =
+      cond do
+        Map.has_key?(attrs, "video_asset_id") -> Map.get(attrs, "video_asset_id")
+        Map.has_key?(attrs, :video_asset_id) -> Map.get(attrs, :video_asset_id)
+        existing_lecture -> existing_lecture.video_asset_id
+        true -> nil
       end
-    end)
-    |> maybe_enqueue_transcript(previous_asset_id)
+
+    is_binary(asset_id) and asset_id != ""
   end
 
   defp delete_lecture_content(lecture_id) do
@@ -698,16 +744,20 @@ defmodule Wasomi.Catalog do
 
   def create_lecture_content(lecture_attrs, resources, questions)
       when is_list(resources) and is_list(questions) do
-    Repo.transaction(fn ->
-      with {:ok, lecture} <- Repo.insert(Lecture.changeset(%Lecture{}, lecture_attrs)),
-           {:ok, _resources} <- insert_resources(lecture.id, resources),
-           {:ok, _questions} <- insert_questions(lecture.id, questions) do
-        Repo.preload(lecture, [:resources, :questions])
-      else
-        {:error, %Ecto.Changeset{} = changeset} -> Repo.rollback(changeset)
-      end
-    end)
-    |> maybe_enqueue_transcript(nil)
+    if has_video_or_resource?(lecture_attrs, resources) do
+      Repo.transaction(fn ->
+        with {:ok, lecture} <- Repo.insert(Lecture.changeset(%Lecture{}, lecture_attrs)),
+             {:ok, _resources} <- insert_resources(lecture.id, resources),
+             {:ok, _questions} <- insert_questions(lecture.id, questions) do
+          Repo.preload(lecture, [:resources, :questions])
+        else
+          {:error, %Ecto.Changeset{} = changeset} -> Repo.rollback(changeset)
+        end
+      end)
+      |> maybe_enqueue_transcript(nil)
+    else
+      {:error, :video_or_resource_required}
+    end
   end
 
   # Only (re-)enqueues transcription when the lecture's video actually
@@ -978,4 +1028,187 @@ defmodule Wasomi.Catalog do
       Wasomi.Catalog.LectureQuestionScorer.OpenAI
     )
   end
+
+  # --- Lecture video-overview generation (spike, TODO #20) -----------------
+  #
+  # Same shape as the quiz-generation lifecycle above (create :pending ->
+  # mark :processing -> mark :ready/:failed, PubSub-broadcast on every
+  # change) — kept as its own section rather than interleaved, since this
+  # is spike-stage code with no caller in the admin UI yet.
+
+  @doc """
+  Records a new lecture video-overview generation request as `:pending` and
+  returns it. The caller is expected to enqueue
+  `Wasomi.Catalog.Workers.GenerateLectureOverviewWorker` right after this
+  succeeds.
+  """
+  def create_overview_generation(%Lecture{} = lecture, %User{} = user) do
+    %LectureOverviewGeneration{}
+    |> LectureOverviewGeneration.changeset(%{
+      lecture_id: lecture.id,
+      requested_by_id: user.id,
+      status: :pending
+    })
+    |> Repo.insert()
+  end
+
+  def get_overview_generation!(id), do: Repo.get!(LectureOverviewGeneration, id)
+
+  def list_overview_generations_for_lecture(%Lecture{id: lecture_id}) do
+    LectureOverviewGeneration
+    |> where([g], g.lecture_id == ^lecture_id)
+    |> order_by([g], desc: g.inserted_at, desc: g.id)
+    |> Repo.all()
+  end
+
+  @doc """
+  Subscribes the caller to overview-generation status updates for this
+  lecture, so an open admin LiveView can react without polling.
+  """
+  def subscribe_to_overview_generation(%Lecture{id: lecture_id}) do
+    Phoenix.PubSub.subscribe(Wasomi.PubSub, overview_generation_topic(lecture_id))
+  end
+
+  def mark_overview_generation_processing(%LectureOverviewGeneration{} = generation) do
+    {:ok, updated} = update_overview_generation(generation, %{status: :processing})
+    broadcast_overview_generation(updated)
+    updated
+  end
+
+  def mark_overview_generation_failed(%LectureOverviewGeneration{} = generation, error_message) do
+    {:ok, updated} =
+      update_overview_generation(generation, %{status: :failed, error_message: error_message})
+
+    broadcast_overview_generation(updated)
+    updated
+  end
+
+  @doc """
+  Lets an admin explicitly give up on a `:pending`/`:processing`
+  generation rather than wait for the worker's own timeout — cancels the
+  underlying Oban job (a no-op if it already finished, was already
+  cancelled, or genuinely never existed) and marks the generation
+  `:failed` immediately either way, since the whole point is to stop
+  waiting on it right now.
+  """
+  def cancel_overview_generation(%LectureOverviewGeneration{} = generation) do
+    cancel_generation_job(generation)
+    mark_overview_generation_failed(generation, "Cancelled by admin.")
+  end
+
+  defp cancel_generation_job(%LectureOverviewGeneration{id: id}) do
+    Oban.Job
+    |> where([j], j.worker == "Wasomi.Catalog.Workers.GenerateLectureOverviewWorker")
+    |> where([j], fragment("?->>'generation_id' = ?", j.args, ^to_string(id)))
+    |> where([j], j.state in ["available", "scheduled", "executing", "retryable"])
+    |> Repo.all()
+    |> Enum.each(&Oban.cancel_job(&1.id))
+  end
+
+  def mark_overview_generation_ready(%LectureOverviewGeneration{} = generation, attrs) do
+    {:ok, updated} =
+      update_overview_generation(generation, Map.put(attrs, :status, :ready))
+
+    broadcast_overview_generation(updated)
+    {:ok, updated}
+  end
+
+  @doc """
+  Starts attaching a `:ready` generation's video as the lecture's real
+  playable video. Only sets the tracking state here — the caller (mirrors
+  `create_overview_generation/2` + a separate `Oban.insert/1`, see
+  `handle_event("generate-overview", ...)`) is expected to enqueue
+  `Wasomi.Catalog.Workers.AttachLectureOverviewVideoWorker` right after.
+  """
+  def mark_overview_video_attaching(%LectureOverviewGeneration{} = generation) do
+    {:ok, updated} =
+      update_overview_generation(generation, %{
+        attach_status: :attaching,
+        attach_asset_id: nil,
+        attach_error_message: nil
+      })
+
+    broadcast_overview_generation(updated)
+    updated
+  end
+
+  @doc """
+  Records the Mux asset id created for this attach attempt, so a later
+  (possibly snoozed-and-rescheduled) run of the attach worker can resume
+  polling it without having to re-create the asset.
+  """
+  def record_overview_video_attach_asset(%LectureOverviewGeneration{} = generation, asset_id)
+      when is_binary(asset_id) do
+    {:ok, updated} = update_overview_generation(generation, %{attach_asset_id: asset_id})
+    broadcast_overview_generation(updated)
+    updated
+  end
+
+  def mark_overview_video_attached(%LectureOverviewGeneration{} = generation) do
+    {:ok, updated} = update_overview_generation(generation, %{attach_status: :attached})
+    broadcast_overview_generation(updated)
+    updated
+  end
+
+  def mark_overview_video_attach_failed(%LectureOverviewGeneration{} = generation, error_message) do
+    {:ok, updated} =
+      update_overview_generation(generation, %{
+        attach_status: :attach_failed,
+        attach_error_message: error_message
+      })
+
+    broadcast_overview_generation(updated)
+    updated
+  end
+
+  @doc """
+  Sets a lecture's video fields directly to an already-processed Mux
+  asset — the same fields a real admin upload sets once Mux finishes
+  processing it (see `Wasomi.Media.Mux.resolve_upload/1`), just reached
+  from a generated video's Mux asset instead of a browser upload.
+  """
+  def attach_lecture_video(%Lecture{} = lecture, playback_id, duration_seconds)
+      when is_binary(playback_id) and is_integer(duration_seconds) do
+    update_lecture(lecture, %{
+      video_provider: :mux,
+      video_asset_id: playback_id,
+      duration_seconds: duration_seconds
+    })
+  end
+
+  defp update_overview_generation(%LectureOverviewGeneration{} = generation, attrs) do
+    generation
+    |> LectureOverviewGeneration.changeset(attrs)
+    |> Repo.update()
+  end
+
+  defp broadcast_overview_generation(%LectureOverviewGeneration{} = generation) do
+    Phoenix.PubSub.broadcast(
+      Wasomi.PubSub,
+      overview_generation_topic(generation.lecture_id),
+      {:lecture_overview_generation_updated, generation}
+    )
+  end
+
+  defp overview_generation_topic(lecture_id),
+    do: "lecture_overview_generation:lecture:#{lecture_id}"
+
+  @doc """
+  A playable URL for a `:ready` generation's video, or `nil` for any other
+  status (including when object storage isn't configured) — the admin
+  preview player treats a `nil` return as "not previewable yet" rather
+  than surfacing the underlying storage error, since a not-yet-ready
+  generation is the overwhelmingly common reason this returns `nil`.
+  """
+  def overview_video_url(%LectureOverviewGeneration{status: :ready, video_storage_key: key})
+      when is_binary(key) do
+    adapter = Application.get_env(:wasomi, :catalog_storage, Wasomi.Catalog.Storage.R2)
+
+    case adapter.download_url(key) do
+      {:ok, url} -> url
+      {:error, _reason} -> nil
+    end
+  end
+
+  def overview_video_url(_generation), do: nil
 end

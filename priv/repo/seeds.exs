@@ -381,62 +381,6 @@ Repo.transaction(fn ->
       course
     end)
 
-  # Extra lightweight records purely so the admin Courses/Students/Payments
-  # list pages have more than one page of results to click through in dev —
-  # no modules/lectures, since these exist only to exercise pagination.
-  filler_course_specs =
-    for i <- 1..15 do
-      idx = String.pad_leading(Integer.to_string(i), 2, "0")
-      status = Enum.at([:draft, :published, :archived], rem(i - 1, 3))
-
-      %{
-        slug: "pagination-test-course-#{idx}",
-        title: "Pagination Test Course #{idx}",
-        description:
-          "Placeholder course seeded to exercise catalogue pagination in the admin UI.",
-        thumbnail_key: "/images/human-stack-course.svg",
-        price_minor: 500_000 + i * 25_000,
-        currency: "KES",
-        status: status,
-        position: 6 + i
-      }
-    end
-
-  filler_courses =
-    Enum.map(filler_course_specs, fn attrs ->
-      case Repo.get_by(Course, slug: attrs.slug) do
-        nil -> %Course{} |> Course.changeset(attrs) |> Repo.insert!()
-        course -> course |> Course.changeset(attrs) |> Repo.update!()
-      end
-    end)
-
-  filler_published_courses = Enum.filter(filler_courses, &(&1.status == :published))
-
-  filler_students =
-    for i <- 1..15 do
-      idx = String.pad_leading(Integer.to_string(i), 2, "0")
-      email = "pagination-learner-#{idx}@example.com"
-
-      case Repo.get_by(User, email: email) do
-        nil ->
-          {:ok, user} =
-            Accounts.register_user(%{
-              name: "Pagination Test Learner #{idx}",
-              email: email,
-              password: "learner12345"
-            })
-
-          user
-          |> User.role_changeset(%{role: :learner})
-          |> Changeset.put_change(:phone, "2547999" <> String.pad_leading(idx, 5, "0"))
-          |> Changeset.put_change(:confirmed_at, confirmed_at)
-          |> Repo.update!()
-
-        user ->
-          user
-      end
-    end
-
   # Steps back N *calendar* months from `date`, clamping the day so e.g.
   # Mar 31 minus one month lands on Feb 28/29 instead of crashing.
   months_ago = fn date, n ->
@@ -508,68 +452,8 @@ Repo.transaction(fn ->
 
     Repo.update_all(from(p in Payment, where: p.id == ^payment.id), set: [inserted_at: paid_at])
   end)
-
-  # One payment (successful/pending/failed, round-robin) per filler learner,
-  # against the real courses plus the published filler ones, so the
-  # Payments list has enough rows — across every status filter — to paginate.
-  payment_course_pool = seeded_courses ++ filler_published_courses
-  payment_statuses = [:successful, :pending, :failed]
-
-  filler_students
-  |> Enum.with_index()
-  |> Enum.each(fn {learner, index} ->
-    course = Enum.at(payment_course_pool, rem(index, length(payment_course_pool)))
-    status = Enum.at(payment_statuses, rem(index, length(payment_statuses)))
-    idx = String.pad_leading(Integer.to_string(index + 1), 2, "0")
-    enrolled_at = today |> Date.add(-index) |> DateTime.new!(~T[09:00:00], "Etc/UTC")
-    enrollment_status = if status == :successful, do: :active, else: :pending
-
-    enrollment =
-      case Repo.get_by(Enrollment, user_id: learner.id, course_id: course.id) do
-        nil -> %Enrollment{}
-        existing -> existing
-      end
-      |> Enrollment.changeset(%{
-        user_id: learner.id,
-        course_id: course.id,
-        status: enrollment_status,
-        enrolled_at: enrolled_at,
-        activated_at: if(enrollment_status == :active, do: enrolled_at)
-      })
-      |> then(fn changeset ->
-        if changeset.data.id, do: Repo.update!(changeset), else: Repo.insert!(changeset)
-      end)
-
-    provider_reference = "KBI-SEED-PAGINATION-#{idx}"
-
-    payment_attrs = %{
-      user_id: learner.id,
-      course_id: course.id,
-      enrollment_id: enrollment.id,
-      provider: if(rem(index, 2) == 0, do: :paystack, else: :mpesa),
-      provider_reference: provider_reference,
-      amount_minor: course.price_minor,
-      currency: course.currency,
-      status: status,
-      paid_at: if(status == :successful, do: enrolled_at),
-      raw_payload: %{"seeded" => true, "pagination_fixture" => true}
-    }
-
-    case Repo.get_by(Payment, provider_reference: provider_reference) do
-      nil -> %Payment{}
-      existing -> existing
-    end
-    |> Payment.changeset(payment_attrs)
-    |> then(fn changeset ->
-      if changeset.data.id, do: Repo.update!(changeset), else: Repo.insert!(changeset)
-    end)
-  end)
 end)
 
 IO.puts("Seeded admin account: #{admin_attrs.email} / #{admin_attrs.password}")
 IO.puts("Seeded paid student account: #{student_attrs.email} / #{student_attrs.password}")
 IO.puts("Seeded #{length(courses)} published courses with modules and playable demo lectures.")
-
-IO.puts(
-  "Seeded 15 filler courses, 15 filler learners, and 15 filler payments for pagination testing."
-)

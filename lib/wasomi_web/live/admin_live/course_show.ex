@@ -68,8 +68,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
      |> assign(:form_title, "New lecture")
      |> assign(:lecture, %Lecture{
        module_id: module.id,
-       position: length(module.lectures) + 1,
-       video_provider: :mux
+       position: length(module.lectures) + 1
      })}
   end
 
@@ -203,6 +202,52 @@ defmodule WasomiWeb.AdminLive.CourseShow do
   end
 
   @impl true
+  def handle_info({LectureLive.FormComponent, {:content_saved, _lecture}}, socket) do
+    {:noreply, load_course(socket, socket.assigns.course.slug)}
+  end
+
+  # `Catalog.subscribe_to_overview_generation/1` is called from inside the
+  # lecture form component's own `update/2`, but PubSub subscriptions are
+  # process-scoped, not component-scoped — the broadcast lands on this
+  # LiveView's mailbox, so this is the only place that can have a
+  # `handle_info/2` for it. The lecture modal's mounted component id is
+  # either the real lecture id (editing) or the fixed atom `:new_lecture`
+  # (creating, for the whole wizard session — see the id-staleness note on
+  # the live_component call below), so target both; `send_update/3` is a
+  # silent no-op for whichever one isn't actually mounted.
+  def handle_info({:lecture_overview_generation_updated, generation}, socket) do
+    send_update(LectureLive.FormComponent,
+      id: generation.lecture_id,
+      overview_generation: generation
+    )
+
+    send_update(LectureLive.FormComponent, id: :new_lecture, overview_generation: generation)
+    {:noreply, socket}
+  end
+
+  # Drives the live-ticking "running for Xs" counter on the generation
+  # form component (see `maybe_start_ticking/1` there, which kicks off
+  # the first one of these) — self-perpetuating for as long as the
+  # generation stays `:pending`/`:processing`, stopping on its own the
+  # moment it doesn't (no explicit cleanup needed either way, since a
+  # stale scheduled message here is harmless: it just re-checks the
+  # generation's current status and finds there's nothing left to do).
+  def handle_info({:tick_overview_generation, generation_id}, socket) do
+    generation = Catalog.get_overview_generation!(generation_id)
+
+    if generation.status in [:pending, :processing] do
+      send_update(LectureLive.FormComponent,
+        id: generation.lecture_id,
+        overview_generation: generation
+      )
+
+      send_update(LectureLive.FormComponent, id: :new_lecture, overview_generation: generation)
+      Process.send_after(self(), {:tick_overview_generation, generation_id}, 1000)
+    end
+
+    {:noreply, socket}
+  end
+
   def handle_info({mod, {:saved, _record}}, socket)
       when mod in [
              CourseLive.FormComponent,
@@ -741,6 +786,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
         id="lecture-modal"
         show
         dismissable={false}
+        max_width="max-w-4xl"
         on_cancel={JS.push("close_modal")}
       >
         <.live_component
@@ -750,6 +796,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
           action={if @lecture.id, do: :edit, else: :new}
           lecture={@lecture}
           current_user={@current_user}
+          course_slug={@course.slug}
           patch={~p"/admin/courses/#{@course.slug}"}
         />
       </.modal>

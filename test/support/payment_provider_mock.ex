@@ -8,3 +8,4 @@ Mox.defmock(Wasomi.QuestionGeneratorMock, for: Wasomi.Assessments.QuestionGenera
 Mox.defmock(Wasomi.TranscriberMock, for: Wasomi.Catalog.Transcriber)
 Mox.defmock(Wasomi.LectureResourceReaderMock, for: Wasomi.Assessments.LectureResourceReader)
 Mox.defmock(Wasomi.DocxExtractorMock, for: Wasomi.Assessments.DocxExtractor)
+Mox.defmock(Wasomi.LectureQuestionScorerMock, for: Wasomi.Catalog.LectureQuestionScorer)

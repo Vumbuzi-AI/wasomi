@@ -63,6 +63,7 @@ defmodule WasomiWeb.CoursePlayerLive do
          |> assign(:current_question_index, 0)
          |> assign(:preview?, preview?)
          |> assign(:preview_progress, %{})
+         |> assign(:lq_submissions, %{})
          |> refresh_progress()}
 
       {:error, :forbidden} when course.status == :published ->
@@ -113,6 +114,7 @@ defmodule WasomiWeb.CoursePlayerLive do
        |> assign(:current_quiz, nil)
        |> assign(:quiz_result, nil)
        |> assign(:current_lecture, lecture)
+       |> assign(:lq_submissions, load_lq_submissions(socket, lecture))
        |> assign(:page_title, lecture_page_title(socket, lecture))}
     else
       {:noreply, put_flash(socket, :error, "Complete the previous lecture to unlock this one.")}
@@ -249,6 +251,40 @@ defmodule WasomiWeb.CoursePlayerLive do
      |> assign(:quiz_result, nil)
      |> assign(:quiz_answers, %{})
      |> assign(:current_question_index, 0)}
+  end
+
+  @impl true
+  def handle_event(
+        "submit-lecture-question",
+        %{"question-id" => q_id, "answer" => answer_text},
+        socket
+      ) do
+    if socket.assigns.preview? do
+      {:noreply, socket}
+    else
+      question =
+        Enum.find(socket.assigns.current_lecture.questions, &(to_string(&1.id) == q_id))
+
+      if question do
+        case Catalog.submit_lecture_question_answer(
+               socket.assigns.current_user,
+               question,
+               String.trim(answer_text)
+             ) do
+          {:ok, submission} ->
+            submissions =
+              Map.put(socket.assigns.lq_submissions, submission.lecture_question_id, submission)
+
+            {:noreply, assign(socket, :lq_submissions, submissions)}
+
+          {:error, _reason} ->
+            {:noreply,
+             put_flash(socket, :error, "Could not score your answer. Please try again.")}
+        end
+      else
+        {:noreply, socket}
+      end
+    end
   end
 
   @impl true
@@ -765,22 +801,48 @@ defmodule WasomiWeb.CoursePlayerLive do
                     class="border-t border-black/5 bg-white p-8 lg:p-10"
                   >
                     <h3 class="text-xs font-medium uppercase tracking-widest text-muted">
-                      Common learner questions
+                      Practice questions
                     </h3>
-                    <div class="mt-4 space-y-3">
-                      <details
-                        :for={question <- @current_lecture.questions}
-                        class="group rounded-2xl border border-black/5 px-5 [&_summary::-webkit-details-marker]:hidden"
-                      >
-                        <summary class="flex cursor-pointer list-none items-center justify-between gap-3 py-4 text-sm font-medium text-dark">
-                          {question.question}
-                          <.icon
-                            name="hero-plus"
-                            class="h-4 w-4 shrink-0 text-primary transition group-open:rotate-45"
-                          />
-                        </summary>
-                        <p class="pb-4 text-sm text-body">{question.answer}</p>
-                      </details>
+                    <p class="mt-1 text-xs text-muted">
+                      Type your answer and submit — you'll get instant feedback.
+                    </p>
+                    <div class="mt-4 space-y-4">
+                      <%= for question <- @current_lecture.questions do %>
+                        <% submission = Map.get(@lq_submissions, question.id) %>
+                        <div class="rounded-2xl border border-black/5 p-5">
+                          <p class="text-sm font-medium text-dark">{question.question}</p>
+                          <%= if submission do %>
+                            <% band = lq_feedback_band(submission.similarity_score) %>
+                            <div class={[
+                              "mt-3 rounded-xl px-4 py-3 text-sm font-medium",
+                              band.class
+                            ]}>
+                              {band.label}
+                            </div>
+                            <p :if={submission.similarity_score < 0.5} class="mt-3 text-sm text-body">
+                              <span class="font-medium text-dark">Model answer:</span>
+                              {question.answer}
+                            </p>
+                          <% else %>
+                            <form phx-submit="submit-lecture-question" class="mt-3 space-y-2">
+                              <input type="hidden" name="question-id" value={question.id} />
+                              <textarea
+                                name="answer"
+                                rows="3"
+                                placeholder="Type your answer here…"
+                                required
+                                class="block w-full rounded-xl border border-black/10 bg-soft px-4 py-2.5 text-sm text-dark placeholder-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                              ></textarea>
+                              <button
+                                type="submit"
+                                class="rounded-full bg-primary px-5 py-2 text-sm font-semibold text-white transition hover:bg-dark"
+                              >
+                                Submit answer
+                              </button>
+                            </form>
+                          <% end %>
+                        </div>
+                      <% end %>
                     </div>
                   </div>
                 <% else %>
@@ -1111,4 +1173,21 @@ defmodule WasomiWeb.CoursePlayerLive do
       }
     end)
   end
+
+  defp load_lq_submissions(socket, lecture) do
+    if socket.assigns.preview? do
+      %{}
+    else
+      Catalog.map_lecture_question_submissions(socket.assigns.current_user, lecture)
+    end
+  end
+
+  defp lq_feedback_band(score) when score >= 0.8,
+    do: %{label: "Great answer!", class: "bg-green-50 text-green-700"}
+
+  defp lq_feedback_band(score) when score >= 0.5,
+    do: %{label: "Close enough — good thinking!", class: "bg-amber-50 text-amber-700"}
+
+  defp lq_feedback_band(_score),
+    do: %{label: "Needs work — see the model answer below.", class: "bg-red-50 text-red-700"}
 end

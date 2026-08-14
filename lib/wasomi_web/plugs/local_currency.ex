@@ -3,6 +3,7 @@ defmodule WasomiWeb.Plugs.LocalCurrency do
   Resolves the user's local currency based on their IP address and stores it in the session.
   """
   import Plug.Conn
+  import Bitwise
 
   @native_currencies ["KES", "NGN", "ZAR", "GHS", "UGX", "RWF", "EGP"]
   @europe_countries [
@@ -79,21 +80,33 @@ defmodule WasomiWeb.Plugs.LocalCurrency do
         country
 
       _ ->
-        # Fallback to IP Geolocation API
-        ip = conn.remote_ip |> :inet.ntoa() |> to_string()
-
-        # Don't query local IPs
-        if ip in ["127.0.0.1", "::1"] do
-          # Default for local dev
+        if private_ip?(conn.remote_ip) do
+          # Default for local dev or internal networks
           "KE"
         else
-          case Req.get("http://ip-api.com/json/#{ip}") do
-            {:ok, %{status: 200, body: %{"status" => "success", "countryCode" => code}}} -> code
+          ip = conn.remote_ip |> :inet.ntoa() |> to_string()
+
+          # Fallback to IP Geolocation API using HTTPS
+          case Req.get("https://get.geojs.io/v1/ip/country/#{ip}.json",
+                 receive_timeout: 1000,
+                 retry: false
+               ) do
+            {:ok, %{status: 200, body: %{"country" => code}}} -> code
             _ -> "KE"
           end
         end
     end
   end
+
+  defp private_ip?({10, _, _, _}), do: true
+  defp private_ip?({192, 168, _, _}), do: true
+  defp private_ip?({172, second, _, _}) when second in 16..31, do: true
+  defp private_ip?({127, _, _, _}), do: true
+  defp private_ip?({0, 0, 0, 0, 0, 0, 0, 1}), do: true
+  # IPv6 Unique Local Addresses (fc00::/7) and Link-Local (fe80::/10)
+  defp private_ip?({first, _, _, _, _, _, _, _}) when (first &&& 0xFE00) == 0xFC00, do: true
+  defp private_ip?({first, _, _, _, _, _, _, _}) when (first &&& 0xFFC0) == 0xFE80, do: true
+  defp private_ip?(_), do: false
 
   defp resolve_display_currency(nil), do: "USD"
 

@@ -80,20 +80,26 @@ defmodule WasomiWeb.Plugs.LocalCurrency do
         country
 
       _ ->
-        if private_ip?(conn.remote_ip) do
-          # Default for local dev or internal networks
-          "KE"
-        else
-          ip = conn.remote_ip |> :inet.ntoa() |> to_string()
+        case conn.remote_ip do
+          nil ->
+            "KE"
 
-          # Fallback to IP Geolocation API using HTTPS
-          case Req.get("https://get.geojs.io/v1/ip/country/#{ip}.json",
-                 receive_timeout: 1000,
-                 retry: false
-               ) do
-            {:ok, %{status: 200, body: %{"country" => code}}} -> code
-            _ -> "KE"
-          end
+          ip_tuple ->
+            if private_ip?(ip_tuple) do
+              # Default for local dev or internal networks
+              "KE"
+            else
+              ip = ip_tuple |> :inet.ntoa() |> to_string()
+
+              # Fallback to IP Geolocation API using HTTPS
+              case Req.get("https://get.geojs.io/v1/ip/country/#{ip}.json",
+                     receive_timeout: 1000,
+                     retry: false
+                   ) do
+                {:ok, %{status: 200, body: %{"country" => code}}} -> code
+                _ -> "KE"
+              end
+            end
         end
     end
   end

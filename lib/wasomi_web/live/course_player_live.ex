@@ -154,7 +154,7 @@ defmodule WasomiWeb.CoursePlayerLive do
               quiz_answers =
                 if existing_submission do
                   Map.new(existing_submission.answers, fn {k, v} ->
-                    {to_string(k), to_string(v)}
+                    {to_string(k), v && to_string(v)}
                   end)
                 else
                   %{}
@@ -1096,6 +1096,8 @@ defmodule WasomiWeb.CoursePlayerLive do
   defp preview_result?(_), do: false
 
   defp question_results(questions, answers) do
+    answers = answers || %{}
+
     Enum.map(questions, fn question ->
       selected_id = Map.get(answers, to_string(question.id))
       selected_option = Enum.find(question.question_options, &(to_string(&1.id) == selected_id))

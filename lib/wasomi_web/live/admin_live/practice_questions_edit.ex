@@ -5,21 +5,26 @@ defmodule WasomiWeb.AdminLive.PracticeQuestionsEdit do
   alias Wasomi.Assessments.PracticeQuestion
   alias Wasomi.Catalog
 
+  # Protected by live_session :require_admin on_mount: [{WasomiWeb.UserAuth, :ensure_admin}]
   @impl true
   def mount(%{"course_slug" => course_slug, "module_id" => module_id}, _session, socket) do
-    course = Catalog.get_course_by_slug!(course_slug)
-    module = load_module!(module_id, course)
+    if socket.assigns[:current_user] && socket.assigns.current_user.role == :admin do
+      course = Catalog.get_course_by_slug!(course_slug)
+      module = load_module!(module_id, course)
 
-    {:ok,
-     socket
-     |> assign(:page_title, "Practice questions · #{module.title}")
-     |> assign(:course, course)
-     |> assign(:module, module)
-     |> assign(:new_practice_form, nil)
-     |> assign(:deleting_question_id, nil)
-     |> assign(:dirty_question_ids, MapSet.new())
-     |> assign(:generating_ai?, false)
-     |> reload_questions()}
+      {:ok,
+       socket
+       |> assign(:page_title, "Practice questions · #{module.title}")
+       |> assign(:course, course)
+       |> assign(:module, module)
+       |> assign(:new_practice_form, nil)
+       |> assign(:deleting_question_id, nil)
+       |> assign(:dirty_question_ids, MapSet.new())
+       |> assign(:generating_ai?, false)
+       |> reload_questions()}
+    else
+      {:ok, redirect(socket, to: ~p"/")}
+    end
   end
 
   @impl true

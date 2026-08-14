@@ -19,6 +19,23 @@ defmodule WasomiWeb.AdminLive.PracticeQuestionsEditTest do
     ~p"/admin/courses/#{course.slug}/modules/#{module.id}/practice"
   end
 
+  describe "authorization" do
+    test "unauthenticated users are redirected" do
+      module = course_module_fixture()
+      conn = build_conn()
+      assert {:error, redirect} = live(conn, edit_path(module))
+      assert {:redirect, %{to: "/users/log_in"}} = redirect
+    end
+
+    test "non-admin student users are redirected", %{conn: conn} do
+      module = course_module_fixture()
+      student = user_fixture()
+      conn = conn |> log_in_user(student)
+      assert {:error, redirect} = live(conn, edit_path(module))
+      assert {:redirect, %{to: "/"}} = redirect
+    end
+  end
+
   setup %{conn: conn} do
     %{conn: log_in_user(conn, admin_fixture())}
   end

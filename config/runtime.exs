@@ -71,10 +71,10 @@ for {env_name, config_key} <- [
 end
 
 if config_env() == :dev do
-  if System.get_env("MUX_TOKEN_ID") not in [nil, ""] do
-    config :wasomi, media_provider: Wasomi.Media.Mux
-  else
+  if System.get_env("MUX_TOKEN_ID") in [nil, ""] do
     config :wasomi, media_provider: Wasomi.Media.Demo
+  else
+    config :wasomi, media_provider: Wasomi.Media.Mux
   end
 end
 

@@ -23,6 +23,8 @@ defmodule Wasomi.Assessments do
     LectureQuizGeneration,
     LectureQuizQuestion,
     LectureQuizSubmission,
+    PracticeQuestion,
+    PracticeQuestionOption,
     Question,
     Quiz,
     QuizGeneration,
@@ -180,6 +182,19 @@ defmodule Wasomi.Assessments do
             passed: submission.passed
           }
         end)
+  end
+
+  @doc """
+  Returns a `MapSet` of `quiz_id`s for which the specified user has submitted at least one attempt in a course.
+  """
+  def completed_quiz_ids_for_user(user_id, course_id) do
+    QuizSubmission
+    |> join(:inner, [s], q in Quiz, on: q.id == s.quiz_id)
+    |> join(:inner, [s, q], m in CourseModule, on: m.id == q.module_id)
+    |> where([s, _q, m], s.user_id == ^user_id and m.course_id == ^course_id)
+    |> select([s], s.quiz_id)
+    |> Repo.all()
+    |> MapSet.new()
   end
 
   @doc """
@@ -1020,4 +1035,256 @@ defmodule Wasomi.Assessments do
 
   defp lecture_quiz_generation_topic(lecture_quiz_id),
     do: "lecture_quiz_generation:lecture_quiz:#{lecture_quiz_id}"
+
+  ## Practice questions
+
+  @doc """
+  Lists all practice questions for a module (any status), ordered by position.
+  Used by the admin authoring view.
+  """
+  def list_all_practice_questions(%CourseModule{id: module_id}) do
+    options_query =
+      from(o in PracticeQuestionOption, order_by: [asc: o.position])
+
+    PracticeQuestion
+    |> where([q], q.module_id == ^module_id)
+    |> order_by([q], asc: q.position)
+    |> preload([q], practice_question_options: ^options_query)
+    |> Repo.all()
+  end
+
+  @doc """
+  Lists only `:published` practice questions for a module with options preloaded.
+  Used by the learner course player.
+  """
+  def list_published_practice_questions(%CourseModule{id: module_id}) do
+    options_query =
+      from(o in PracticeQuestionOption, order_by: [asc: o.position])
+
+    PracticeQuestion
+    |> where([q], q.module_id == ^module_id and q.status == :published)
+    |> order_by([q], asc: q.position)
+    |> preload([q], practice_question_options: ^options_query)
+    |> Repo.all()
+  end
+
+  @doc """
+  Returns a map of `module_id => [published PracticeQuestion]` for every
+  module in a course that has at least one published practice question.
+  Used by the course player to build the sidenav and avoid N+1 queries.
+  """
+  def published_practice_questions_by_module(course_id) do
+    options_query =
+      from(o in PracticeQuestionOption, order_by: [asc: o.position])
+
+    PracticeQuestion
+    |> join(:inner, [q], m in CourseModule, on: m.id == q.module_id)
+    |> where([q, m], m.course_id == ^course_id and q.status == :published)
+    |> order_by([q, _m], asc: q.position)
+    |> preload([q, _m], practice_question_options: ^options_query)
+    |> Repo.all()
+    |> Enum.group_by(& &1.module_id)
+  end
+
+  def get_practice_question!(id) do
+    options_query = from(o in PracticeQuestionOption, order_by: [asc: o.position])
+    Repo.get!(PracticeQuestion, id) |> Repo.preload(practice_question_options: options_query)
+  end
+
+  def create_practice_question(%CourseModule{} = module, attrs) do
+    position = next_practice_question_position(module.id)
+
+    %PracticeQuestion{module_id: module.id, position: position}
+    |> PracticeQuestion.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  def update_practice_question(%PracticeQuestion{} = question, attrs) do
+    question
+    |> PracticeQuestion.changeset(attrs)
+    |> Repo.update()
+  end
+
+  def delete_practice_question(%PracticeQuestion{} = question), do: Repo.delete(question)
+
+  def change_practice_question(%PracticeQuestion{} = question, attrs \\ %{}),
+    do: PracticeQuestion.changeset(question, attrs)
+
+  @doc """
+  Marks a practice question as `:published`, making it visible to learners.
+  """
+  def publish_practice_question(%PracticeQuestion{} = question) do
+    question
+    |> Ecto.Changeset.change(status: :published)
+    |> Repo.update()
+  end
+
+  defp next_practice_question_position(module_id) do
+    max_pos =
+      PracticeQuestion
+      |> where([q], q.module_id == ^module_id)
+      |> select([q], max(q.position))
+      |> Repo.one()
+
+    (max_pos || 0) + 1
+  end
+
+  @doc """
+  Generates AI practice questions on-demand for a module using its lecture content, resources, and transcripts.
+  Deduplicates generated questions against any existing module quiz questions, lecture quiz questions, or prior practice questions.
+  All generated questions are inserted as `:published` practice questions.
+  """
+  def generate_practice_questions_for_module(%CourseModule{} = module, opts \\ []) do
+    text = gather_module_text(module)
+    count = Keyword.get(opts, :count, 5)
+    existing_prompts = list_existing_question_prompts_for_module(module.id)
+
+    generator =
+      Application.get_env(
+        :wasomi,
+        :question_generator,
+        Wasomi.Assessments.QuestionGenerator.OpenAI
+      )
+
+    generator_opts = [
+      min_count: count,
+      max_count: count,
+      avoid_duplicating: existing_prompts
+    ]
+
+    case generator.generate_questions(text, generator_opts) do
+      {:ok, draft_questions} ->
+        questions =
+          Enum.map(draft_questions, fn draft ->
+            options_attrs =
+              draft.options
+              |> Enum.with_index(1)
+              |> Map.new(fn {opt, idx} ->
+                {to_string(idx),
+                 %{
+                   "label" => opt.label,
+                   "correct" => opt.correct,
+                   "position" => idx
+                 }}
+              end)
+
+            attrs = %{
+              "prompt" => draft.prompt,
+              "explanation" =>
+                Map.get(draft, :explanation, "Generated from module study material."),
+              "status" => "published",
+              "practice_question_options" => options_attrs
+            }
+
+            {:ok, question} = create_practice_question(module, attrs)
+            get_practice_question!(question.id)
+          end)
+
+        {:ok, questions}
+
+      error ->
+        error
+    end
+  end
+
+  @doc """
+  Returns a list of all existing question prompts in the module (from the module quiz,
+  all lecture quizzes, and existing practice questions) to prevent duplicate questions.
+  """
+  def list_existing_question_prompts_for_module(module_id) do
+    module_quiz_prompts =
+      from(q in Question,
+        join: z in Quiz,
+        on: z.id == q.quiz_id,
+        where: z.module_id == ^module_id,
+        select: q.prompt
+      )
+      |> Repo.all()
+
+    lecture_quiz_prompts =
+      from(lq in LectureQuizQuestion,
+        join: lz in LectureQuiz,
+        on: lz.id == lq.lecture_quiz_id,
+        join: l in Lecture,
+        on: l.id == lz.lecture_id,
+        where: l.module_id == ^module_id,
+        select: lq.prompt
+      )
+      |> Repo.all()
+
+    practice_prompts =
+      from(pq in PracticeQuestion,
+        where: pq.module_id == ^module_id,
+        select: pq.prompt
+      )
+      |> Repo.all()
+
+    (module_quiz_prompts ++ lecture_quiz_prompts ++ practice_prompts)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.uniq()
+  end
+
+  defp gather_module_text(%CourseModule{id: module_id} = module) do
+    lectures =
+      Lecture
+      |> where([l], l.module_id == ^module_id)
+      |> order_by([l], asc: l.position)
+      |> Repo.all()
+
+    resource_reader =
+      Application.get_env(
+        :wasomi,
+        :lecture_resource_reader,
+        Wasomi.Assessments.LectureResourceReader.Storage
+      )
+
+    lecture_texts =
+      Enum.map(lectures, fn lecture ->
+        transcript_text =
+          case Wasomi.Catalog.get_lecture_transcript(lecture.id) do
+            %{status: :ready, text: t} when is_binary(t) -> t
+            _ -> ""
+          end
+
+        resources =
+          from(r in Wasomi.Catalog.LectureResource,
+            where: r.lecture_id == ^lecture.id,
+            order_by: [asc: r.position]
+          )
+          |> Repo.all()
+
+        resource_texts =
+          Enum.map(resources, fn res ->
+            case resource_reader.extract_text(res) do
+              {:ok, text} when is_binary(text) -> text
+              _ -> ""
+            end
+          end)
+          |> Enum.reject(&(&1 == ""))
+          |> Enum.join("\n\n")
+
+        parts = [
+          lecture.description,
+          transcript_text,
+          resource_texts
+        ]
+
+        parts
+        |> Enum.reject(&(&1 in [nil, ""]))
+        |> Enum.join("\n\n")
+      end)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.join("\n\n---\n\n")
+
+    module_title = module.title || "Module"
+    module_desc = Map.get(module, :description) || ""
+
+    if String.trim(lecture_texts) == "" do
+      "Subject Matter Domain: #{module_title}\n\nOverview:\n#{module_desc}"
+    else
+      "Subject Matter Domain: #{module_title}\n\nOverview:\n#{module_desc}\n\nStudy Material:\n#{lecture_texts}"
+    end
+  end
 end

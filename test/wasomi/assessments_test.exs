@@ -991,4 +991,192 @@ defmodule Wasomi.AssessmentsTest do
       assert Assessments.passed_lecture_quiz?(user, quiz)
     end
   end
+
+  describe "practice questions" do
+    test "create_practice_question/2 creates a practice question with options and auto-assigns position" do
+      module = course_module_fixture()
+
+      assert {:ok, question} =
+               Assessments.create_practice_question(module, %{
+                 prompt: "Test practice question?",
+                 explanation: "Because it is a test.",
+                 practice_question_options: question_options_attrs()
+               })
+
+      assert question.prompt == "Test practice question?"
+      assert question.explanation == "Because it is a test."
+      assert question.position == 1
+      assert question.status == :draft
+      assert length(question.practice_question_options) == 4
+      assert Enum.count(question.practice_question_options, & &1.correct) == 1
+
+      assert {:ok, question2} =
+               Assessments.create_practice_question(module, %{
+                 prompt: "Second practice question?",
+                 practice_question_options: question_options_attrs()
+               })
+
+      assert question2.position == 2
+    end
+
+    test "create_practice_question/2 validates option count and correct options" do
+      module = course_module_fixture()
+      all_wrong = Enum.map(question_options_attrs(), &Map.put(&1, :correct, false))
+      too_few = Enum.take(question_options_attrs(), 1)
+
+      assert {:error, changeset} =
+               Assessments.create_practice_question(module, %{
+                 prompt: "All wrong?",
+                 practice_question_options: all_wrong
+               })
+
+      assert "at least one option must be marked correct" in errors_on(changeset).practice_question_options
+
+      assert {:error, changeset} =
+               Assessments.create_practice_question(module, %{
+                 prompt: "Too few?",
+                 practice_question_options: too_few
+               })
+
+      assert "must have between 2 and 4 options" in errors_on(changeset).practice_question_options
+    end
+
+    test "update_practice_question/2 updates attributes and options" do
+      question = practice_question_fixture()
+
+      new_options = [
+        %{label: "New Right", correct: true, position: 1},
+        %{label: "New Wrong", correct: false, position: 2}
+      ]
+
+      assert {:ok, updated} =
+               Assessments.update_practice_question(question, %{
+                 prompt: "Updated prompt",
+                 practice_question_options: new_options
+               })
+
+      assert updated.prompt == "Updated prompt"
+      assert length(updated.practice_question_options) == 2
+      assert Enum.map(updated.practice_question_options, & &1.label) == ["New Right", "New Wrong"]
+    end
+
+    test "delete_practice_question/1 cascades to options" do
+      question = practice_question_fixture()
+      option_ids = Enum.map(question.practice_question_options, & &1.id)
+
+      assert {:ok, _} = Assessments.delete_practice_question(question)
+
+      assert_raise Ecto.NoResultsError, fn -> Assessments.get_practice_question!(question.id) end
+
+      assert Repo.all(
+               from o in Wasomi.Assessments.PracticeQuestionOption, where: o.id in ^option_ids
+             ) == []
+    end
+
+    test "list_all_practice_questions/1 returns all questions ordered by position" do
+      module = course_module_fixture()
+      q2 = practice_question_fixture(%{module: module, position: 2, status: :draft})
+      q1 = practice_question_fixture(%{module: module, position: 1, status: :published})
+      _other_module_q = practice_question_fixture()
+
+      questions = Assessments.list_all_practice_questions(module)
+      assert Enum.map(questions, & &1.id) == [q1.id, q2.id]
+      # It should preload options
+      assert Enum.all?(questions, &is_list(&1.practice_question_options))
+    end
+
+    test "list_published_practice_questions/1 returns only published questions" do
+      module = course_module_fixture()
+      _draft = practice_question_fixture(%{module: module, position: 2, status: :draft})
+      published = practice_question_fixture(%{module: module, position: 1, status: :published})
+
+      questions = Assessments.list_published_practice_questions(module)
+      assert Enum.map(questions, & &1.id) == [published.id]
+    end
+
+    test "publish_practice_question/1 flips draft to published" do
+      question = practice_question_fixture(%{status: :draft})
+
+      assert {:ok, published} = Assessments.publish_practice_question(question)
+      assert published.status == :published
+    end
+
+    test "change_practice_question/2 returns a changeset" do
+      question = practice_question_fixture()
+      assert %Ecto.Changeset{data: ^question} = Assessments.change_practice_question(question)
+    end
+
+    test "generate_practice_questions_for_module/2 uses QuestionGenerator to create published practice questions" do
+      module = course_module_fixture()
+
+      Mox.expect(Wasomi.QuestionGeneratorMock, :generate_questions, fn text, opts ->
+        assert text =~ module.title
+        assert Keyword.get(opts, :min_count) == 5
+
+        {:ok,
+         [
+           %{
+             prompt: "What is AI?",
+             options: [
+               %{label: "Artificial Intelligence", correct: true},
+               %{label: "Automated Integration", correct: false}
+             ]
+           }
+         ]}
+      end)
+
+      assert {:ok, [q]} = Assessments.generate_practice_questions_for_module(module, count: 5)
+      assert q.prompt == "What is AI?"
+      assert q.status == :published
+      assert length(q.practice_question_options) == 2
+    end
+
+    test "PracticeQuestion changeset handles nested string form params safely" do
+      alias Wasomi.Assessments.PracticeQuestion
+      module = course_module_fixture()
+
+      params = %{
+        "prompt" => "Sample prompt?",
+        "position" => "1",
+        "module_id" => module.id,
+        "practice_question_options" => %{
+          "0" => %{"label" => "Option 1", "position" => "1", "correct" => "true"},
+          "1" => %{"label" => "Option 2", "position" => "2", "correct" => "false"}
+        }
+      }
+
+      changeset = PracticeQuestion.changeset(%PracticeQuestion{}, params)
+      assert changeset.valid?
+    end
+
+    test "PracticeQuestion changeset returns error when no options are correct" do
+      alias Wasomi.Assessments.PracticeQuestion
+      module = course_module_fixture()
+
+      params = %{
+        "prompt" => "Sample prompt?",
+        "position" => "1",
+        "module_id" => module.id,
+        "practice_question_options" => %{
+          "0" => %{"label" => "Option 1", "position" => "1", "correct" => "false"},
+          "1" => %{"label" => "Option 2", "position" => "2", "correct" => "false"}
+        }
+      }
+
+      changeset = PracticeQuestion.changeset(%PracticeQuestion{}, params)
+      refute changeset.valid?
+
+      assert "at least one option must be marked correct" in errors_on(changeset).practice_question_options
+    end
+
+    test "PracticeQuestionOption changeset accepts params missing correct key" do
+      alias Wasomi.Assessments.PracticeQuestionOption
+      params = %{"label" => "Option Text", "position" => 1}
+
+      changeset = PracticeQuestionOption.changeset(%PracticeQuestionOption{}, params)
+
+      assert changeset.valid?
+      assert Ecto.Changeset.get_field(changeset, :correct) == false
+    end
+  end
 end

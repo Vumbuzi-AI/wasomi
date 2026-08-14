@@ -581,6 +581,12 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                     >
                       <.icon name="hero-plus-circle" class="h-4 w-4" /> Add lecture
                     </button>
+                    <.link
+                      navigate={~p"/admin/courses/#{@course.slug}/modules/#{module.id}/practice"}
+                      class="inline-flex items-center gap-1.5 rounded-full border border-black/10 px-4 py-1.5 text-sm font-medium text-dark transition hover:bg-mint hover:text-primary"
+                    >
+                      <.icon name="hero-beaker" class="h-4 w-4" /> Practice questions
+                    </.link>
                     <span
                       :if={
                         is_nil(Map.get(@quizzes_by_module, module.id)) and

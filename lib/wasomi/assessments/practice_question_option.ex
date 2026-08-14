@@ -15,7 +15,7 @@ defmodule Wasomi.Assessments.PracticeQuestionOption do
   def changeset(option, attrs) do
     option
     |> cast(attrs, [:label, :correct, :position, :practice_question_id])
-    |> validate_required([:label, :correct, :position])
+    |> validate_required([:label, :position])
     |> validate_length(:label, min: 1, max: 500)
     |> validate_number(:position, greater_than: 0)
   end

@@ -49,7 +49,14 @@ defmodule Wasomi.Assessments.PracticeQuestion do
   defp validate_correct_option(changeset) do
     options = get_field(changeset, :practice_question_options, [])
 
-    if Enum.any?(options, & &1.correct) do
+    has_correct? =
+      Enum.any?(options, fn
+        %Ecto.Changeset{} = cs -> get_field(cs, :correct) == true
+        %{correct: correct} -> correct == true
+        _ -> false
+      end)
+
+    if has_correct? do
       changeset
     else
       add_error(

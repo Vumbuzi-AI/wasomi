@@ -151,7 +151,14 @@ defmodule WasomiWeb.CoursePlayerLive do
                   List.first(user_submissions)
                 end
 
-              quiz_answers = if existing_submission, do: existing_submission.answers, else: %{}
+              quiz_answers =
+                if existing_submission do
+                  Map.new(existing_submission.answers, fn {k, v} ->
+                    {to_string(k), to_string(v)}
+                  end)
+                else
+                  %{}
+                end
 
               {:noreply,
                socket
@@ -509,10 +516,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                         Question Breakdown
                       </h4>
                       <ol class="divide-y divide-black/5 border-t border-black/5">
-                        <li
-                          :for={{r, idx} <- Enum.with_index(q_results, 1)}
-                          class="py-4"
-                        >
+                        <li :for={{r, idx} <- Enum.with_index(q_results, 1)} class="py-4">
                           <div class="flex items-start gap-3">
                             <div class={[
                               "mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full text-white",
@@ -528,7 +532,15 @@ defmodule WasomiWeb.CoursePlayerLive do
                                 {idx}. {r.question.prompt}
                               </p>
                               <p class="mt-1 text-sm text-dark/70">
-                                Your answer: <span class={if(r.correct?, do: "font-medium text-green-700", else: "font-medium text-red-600")}>{(r.selected_option && r.selected_option.label) || "—"}</span>
+                                Your answer:
+                                <span class={
+                                  if(r.correct?,
+                                    do: "font-medium text-green-700",
+                                    else: "font-medium text-red-600"
+                                  )
+                                }>
+                                  {(r.selected_option && r.selected_option.label) || "—"}
+                                </span>
                               </p>
                               <p
                                 :if={!r.correct? && r.correct_option}

@@ -1117,7 +1117,7 @@ defmodule WasomiWeb.HomeComponents do
       <div class="mx-auto max-w-container px-5 lg:px-8">
         <div class="flex flex-col items-start justify-between gap-6 sm:flex-row sm:items-end">
           <h2 class="max-w-xl text-3xl font-semibold text-white sm:text-4xl">
-            Learn from the Best Talent in the Industry
+            Learn from the Best in the Industry
           </h2>
           <a
             href="#"

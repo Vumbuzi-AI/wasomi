@@ -117,7 +117,11 @@ defmodule WasomiWeb.UserRegistrationLive do
           </.auth_input>
         </div>
 
-        <label class="flex items-center gap-2.5 text-sm font-medium text-dark">
+        <label
+          id="terms-agreement"
+          phx-update="ignore"
+          class="flex items-center gap-2.5 text-sm font-medium text-dark"
+        >
           <input
             type="checkbox"
             required

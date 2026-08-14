@@ -8,6 +8,8 @@ defmodule Wasomi.Catalog.LectureQuestionScorer.OpenAI do
   set to a strict JSON schema, so the score field is guaranteed by the API.
   """
 
+  require Logger
+
   @behaviour Wasomi.Catalog.LectureQuestionScorer
 
   @api_url "https://api.openai.com/v1/chat/completions"
@@ -82,38 +84,53 @@ defmodule Wasomi.Catalog.LectureQuestionScorer.OpenAI do
         {:ok, score |> max(0.0) |> min(1.0)}
 
       {:ok, other} ->
+        Logger.warning("OpenAI scorer: unexpected JSON shape: #{inspect(other)}")
         {:error, {:unexpected_shape, other}}
 
       {:error, reason} ->
+        Logger.warning("OpenAI scorer: invalid JSON in response: #{inspect(reason)}")
         {:error, {:invalid_json, reason}}
     end
   end
 
-  defp handle_response(%{"choices" => []}), do: {:error, :no_completion_returned}
-  defp handle_response(body), do: {:error, {:unexpected_response, body}}
+  defp handle_response(%{"choices" => []}) do
+    Logger.warning("OpenAI scorer: API returned empty choices")
+    {:error, :no_completion_returned}
+  end
+
+  defp handle_response(body) do
+    Logger.warning("OpenAI scorer: unexpected response body: #{inspect(body)}")
+    {:error, {:unexpected_response, body}}
+  end
 
   defp request(body) do
     with {:ok, api_key} <- api_key() do
-      response =
-        Req.post(@api_url,
-          json: body,
-          headers: [
-            {"Content-Type", "application/json"},
-            {"Authorization", "Bearer #{api_key}"}
+      opts =
+        Keyword.merge(
+          [
+            json: body,
+            headers: [
+              {"Content-Type", "application/json"},
+              {"Authorization", "Bearer #{api_key}"}
+            ],
+            retry: :transient,
+            max_retries: 2,
+            receive_timeout: 30_000
           ],
-          retry: :transient,
-          max_retries: 2,
-          receive_timeout: 30_000
+          req_options()
         )
 
-      case response do
+      case Req.post(@api_url, opts) do
         {:ok, %{status: 200, body: response_body}} ->
           {:ok, response_body}
 
         {:ok, %{status: status, body: response_body}} ->
+          Logger.warning("OpenAI scorer: HTTP #{status}: #{inspect(response_body)}")
+
           {:error, {:http_error, status, response_body}}
 
         {:error, reason} ->
+          Logger.warning("OpenAI scorer: request failed: #{inspect(reason)}")
           {:error, reason}
       end
     end
@@ -121,10 +138,16 @@ defmodule Wasomi.Catalog.LectureQuestionScorer.OpenAI do
 
   defp api_key do
     case Application.get_env(:wasomi, :openai_api_key) do
-      key when is_binary(key) and key != "" -> {:ok, key}
-      _ -> {:error, :openai_api_key_not_configured}
+      key when is_binary(key) and key != "" ->
+        {:ok, key}
+
+      _ ->
+        Logger.warning("OpenAI scorer: OPENAI_API_KEY is not configured")
+        {:error, :openai_api_key_not_configured}
     end
   end
 
   defp model, do: Application.get_env(:wasomi, :openai_model, @default_model)
+
+  defp req_options, do: Application.get_env(:wasomi, :openai_scorer_req_options, [])
 end

@@ -164,7 +164,6 @@ defmodule WasomiWeb.CourseLive.FormComponent do
           </p>
         </div>
 
-
         <:actions>
           <.button phx-disable-with="Saving...">Save Course</.button>
         </:actions>

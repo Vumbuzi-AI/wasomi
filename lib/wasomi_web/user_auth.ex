@@ -203,10 +203,15 @@ defmodule WasomiWeb.UserAuth do
   end
 
   defp mount_current_user(socket, session) do
-    Phoenix.Component.assign_new(socket, :current_user, fn ->
-      if user_token = session["user_token"] do
-        Accounts.get_user_by_session_token(user_token)
-      end
+    socket =
+      Phoenix.Component.assign_new(socket, :current_user, fn ->
+        if user_token = session["user_token"] do
+          Accounts.get_user_by_session_token(user_token)
+        end
+      end)
+
+    Phoenix.Component.assign_new(socket, :display_currency, fn ->
+      session["display_currency"] || "USD"
     end)
   end
 

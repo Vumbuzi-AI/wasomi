@@ -376,7 +376,9 @@ defmodule WasomiWeb.HomeComponents do
     """
   end
 
-  attr :course, :map, required: true
+  attr :course, Wasomi.Catalog.Course, required: true
+  attr :display_currency, :string, default: nil
+  attr :progress, :map, default: %{}
   attr :image_class, :string, default: "h-56"
 
   def course_card(assigns) do
@@ -399,7 +401,7 @@ defmodule WasomiWeb.HomeComponents do
             Course
           </span>
           <div class="text-lg font-semibold text-dark">
-            {Catalog.format_price(@course)}
+            {Catalog.format_price(@course, @display_currency)}
           </div>
         </div>
         <h3 class="mt-4 text-lg font-medium text-dark">{@course.title}</h3>

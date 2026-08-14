@@ -58,7 +58,7 @@ defmodule WasomiWeb.CatalogLive.Index do
                       Communication
                     </span>
                     <span class="text-sm font-semibold text-dark">
-                      {Catalog.format_price(course)}
+                      {Catalog.format_price(course, assigns[:display_currency])}
                     </span>
                   </div>
                   <h2 class="mt-5 text-xl font-semibold text-dark">{course.title}</h2>

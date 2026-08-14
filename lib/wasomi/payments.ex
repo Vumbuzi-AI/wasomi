@@ -260,7 +260,7 @@ defmodule Wasomi.Payments do
     if course.is_free do
       case Enrollments.enroll_free_course(user, course) do
         {:ok, enrollment} ->
-          {:ok, %{enrollment: enrollment, payment: nil, authorization_url: nil}}
+          {:ok, %{enrollment: enrollment}}
 
         {:error, reason} ->
           {:error, reason}

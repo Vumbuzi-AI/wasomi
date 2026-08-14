@@ -22,6 +22,12 @@ defmodule WasomiWeb.CheckoutLive do
              |> put_flash(:info, "Enrolled in #{course.title} successfully.")
              |> redirect(to: ~p"/learn/courses/#{course.slug}")}
 
+          {:error, :unauthenticated} ->
+            {:ok,
+             socket
+             |> put_flash(:error, "Please log in to enroll in this free course.")
+             |> redirect(to: ~p"/users/log_in")}
+
           {:error, _reason} ->
             {:ok,
              socket
@@ -57,6 +63,12 @@ defmodule WasomiWeb.CheckoutLive do
            ) do
         {:ok, %{authorization_url: url}} ->
           {:noreply, redirect(socket, external: url)}
+
+        {:ok, %{enrollment: _enrollment}} ->
+          {:noreply,
+           socket
+           |> put_flash(:info, "Enrolled successfully.")
+           |> redirect(to: ~p"/learn/courses/#{socket.assigns.course.slug}")}
 
         {:error, reason} ->
           Logger.error(

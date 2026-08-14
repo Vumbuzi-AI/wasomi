@@ -227,6 +227,8 @@ defmodule Wasomi.Enrollments do
   @doc """
   Enrolls a user in a free course, creating and activating the enrollment immediately.
   """
+  def enroll_free_course(nil, %Course{}), do: {:error, :unauthenticated}
+
   def enroll_free_course(%User{} = user, %Course{is_free: true} = course) do
     Repo.transaction(fn ->
       with {:ok, enrollment} <- create_pending_enrollment(user, course),

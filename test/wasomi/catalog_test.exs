@@ -85,7 +85,6 @@ defmodule Wasomi.CatalogTest do
         position: 43,
         description: "some updated description",
         title: "some updated title",
-        currency: "usd",
         slug: "Some Updated Slug",
         thumbnail_key: "some updated thumbnail_key",
         price_minor: 43
@@ -95,7 +94,6 @@ defmodule Wasomi.CatalogTest do
       assert course.position == 43
       assert course.description == "some updated description"
       assert course.title == "some updated title"
-      assert course.currency == "USD"
       assert course.slug == "some-updated-slug"
       assert course.thumbnail_key == "some updated thumbnail_key"
       assert course.price_minor == 43
@@ -133,7 +131,9 @@ defmodule Wasomi.CatalogTest do
     test "pricing helpers preserve integer minor units and currency" do
       course = course_fixture(price_minor: 15_000_00, currency: "KES")
 
-      assert %Money{amount: 15_000_00, currency: :KES} = Catalog.price(course)
+      price = Catalog.price(course)
+      assert price.currency == :KES
+      assert Decimal.to_float(price.amount) == 15000.0
       assert Catalog.format_price(course) =~ "KES"
     end
 

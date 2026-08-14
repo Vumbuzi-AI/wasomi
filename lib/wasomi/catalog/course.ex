@@ -35,7 +35,6 @@ defmodule Wasomi.Catalog.Course do
       :description,
       :thumbnail_key,
       :price_minor,
-      :currency,
       :status,
       :position,
       :is_free
@@ -44,20 +43,17 @@ defmodule Wasomi.Catalog.Course do
       :slug,
       :title,
       :description,
-      :currency,
       :status,
       :position
     ])
     |> validate_price()
     |> update_change(:slug, &normalize_slug/1)
-    |> update_change(:currency, &String.upcase/1)
     |> update_change(:title, &trim/1)
     |> validate_format(:slug, ~r/^[a-z0-9]+(?:-[a-z0-9]+)*$/,
       message: "must contain lowercase letters, numbers, and hyphens only"
     )
     |> validate_length(:title, min: 3, max: 160)
     |> validate_number(:position, greater_than: 0)
-    |> validate_format(:currency, ~r/^[A-Z]{3}$/, message: "must be a 3-letter currency code")
     |> unique_constraint(:slug)
     |> check_constraint(:price_minor, name: :courses_price_must_be_non_negative)
     |> check_constraint(:position, name: :courses_position_must_be_positive)

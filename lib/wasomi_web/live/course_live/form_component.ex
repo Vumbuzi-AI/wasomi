@@ -164,7 +164,7 @@ defmodule WasomiWeb.CourseLive.FormComponent do
           </p>
         </div>
 
-        <.input field={@form[:currency]} type="text" label="Currency" />
+
         <:actions>
           <.button phx-disable-with="Saving...">Save Course</.button>
         </:actions>

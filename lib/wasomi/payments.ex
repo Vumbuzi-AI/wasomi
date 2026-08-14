@@ -40,9 +40,11 @@ defmodule Wasomi.Payments do
   matching the convention used for individual payment receipts.
   """
   def format_minor(amount, currency \\ "KES") do
-    (amount || 0)
-    |> Money.new(currency)
-    |> Money.to_string(symbol: false, code: true)
+    # Note: Paystack configured/verified for KES when using M-Pesa.
+    # The currency here acts as a pass-through to Paystack's initialization,
+    # so it must match what the account is enabled to process.
+    Money.from_integer(amount || 0, currency)
+    |> Money.to_string!()
   end
 
   @doc """

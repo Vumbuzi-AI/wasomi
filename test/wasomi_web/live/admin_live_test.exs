@@ -130,8 +130,7 @@ defmodule WasomiWeb.AdminLiveTest do
         title: "A brand new course",
         description: "A full description",
         thumbnail_key: "thumb.jpg",
-        price_minor: "1500.00",
-        currency: "KES"
+        price_minor: "1500.00"
       }
 
       html =
@@ -156,8 +155,7 @@ defmodule WasomiWeb.AdminLiveTest do
         title: "A free course",
         description: "A free description",
         thumbnail_key: "thumb.jpg",
-        is_free: "true",
-        currency: "KES"
+        is_free: "true"
       }
 
       html =
@@ -189,8 +187,7 @@ defmodule WasomiWeb.AdminLiveTest do
           course: %{
             title: "Uploaded thumbnail course",
             description: "A course with an uploaded thumbnail.",
-            price_minor: "1500.00",
-            currency: "KES"
+            price_minor: "1500.00"
           }
         )
         |> render_submit()

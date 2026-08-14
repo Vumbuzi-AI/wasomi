@@ -174,10 +174,10 @@ defmodule Wasomi.Catalog do
   @doc """
   Converts the persisted integer minor units into a currency-aware value.
   """
-  def price(%Course{is_free: true, currency: currency}), do: Money.new(0, currency || "KES")
+  def price(%Course{is_free: true, currency: currency}), do: Money.from_integer(0, currency || "KES")
 
   def price(%Course{price_minor: amount, currency: currency}) do
-    Money.new(amount || 0, currency || "KES")
+    Money.from_integer(amount || 0, currency || "KES")
   end
 
   @doc """
@@ -188,7 +188,7 @@ defmodule Wasomi.Catalog do
   def format_price(%Course{} = course) do
     course
     |> price()
-    |> Money.to_string(symbol: false, code: true)
+    |> Money.to_string!()
   end
 
   def lecture_count(%Course{modules: modules}) when is_list(modules) do

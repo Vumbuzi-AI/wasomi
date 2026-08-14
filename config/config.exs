@@ -93,6 +93,10 @@ config :logger, :console,
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
 
+config :ex_money, 
+  default_cldr_backend: Wasomi.Cldr,
+  auto_start_exchange_rate_service: false
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"

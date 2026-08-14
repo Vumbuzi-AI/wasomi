@@ -91,6 +91,14 @@ defmodule Wasomi.Catalog.Workers.AttachLectureOverviewVideoWorker do
     |> inspect()
   end
 
+  defp format_failure({:mux, %{"messages" => [_ | _] = messages}}),
+    do: "Mux rejected the request (#{Enum.join(messages, " ")})"
+
+  defp format_failure({:mux, %{"type" => type}}), do: "Mux rejected the request (#{type})"
+
+  defp format_failure({:mux, status, _body}) when is_integer(status),
+    do: "Mux returned an unexpected response (HTTP #{status})"
+
   defp format_failure(reason), do: inspect(reason)
 
   defp storage,

@@ -117,4 +117,29 @@ defmodule Wasomi.Catalog.Workers.AttachLectureOverviewVideoWorkerTest do
     assert updated.attach_status == :attach_failed
     assert updated.attach_error_message =~ "mux_asset_errored"
   end
+
+  test "formats a Mux API error as a readable message instead of a raw term dump", %{
+    generation: generation
+  } do
+    stub(Wasomi.CatalogStorageMock, :download_url, fn key ->
+      {:ok, "https://cdn.example.test/#{key}"}
+    end)
+
+    stub(Wasomi.MediaProviderMock, :create_asset_from_url, fn _lecture, _url, _opts ->
+      {:error,
+       {:mux,
+        %{"messages" => ["Free plan is limited to 10 assets"], "type" => "invalid_parameters"}}}
+    end)
+
+    Oban.Testing.perform_job(AttachLectureOverviewVideoWorker, args(generation),
+      attempt: 5,
+      max_attempts: 5
+    )
+
+    updated = Catalog.get_overview_generation!(generation.id)
+    assert updated.attach_status == :attach_failed
+
+    assert updated.attach_error_message ==
+             "Mux rejected the request (Free plan is limited to 10 assets)"
+  end
 end

@@ -585,4 +585,140 @@ defmodule WasomiWeb.AdminComponents do
     </.form>
     """
   end
+
+  @doc """
+  Inline form for authoring a `PracticeQuestion`.
+
+  Mirrors `question_form/1` but uses `:practice_question_options` and
+  practice-question-specific event names so both can coexist on the same page.
+  """
+  attr :form, :any, required: true
+  attr :question, :any, required: true
+  attr :dirty, :boolean, default: false
+
+  def practice_question_form(assigns) do
+    assigns =
+      assign(
+        assigns,
+        :input_prefix,
+        if(assigns.question,
+          do: "practice-question-#{assigns.question.id}",
+          else: "new-practice-question"
+        )
+      )
+
+    ~H"""
+    <.form
+      for={@form}
+      id={
+        if @question,
+          do: "practice-question-form-#{@question.id}",
+          else: "new-practice-question-form"
+      }
+      phx-change={
+        if @question,
+          do: "validate_practice_question",
+          else: "validate_new_practice_question"
+      }
+      phx-submit={if @question, do: "save_practice_question", else: "save_new_practice_question"}
+      phx-value-id={@question && @question.id}
+      class="space-y-5"
+    >
+      <.input
+        field={@form[:prompt]}
+        id={"#{@input_prefix}-prompt"}
+        type="textarea"
+        label="Question text"
+      />
+      <.input
+        field={@form[:explanation]}
+        id={"#{@input_prefix}-explanation"}
+        type="textarea"
+        label="Explanation (shown after answering)"
+        placeholder="Optional: explain why the correct answer is right"
+      />
+
+      <fieldset>
+        <legend class="mb-3 text-sm font-semibold text-dark">
+          Answer options <span class="font-normal text-body">(select the correct answer)</span>
+        </legend>
+        <div class="space-y-3">
+          <.inputs_for :let={option_form} field={@form[:practice_question_options]}>
+            <div class="flex items-start gap-3">
+              <input
+                type="radio"
+                name={"#{@input_prefix}[correct_option_id]"}
+                value={option_form.index}
+                checked={option_form[:correct].value == true}
+                aria-label={"Mark option #{option_form.index + 1} correct"}
+                class="mt-3 h-4 w-4 border-black/20 text-primary focus:ring-primary"
+              />
+              <input
+                type="hidden"
+                name={"#{option_form.name}[position]"}
+                value={option_form.index + 1}
+              />
+              <div class="flex-1">
+                <.input
+                  field={option_form[:label]}
+                  id={"#{@input_prefix}-option-#{option_form.index}"}
+                  type="text"
+                  label={"Option #{option_form.index + 1}"}
+                />
+              </div>
+              <button
+                :if={
+                  length(@form.impl.to_form(@form.source, @form, :practice_question_options, [])) > 2
+                }
+                type="button"
+                phx-click="remove_practice_option"
+                phx-value-id={if @question, do: @question.id, else: "new"}
+                phx-value-index={option_form.index}
+                tabindex="-1"
+                class="mt-8 p-2 text-muted hover:text-red-500 rounded-lg hover:bg-neutral-50 transition shrink-0"
+                title="Remove option"
+              >
+                <.icon name="hero-trash" class="h-4 w-4" />
+              </button>
+            </div>
+          </.inputs_for>
+          <div
+            :if={length(@form.impl.to_form(@form.source, @form, :practice_question_options, [])) < 4}
+            class="pt-1"
+          >
+            <button
+              type="button"
+              phx-click="add_practice_option"
+              phx-value-id={if @question, do: @question.id, else: "new"}
+              class="inline-flex items-center gap-1.5 rounded-full border border-black/10 px-3 py-1.5 text-xs font-semibold text-dark transition hover:bg-neutral-50 hover:text-primary active:scale-[0.96]"
+            >
+              <.icon name="hero-plus-circle" class="h-4 w-4" /> Add option
+            </button>
+          </div>
+          <.error :for={err <- @form[:practice_question_options].errors}>
+            {translate_error(err)}
+          </.error>
+        </div>
+      </fieldset>
+
+      <div class="flex items-center gap-4">
+        <button
+          type="submit"
+          disabled={@question && !@dirty}
+          class="rounded-full bg-dark px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-primary active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {if @question, do: "Save question", else: "Add question"}
+        </button>
+        <button
+          :if={is_nil(@question)}
+          type="button"
+          phx-click="cancel_new_practice_question"
+          class="text-sm font-medium text-muted hover:text-dark transition active:scale-[0.96]"
+        >
+          Cancel
+        </button>
+      </div>
+    </.form>
+    """
+  end
 end

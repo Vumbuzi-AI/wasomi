@@ -116,6 +116,7 @@ defmodule Wasomi.Assessments.QuestionGenerator.OpenAI do
     #{difficulty_instruction(difficulty)}
     - Never invent facts not present in the document, and never write a
       question that can be answered from general knowledge alone.
+    - STRICT REQUIREMENT: Never write meta-questions about the text formatting, headings, lecture titles, line numbers, or document structure (e.g. NEVER ask "Which title appears at the top of the document?", "What is lecture 1 titled?", or "Which phrase appears in lecture 2?"). Write questions ONLY about actual subject-matter concepts, definitions, principles, techniques, and domain knowledge.
     #{seed_questions_instruction(avoid_duplicating)}
     Question format:
     - Most questions should be multiple-choice with exactly four options,

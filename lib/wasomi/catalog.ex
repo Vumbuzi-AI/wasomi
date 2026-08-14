@@ -11,6 +11,7 @@ defmodule Wasomi.Catalog do
     CourseModule,
     Lecture,
     LectureQuestion,
+    LectureQuestionSubmission,
     LectureResource,
     LectureTranscript,
     PublishGuard
@@ -897,5 +898,78 @@ defmodule Wasomi.Catalog do
         |> Repo.update_all(set: [position: position, updated_at: now])
       end)
     end)
+  end
+
+  ## Lecture question submissions
+
+  @doc """
+  Scores a learner's free-text answer against the admin-authored model answer
+  for a LectureQuestion using the configured scorer, then persists the result.
+
+  Returns `{:ok, %LectureQuestionSubmission{}}` on success, or
+  `{:error, reason}` if the scorer call fails, or `{:error, changeset}` if
+  the insert fails validation.
+  """
+  def submit_lecture_question_answer(
+        %Wasomi.Accounts.User{} = user,
+        %LectureQuestion{} = question,
+        answer_text
+      )
+      when is_binary(answer_text) do
+    with {:ok, score} <-
+           lecture_question_scorer().score(question.question, question.answer, answer_text) do
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      %LectureQuestionSubmission{}
+      |> LectureQuestionSubmission.changeset(%{
+        user_id: user.id,
+        lecture_question_id: question.id,
+        answer_text: answer_text,
+        similarity_score: score,
+        scored_at: now
+      })
+      |> Repo.insert()
+    end
+  end
+
+  @doc """
+  Returns the most recent submission by `user` for `question`, or `nil` if
+  the learner has not yet answered it.
+  """
+  def get_latest_lecture_question_submission(
+        %Wasomi.Accounts.User{} = user,
+        %LectureQuestion{} = question
+      ) do
+    LectureQuestionSubmission
+    |> where(
+      [s],
+      s.user_id == ^user.id and s.lecture_question_id == ^question.id
+    )
+    |> order_by([s], desc: s.scored_at, desc: s.id)
+    |> limit(1)
+    |> Repo.one()
+  end
+
+  @doc """
+  Returns all submissions by `user` for every LectureQuestion belonging to
+  `lecture`, ordered most-recent first. Keyed by `lecture_question_id` so
+  the caller can do a single O(1) lookup per question.
+  """
+  def map_lecture_question_submissions(%Wasomi.Accounts.User{} = user, %Lecture{} = lecture) do
+    LectureQuestionSubmission
+    |> join(:inner, [s], q in LectureQuestion, on: q.id == s.lecture_question_id)
+    |> where([s, q], s.user_id == ^user.id and q.lecture_id == ^lecture.id)
+    |> order_by([s, _q], desc: s.scored_at, desc: s.id)
+    |> Repo.all()
+    |> Enum.uniq_by(& &1.lecture_question_id)
+    |> Map.new(&{&1.lecture_question_id, &1})
+  end
+
+  defp lecture_question_scorer do
+    Application.get_env(
+      :wasomi,
+      :lecture_question_scorer,
+      Wasomi.Catalog.LectureQuestionScorer.OpenAI
+    )
   end
 end

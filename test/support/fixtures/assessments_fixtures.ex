@@ -139,4 +139,34 @@ defmodule Wasomi.AssessmentsFixtures do
 
     generation
   end
+
+  @doc """
+  Generate a practice question with a valid, single-correct-option set, defaulting to
+  a freshly created course module when none is given.
+  """
+  def practice_question_fixture(attrs \\ %{}) do
+    attrs = Map.new(attrs)
+
+    module =
+      Map.get_lazy(attrs, :module, fn -> Wasomi.CatalogFixtures.course_module_fixture() end)
+
+    {:ok, question} =
+      attrs
+      |> Map.delete(:module)
+      |> Enum.into(%{
+        prompt: "What is 2 + 2? (#{System.unique_integer([:positive])})",
+        explanation: "Two pairs make four.",
+        status: :published,
+        position: 1,
+        practice_question_options: [
+          %{label: "Option A", correct: true, position: 1},
+          %{label: "Option B", correct: false, position: 2},
+          %{label: "Option C", correct: false, position: 3},
+          %{label: "Option D", correct: false, position: 4}
+        ]
+      })
+      |> then(&Assessments.create_practice_question(module, &1))
+
+    question
+  end
 end

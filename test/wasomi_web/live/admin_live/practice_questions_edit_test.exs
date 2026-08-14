@@ -105,6 +105,8 @@ defmodule WasomiWeb.AdminLive.PracticeQuestionsEditTest do
 
     view |> element("button", "Generate with AI") |> render_click()
 
+    _html = render_async(view)
+
     assert has_element?(view, "p", "Generated AI Question?")
     assert length(Assessments.list_all_practice_questions(module)) == 1
   end

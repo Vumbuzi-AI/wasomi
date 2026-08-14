@@ -392,22 +392,55 @@ defmodule WasomiWeb.AdminLive.PracticeQuestionsEdit do
 
   @impl true
   def handle_event("generate_ai_practice_questions", _params, socket) do
-    socket = assign(socket, :generating_ai?, true)
+    if socket.assigns.generating_ai? do
+      {:noreply, socket}
+    else
+      module = socket.assigns.module
 
-    case Assessments.generate_practice_questions_for_module(socket.assigns.module, count: 5) do
-      {:ok, questions} ->
-        {:noreply,
-         socket
-         |> assign(:generating_ai?, false)
-         |> put_flash(:info, "Generated #{length(questions)} AI practice questions!")
-         |> reload_questions()}
-
-      {:error, _reason} ->
-        {:noreply,
-         socket
-         |> assign(:generating_ai?, false)
-         |> put_flash(:error, "Could not generate practice questions at this time.")}
+      {:noreply,
+       socket
+       |> assign(:generating_ai?, true)
+       |> start_async({:generate_ai_practice_questions, module.id}, fn ->
+         Assessments.generate_practice_questions_for_module(module, count: 5)
+       end)}
     end
+  end
+
+  @impl true
+  def handle_async(
+        {:generate_ai_practice_questions, _module_id},
+        {:ok, {:ok, questions}},
+        socket
+      ) do
+    {:noreply,
+     socket
+     |> assign(:generating_ai?, false)
+     |> put_flash(:info, "Generated #{length(questions)} AI practice questions!")
+     |> reload_questions()}
+  end
+
+  @impl true
+  def handle_async(
+        {:generate_ai_practice_questions, _module_id},
+        {:ok, {:error, _reason}},
+        socket
+      ) do
+    {:noreply,
+     socket
+     |> assign(:generating_ai?, false)
+     |> put_flash(:error, "Could not generate practice questions at this time.")}
+  end
+
+  @impl true
+  def handle_async(
+        {:generate_ai_practice_questions, _module_id},
+        {:exit, _reason},
+        socket
+      ) do
+    {:noreply,
+     socket
+     |> assign(:generating_ai?, false)
+     |> put_flash(:error, "Practice question generation timed out.")}
   end
 
   defp reload_questions(socket) do

@@ -460,6 +460,9 @@ defmodule WasomiWeb.AdminLive.PracticeQuestionsEdit do
   defp correct_option_id(full_params, prefix),
     do: get_in(full_params, [prefix, "correct_option_id"])
 
+  defp apply_correct_option(params, nil), do: params
+  defp apply_correct_option(params, ""), do: params
+
   defp apply_correct_option(params, correct_option_id) do
     correct_index = to_string(correct_option_id)
 

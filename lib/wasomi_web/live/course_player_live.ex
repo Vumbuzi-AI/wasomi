@@ -345,7 +345,7 @@ defmodule WasomiWeb.CoursePlayerLive do
       {:noreply,
        socket
        |> assign(:generating_practice?, true)
-       |> start_async(:generate_practice_questions, fn ->
+       |> start_async({:generate_practice_questions, module.id}, fn ->
          Assessments.generate_practice_questions_for_module(module, count: 5)
        end)}
     else
@@ -504,29 +504,42 @@ defmodule WasomiWeb.CoursePlayerLive do
   end
 
   @impl true
-  def handle_async(:generate_practice_questions, {:ok, {:ok, new_questions}}, socket) do
+  def handle_async(
+        {:generate_practice_questions, module_id},
+        {:ok, {:ok, new_questions}},
+        socket
+      ) do
     course_id = socket.assigns.course.id
     practice_by_module = Assessments.published_practice_questions_by_module(course_id)
 
-    module =
+    current_module_id =
       if socket.assigns.current_practice_module do
-        socket.assigns.current_practice_module.module
-      else
-        List.first(socket.assigns.course.modules)
+        socket.assigns.current_practice_module.module.id
       end
 
-    questions = Map.get(practice_by_module, module.id, new_questions)
+    socket =
+      socket
+      |> assign(:generating_practice?, false)
+      |> assign(:practice_by_module, practice_by_module)
 
-    {:noreply,
-     socket
-     |> assign(:generating_practice?, false)
-     |> assign(:practice_by_module, practice_by_module)
-     |> assign(:current_practice_module, %{module: module, questions: questions})
-     |> put_flash(:info, "Generated #{length(new_questions)} practice questions!")}
+    socket =
+      if current_module_id == module_id do
+        module = socket.assigns.current_practice_module.module
+        questions = Map.get(practice_by_module, module_id, new_questions)
+        assign(socket, :current_practice_module, %{module: module, questions: questions})
+      else
+        socket
+      end
+
+    {:noreply, put_flash(socket, :info, "Generated #{length(new_questions)} practice questions!")}
   end
 
   @impl true
-  def handle_async(:generate_practice_questions, {:ok, {:error, _reason}}, socket) do
+  def handle_async(
+        {:generate_practice_questions, _module_id},
+        {:ok, {:error, _reason}},
+        socket
+      ) do
     {:noreply,
      socket
      |> assign(:generating_practice?, false)
@@ -534,7 +547,7 @@ defmodule WasomiWeb.CoursePlayerLive do
   end
 
   @impl true
-  def handle_async(:generate_practice_questions, {:exit, _reason}, socket) do
+  def handle_async({:generate_practice_questions, _module_id}, {:exit, _reason}, socket) do
     {:noreply,
      socket
      |> assign(:generating_practice?, false)

@@ -3,7 +3,7 @@ defmodule Wasomi.AssessmentsTest do
   use Oban.Testing, repo: Wasomi.Repo
 
   alias Wasomi.Assessments
-  alias Wasomi.Assessments.{Question, QuestionOption}
+  alias Wasomi.Assessments.{FlashcardSet, PracticeSet, Question, QuestionOption}
   alias Wasomi.Repo
 
   import Wasomi.AssessmentsFixtures
@@ -1177,6 +1177,245 @@ defmodule Wasomi.AssessmentsTest do
 
       assert changeset.valid?
       assert Ecto.Changeset.get_field(changeset, :correct) == false
+    end
+  end
+
+  describe "flashcards" do
+    test "get_or_create_flashcard_set/1 creates a pending set, then returns the same row" do
+      module = course_module_fixture()
+
+      assert {:ok, set} = Assessments.get_or_create_flashcard_set(module)
+      assert set.module_id == module.id
+      assert set.status == :pending
+
+      assert {:ok, ^set} = Assessments.get_or_create_flashcard_set(module)
+    end
+
+    test "get_or_create_flashcard_set/1 also scopes to a single lecture" do
+      lecture = lecture_fixture()
+
+      assert {:ok, set} = Assessments.get_or_create_flashcard_set(lecture)
+      assert set.lecture_id == lecture.id
+      assert set.module_id == nil
+      assert set.status == :pending
+
+      assert {:ok, ^set} = Assessments.get_or_create_flashcard_set(lecture)
+    end
+
+    test "mark_flashcard_set_processing/1 and mark_flashcard_set_failed/2 update status and broadcast" do
+      module = course_module_fixture()
+      set = flashcard_set_fixture(module: module)
+      Assessments.subscribe_to_flashcard_set(module)
+
+      processing = Assessments.mark_flashcard_set_processing(set)
+      assert processing.status == :processing
+      assert_receive {:flashcard_set_updated, %{status: :processing}}
+
+      failed = Assessments.mark_flashcard_set_failed(set, "boom")
+      assert failed.status == :failed
+      assert failed.error_message == "boom"
+      assert_receive {:flashcard_set_updated, %{status: :failed}}
+    end
+
+    test "subscribe_to_flashcard_set/1 also works for a lecture scope" do
+      lecture = lecture_fixture()
+      set = flashcard_set_fixture(lecture: lecture)
+      Assessments.subscribe_to_flashcard_set(lecture)
+
+      Assessments.mark_flashcard_set_processing(set)
+      assert_receive {:flashcard_set_updated, %{status: :processing}}
+    end
+
+    test "mark_flashcard_set_ready/2 inserts cards, skips invalid ones, and marks the set ready" do
+      module = course_module_fixture()
+      set = flashcard_set_fixture(module: module)
+      Assessments.subscribe_to_flashcard_set(module)
+
+      assert {:ok, 2} =
+               Assessments.mark_flashcard_set_ready(set, [
+                 draft_flashcard_attrs(%{front: "Front A", back: "Back A"}),
+                 %{front: "", back: ""},
+                 draft_flashcard_attrs(%{front: "Front B", back: "Back B"})
+               ])
+
+      updated = Assessments.get_flashcard_set!(set.id)
+      assert updated.status == :ready
+      assert updated.cards_generated_count == 2
+      assert length(Assessments.list_flashcards(updated)) == 2
+      assert_receive {:flashcard_set_updated, %{status: :ready}}
+    end
+
+    test "mark_flashcard_set_ready/2 errors when every card is invalid" do
+      set = flashcard_set_fixture()
+
+      assert {:error, :no_valid_flashcards_generated} =
+               Assessments.mark_flashcard_set_ready(set, [%{front: "", back: ""}])
+
+      assert Assessments.get_flashcard_set!(set.id).status == :pending
+    end
+
+    test "list_flashcards_with_progress/2 pairs each card with the user's own progress" do
+      set = flashcard_set_fixture()
+
+      {:ok, 2} =
+        Assessments.mark_flashcard_set_ready(set, [
+          draft_flashcard_attrs(%{front: "Card 1"}),
+          draft_flashcard_attrs(%{front: "Card 2"})
+        ])
+
+      [card1, card2] = Assessments.list_flashcards(set)
+      user = user_fixture()
+
+      {:ok, _} = Assessments.record_flashcard_progress(user, card1, :known)
+
+      results = Assessments.list_flashcards_with_progress(set, user)
+      assert {^card1, %{status: :known}} = Enum.find(results, fn {c, _} -> c.id == card1.id end)
+      assert {^card2, nil} = Enum.find(results, fn {c, _} -> c.id == card2.id end)
+    end
+
+    test "record_flashcard_progress/3 upserts on repeat calls for the same user and card" do
+      card = flashcard_fixture()
+      user = user_fixture()
+
+      assert {:ok, progress} = Assessments.record_flashcard_progress(user, card, :review_again)
+      assert progress.status == :review_again
+
+      assert {:ok, updated} = Assessments.record_flashcard_progress(user, card, :known)
+      assert updated.id == progress.id
+      assert updated.status == :known
+    end
+
+    test "the changeset requires exactly one of module_id or lecture_id" do
+      neither =
+        FlashcardSet.changeset(%FlashcardSet{}, %{
+          status: :pending
+        })
+
+      refute neither.valid?
+      assert %{module_id: ["must set either a module or a lecture"]} = errors_on(neither)
+
+      module = course_module_fixture()
+      lecture = lecture_fixture()
+
+      both =
+        FlashcardSet.changeset(%FlashcardSet{}, %{
+          status: :pending,
+          module_id: module.id,
+          lecture_id: lecture.id
+        })
+
+      refute both.valid?
+      assert %{lecture_id: ["cannot be set together with a module"]} = errors_on(both)
+    end
+  end
+
+  describe "practice questions" do
+    test "get_or_create_practice_set/1 creates a pending quiz, then returns the same row" do
+      module = course_module_fixture()
+
+      assert {:ok, quiz} = Assessments.get_or_create_practice_set(module)
+      assert quiz.module_id == module.id
+      assert quiz.status == :pending
+
+      assert {:ok, ^quiz} = Assessments.get_or_create_practice_set(module)
+    end
+
+    test "get_or_create_practice_set/1 also scopes to a single lecture" do
+      lecture = lecture_fixture()
+
+      assert {:ok, quiz} = Assessments.get_or_create_practice_set(lecture)
+      assert quiz.lecture_id == lecture.id
+      assert quiz.module_id == nil
+      assert quiz.status == :pending
+
+      assert {:ok, ^quiz} = Assessments.get_or_create_practice_set(lecture)
+    end
+
+    test "mark_practice_set_processing/1 and mark_practice_set_failed/2 update status and broadcast" do
+      module = course_module_fixture()
+      quiz = practice_set_fixture(module: module)
+      Assessments.subscribe_to_practice_set(module)
+
+      processing = Assessments.mark_practice_set_processing(quiz)
+      assert processing.status == :processing
+      assert_receive {:practice_set_updated, %{status: :processing}}
+
+      failed = Assessments.mark_practice_set_failed(quiz, "boom")
+      assert failed.status == :failed
+      assert_receive {:practice_set_updated, %{status: :failed}}
+    end
+
+    test "subscribe_to_practice_set/1 also works for a lecture scope" do
+      lecture = lecture_fixture()
+      quiz = practice_set_fixture(lecture: lecture)
+      Assessments.subscribe_to_practice_set(lecture)
+
+      Assessments.mark_practice_set_processing(quiz)
+      assert_receive {:practice_set_updated, %{status: :processing}}
+    end
+
+    test "mark_practice_set_ready/2 inserts questions with options and marks the quiz ready" do
+      module = course_module_fixture()
+      quiz = practice_set_fixture(module: module)
+      Assessments.subscribe_to_practice_set(module)
+
+      assert {:ok, 1} =
+               Assessments.mark_practice_set_ready(quiz, [
+                 draft_question_attrs(%{prompt: "What is 2 + 2?"})
+               ])
+
+      updated = Assessments.get_practice_set!(quiz.id)
+      assert updated.status == :ready
+      assert updated.questions_generated_count == 1
+      assert [question] = Assessments.list_practice_set_questions(updated)
+      assert question.prompt == "What is 2 + 2?"
+      assert length(question.practice_set_question_options) == 4
+      assert_receive {:practice_set_updated, %{status: :ready}}
+    end
+
+    test "practice_answer_correct?/2 identifies the correct option" do
+      question = practice_set_question_fixture()
+      correct = Enum.find(question.practice_set_question_options, & &1.correct)
+      wrong = Enum.find(question.practice_set_question_options, &(!&1.correct))
+
+      assert Assessments.practice_answer_correct?(question, correct.id)
+      refute Assessments.practice_answer_correct?(question, wrong.id)
+    end
+
+    test "record_practice_answer/3 upserts and practice_progress_by_question/2 reads it back" do
+      question = practice_set_question_fixture()
+      quiz = Assessments.get_practice_set!(question.practice_set_id)
+      user = user_fixture()
+
+      assert {:ok, _} = Assessments.record_practice_answer(user, question, false)
+      assert {:ok, progress} = Assessments.record_practice_answer(user, question, true)
+      assert progress.last_correct
+
+      by_question = Assessments.practice_progress_by_question(quiz, user)
+      assert %{last_correct: true} = Map.fetch!(by_question, question.id)
+    end
+
+    test "the changeset requires exactly one of module_id or lecture_id" do
+      neither =
+        PracticeSet.changeset(%PracticeSet{}, %{
+          status: :pending
+        })
+
+      refute neither.valid?
+      assert %{module_id: ["must set either a module or a lecture"]} = errors_on(neither)
+
+      module = course_module_fixture()
+      lecture = lecture_fixture()
+
+      both =
+        PracticeSet.changeset(%PracticeSet{}, %{
+          status: :pending,
+          module_id: module.id,
+          lecture_id: lecture.id
+        })
+
+      refute both.valid?
+      assert %{lecture_id: ["cannot be set together with a module"]} = errors_on(both)
     end
   end
 end

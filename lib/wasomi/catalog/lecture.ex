@@ -12,6 +12,8 @@ defmodule Wasomi.Catalog.Lecture do
     belongs_to :module, Wasomi.Catalog.CourseModule
     has_many :resources, Wasomi.Catalog.LectureResource
     has_many :questions, Wasomi.Catalog.LectureQuestion
+    has_one :flashcard_set, Wasomi.Assessments.FlashcardSet, foreign_key: :lecture_id
+    has_one :practice_set, Wasomi.Assessments.PracticeSet, foreign_key: :lecture_id
 
     timestamps(type: :utc_datetime)
   end

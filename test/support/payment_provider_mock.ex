@@ -16,3 +16,4 @@ Mox.defmock(Wasomi.OverviewImageGeneratorMock, for: Wasomi.Catalog.OverviewImage
 Mox.defmock(Wasomi.SlideRendererMock, for: Wasomi.Catalog.SlideRenderer)
 Mox.defmock(Wasomi.VideoAssemblerMock, for: Wasomi.Catalog.VideoAssembler)
 Mox.defmock(Wasomi.LinkTextFetcherMock, for: Wasomi.Catalog.LinkTextFetcher)
+Mox.defmock(Wasomi.FlashcardGeneratorMock, for: Wasomi.Assessments.FlashcardGenerator)

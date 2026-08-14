@@ -19,12 +19,19 @@ defmodule Wasomi.Assessments do
   alias Wasomi.Accounts.User
 
   alias Wasomi.Assessments.{
+    Flashcard,
+    FlashcardProgress,
+    FlashcardSet,
     LectureQuiz,
     LectureQuizGeneration,
     LectureQuizQuestion,
     LectureQuizSubmission,
     PracticeQuestion,
     PracticeQuestionOption,
+    PracticeSet,
+    PracticeSetQuestion,
+    PracticeSetQuestionOption,
+    PracticeSetQuestionProgress,
     Question,
     Quiz,
     QuizGeneration,
@@ -1287,4 +1294,367 @@ defmodule Wasomi.Assessments do
       "Subject Matter Domain: #{module_title}\n\nOverview:\n#{module_desc}\n\nStudy Material:\n#{lecture_texts}"
     end
   end
+  ## Flashcards
+  #
+  # Self-study content: there's no admin authoring step, so (unlike
+  # `Quiz`/`QuizGeneration`) generation status lives directly on the set
+  # itself rather than a separate generation record, and a set is visible
+  # to learners the moment it's `:ready` — every card in it is already
+  # "published" by definition.
+
+  @doc """
+  Gets or creates the flashcard set for a module or a single lecture.
+  Learner-triggered generation always needs a row to flip to `:processing`,
+  and — unlike the admin-driven quiz flow — multiple learners can open the
+  same scope's Flashcards section at once, so a losing concurrent insert
+  falls back to re-fetching the winner's row instead of erroring.
+  """
+  def get_or_create_flashcard_set(%CourseModule{id: module_id}),
+    do: do_get_or_create_flashcard_set(module_id: module_id)
+
+  def get_or_create_flashcard_set(%Lecture{id: lecture_id}),
+    do: do_get_or_create_flashcard_set(lecture_id: lecture_id)
+
+  defp do_get_or_create_flashcard_set(scope) do
+    case Repo.get_by(FlashcardSet, scope) do
+      nil ->
+        %FlashcardSet{}
+        |> FlashcardSet.changeset(Enum.into(scope, %{status: :pending}))
+        |> Repo.insert()
+        |> case do
+          {:ok, set} -> {:ok, set}
+          {:error, _changeset} -> {:ok, Repo.get_by!(FlashcardSet, scope)}
+        end
+
+      set ->
+        {:ok, set}
+    end
+  end
+
+  def get_flashcard_set!(id), do: Repo.get!(FlashcardSet, id)
+
+  @doc """
+  Subscribes the caller to status updates for this module's or lecture's
+  flashcard set, so an open LiveView can react to generation finishing
+  without polling.
+  """
+  def subscribe_to_flashcard_set(%CourseModule{} = module),
+    do: Phoenix.PubSub.subscribe(Wasomi.PubSub, flashcard_set_topic(module))
+
+  def subscribe_to_flashcard_set(%Lecture{} = lecture),
+    do: Phoenix.PubSub.subscribe(Wasomi.PubSub, flashcard_set_topic(lecture))
+
+  def mark_flashcard_set_processing(%FlashcardSet{} = set) do
+    {:ok, updated} = update_flashcard_set(set, %{status: :processing})
+    broadcast_flashcard_set(updated)
+    updated
+  end
+
+  def mark_flashcard_set_failed(%FlashcardSet{} = set, error_message) do
+    {:ok, updated} =
+      update_flashcard_set(set, %{status: :failed, error_message: error_message})
+
+    broadcast_flashcard_set(updated)
+    updated
+  end
+
+  @doc """
+  Inserts one flashcard per generated item and marks the set `:ready` —
+  same "skip malformed items, only fail the batch if none landed" behavior
+  as `create_draft_questions_and_mark_ready/2`.
+  """
+  def mark_flashcard_set_ready(%FlashcardSet{} = set, cards) when is_list(cards) do
+    {created, _next_position} =
+      Enum.reduce(cards, {[], 1}, fn card, {acc, position} ->
+        case create_flashcard(set, Map.put(card, :position, position)) do
+          {:ok, flashcard} -> {[flashcard | acc], position + 1}
+          {:error, _changeset} -> {acc, position}
+        end
+      end)
+
+    created = Enum.reverse(created)
+
+    if created == [] do
+      {:error, :no_valid_flashcards_generated}
+    else
+      {:ok, updated} =
+        update_flashcard_set(set, %{
+          status: :ready,
+          cards_generated_count: length(created),
+          generated_at: DateTime.utc_now() |> DateTime.truncate(:second)
+        })
+
+      broadcast_flashcard_set(updated)
+      {:ok, length(created)}
+    end
+  end
+
+  defp create_flashcard(%FlashcardSet{id: flashcard_set_id}, attrs) do
+    %Flashcard{}
+    |> Flashcard.changeset(Map.put(attrs, :flashcard_set_id, flashcard_set_id))
+    |> Repo.insert()
+  end
+
+  def list_flashcards(%FlashcardSet{id: flashcard_set_id}) do
+    Flashcard
+    |> where([f], f.flashcard_set_id == ^flashcard_set_id)
+    |> order_by([f], asc: f.position)
+    |> Repo.all()
+  end
+
+  @doc """
+  Every flashcard in a set with that user's own progress preloaded (`nil`
+  for a card they haven't reviewed yet), so the review UI can render
+  known/review-again state and a "N known of M" count without an N+1
+  lookup per card.
+  """
+  def list_flashcards_with_progress(%FlashcardSet{id: flashcard_set_id}, %User{id: user_id}) do
+    progress_by_flashcard_id =
+      FlashcardProgress
+      |> where([p], p.user_id == ^user_id)
+      |> Repo.all()
+      |> Map.new(&{&1.flashcard_id, &1})
+
+    %FlashcardSet{id: flashcard_set_id}
+    |> list_flashcards()
+    |> Enum.map(fn flashcard -> {flashcard, Map.get(progress_by_flashcard_id, flashcard.id)} end)
+  end
+
+  @doc """
+  Records (or updates) a learner's known/review-again call on a flashcard.
+  """
+  def record_flashcard_progress(%User{id: user_id}, %Flashcard{id: flashcard_id}, status)
+      when status in [:known, :review_again] do
+    %FlashcardProgress{}
+    |> FlashcardProgress.changeset(%{
+      flashcard_id: flashcard_id,
+      user_id: user_id,
+      status: status,
+      reviewed_at: DateTime.utc_now() |> DateTime.truncate(:second)
+    })
+    |> Repo.insert(
+      on_conflict: {:replace, [:status, :reviewed_at, :updated_at]},
+      conflict_target: [:flashcard_id, :user_id],
+      returning: true
+    )
+  end
+
+  defp update_flashcard_set(%FlashcardSet{} = set, attrs) do
+    set
+    |> FlashcardSet.changeset(attrs)
+    |> Repo.update()
+  end
+
+  defp broadcast_flashcard_set(%FlashcardSet{} = set) do
+    Phoenix.PubSub.broadcast(
+      Wasomi.PubSub,
+      flashcard_set_topic(set),
+      {:flashcard_set_updated, set}
+    )
+  end
+
+  defp flashcard_set_topic(%CourseModule{id: id}), do: "flashcard_set:module:#{id}"
+  defp flashcard_set_topic(%Lecture{id: id}), do: "flashcard_set:lecture:#{id}"
+
+  defp flashcard_set_topic(%FlashcardSet{module_id: id}) when not is_nil(id),
+    do: "flashcard_set:module:#{id}"
+
+  defp flashcard_set_topic(%FlashcardSet{lecture_id: id}) when not is_nil(id),
+    do: "flashcard_set:lecture:#{id}"
+
+  ## Practice questions
+  #
+  # "Extra practice" — self-study, per-module, same set-level-status/no-draft
+  # shape as Flashcards above, but reuses the existing
+  # `Wasomi.Assessments.QuestionGenerator` behaviour (same prompt/options
+  # shape as quiz generation) rather than needing a generator of its own.
+
+  @doc """
+  Gets or creates the practice set for a module or a single lecture.
+  Mirrors `get_or_create_flashcard_set/1`, including the same
+  concurrent-learner fallback.
+  """
+  def get_or_create_practice_set(%CourseModule{id: module_id}),
+    do: do_get_or_create_practice_set(module_id: module_id)
+
+  def get_or_create_practice_set(%Lecture{id: lecture_id}),
+    do: do_get_or_create_practice_set(lecture_id: lecture_id)
+
+  defp do_get_or_create_practice_set(scope) do
+    case Repo.get_by(PracticeSet, scope) do
+      nil ->
+        %PracticeSet{}
+        |> PracticeSet.changeset(Enum.into(scope, %{status: :pending}))
+        |> Repo.insert()
+        |> case do
+          {:ok, quiz} -> {:ok, quiz}
+          {:error, _changeset} -> {:ok, Repo.get_by!(PracticeSet, scope)}
+        end
+
+      quiz ->
+        {:ok, quiz}
+    end
+  end
+
+  def get_practice_set!(id), do: Repo.get!(PracticeSet, id)
+
+  @doc """
+  Subscribes the caller to status updates for this module's or lecture's
+  practice set, so an open LiveView can react to generation finishing
+  without polling.
+  """
+  def subscribe_to_practice_set(%CourseModule{} = module),
+    do: Phoenix.PubSub.subscribe(Wasomi.PubSub, practice_set_topic(module))
+
+  def subscribe_to_practice_set(%Lecture{} = lecture),
+    do: Phoenix.PubSub.subscribe(Wasomi.PubSub, practice_set_topic(lecture))
+
+  def mark_practice_set_processing(%PracticeSet{} = quiz) do
+    {:ok, updated} = update_practice_set(quiz, %{status: :processing})
+    broadcast_practice_set(updated)
+    updated
+  end
+
+  def mark_practice_set_failed(%PracticeSet{} = quiz, error_message) do
+    {:ok, updated} =
+      update_practice_set(quiz, %{status: :failed, error_message: error_message})
+
+    broadcast_practice_set(updated)
+    updated
+  end
+
+  @doc """
+  Inserts one practice question (with options) per generated item and
+  marks the quiz `:ready` — same "skip malformed items, only fail the
+  batch if none landed" behavior as `create_draft_questions_and_mark_ready/2`.
+  """
+  def mark_practice_set_ready(%PracticeSet{} = quiz, drafts) when is_list(drafts) do
+    {created, _next_position} =
+      Enum.reduce(drafts, {[], 1}, fn draft, {acc, position} ->
+        case create_practice_set_question(quiz, practice_set_question_attrs(draft, position)) do
+          {:ok, question} -> {[question | acc], position + 1}
+          {:error, _changeset} -> {acc, position}
+        end
+      end)
+
+    created = Enum.reverse(created)
+
+    if created == [] do
+      {:error, :no_valid_questions_generated}
+    else
+      {:ok, updated} =
+        update_practice_set(quiz, %{
+          status: :ready,
+          questions_generated_count: length(created),
+          generated_at: DateTime.utc_now() |> DateTime.truncate(:second)
+        })
+
+      broadcast_practice_set(updated)
+      {:ok, length(created)}
+    end
+  end
+
+  defp create_practice_set_question(%PracticeSet{id: practice_set_id}, attrs) do
+    %PracticeSetQuestion{}
+    |> PracticeSetQuestion.changeset(Map.put(attrs, :practice_set_id, practice_set_id))
+    |> Repo.insert()
+  end
+
+  defp practice_set_question_attrs(%{prompt: prompt, options: options} = draft, position) do
+    %{
+      prompt: prompt,
+      explanation: Map.get(draft, :explanation),
+      position: position,
+      practice_set_question_options:
+        options
+        |> Enum.with_index(1)
+        |> Enum.map(fn {option, idx} ->
+          %{label: option.label, correct: option.correct, position: idx}
+        end)
+    }
+  end
+
+  def list_practice_set_questions(%PracticeSet{id: practice_set_id}) do
+    options_query =
+      from(option in PracticeSetQuestionOption, order_by: [asc: option.position])
+
+    PracticeSetQuestion
+    |> where([q], q.practice_set_id == ^practice_set_id)
+    |> order_by([q], asc: q.position)
+    |> preload(practice_set_question_options: ^options_query)
+    |> Repo.all()
+  end
+
+  @doc """
+  Whether the given option id is the correct answer for a practice
+  question, for the self-check UI's immediate right/wrong feedback.
+  """
+  def practice_answer_correct?(
+        %PracticeSetQuestion{practice_set_question_options: options},
+        option_id
+      ) do
+    Enum.any?(options, &(to_string(&1.id) == to_string(option_id) and &1.correct))
+  end
+
+  @doc """
+  Records (or updates) a learner's most recent answer to a practice
+  question. There's no scored submission here — just a running
+  right/wrong log the "X of Y correct" counter reads from.
+  """
+  def record_practice_answer(
+        %User{id: user_id},
+        %PracticeSetQuestion{id: practice_set_question_id},
+        last_correct
+      )
+      when is_boolean(last_correct) do
+    %PracticeSetQuestionProgress{}
+    |> PracticeSetQuestionProgress.changeset(%{
+      practice_set_question_id: practice_set_question_id,
+      user_id: user_id,
+      last_correct: last_correct,
+      answered_at: DateTime.utc_now() |> DateTime.truncate(:second)
+    })
+    |> Repo.insert(
+      on_conflict: {:replace, [:last_correct, :answered_at, :updated_at]},
+      conflict_target: [:practice_set_question_id, :user_id],
+      returning: true
+    )
+  end
+
+  @doc """
+  A user's practice-question progress for a quiz, keyed by `question_id`,
+  so the self-check UI can restore "X of Y correct" and per-question
+  right/wrong state on reload without an N+1 lookup per question.
+  """
+  def practice_progress_by_question(%PracticeSet{id: practice_set_id}, %User{id: user_id}) do
+    PracticeSetQuestionProgress
+    |> join(:inner, [p], q in PracticeSetQuestion, on: q.id == p.practice_set_question_id)
+    |> where([p, q], q.practice_set_id == ^practice_set_id and p.user_id == ^user_id)
+    |> select([p, q], {q.id, p})
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  defp update_practice_set(%PracticeSet{} = quiz, attrs) do
+    quiz
+    |> PracticeSet.changeset(attrs)
+    |> Repo.update()
+  end
+
+  defp broadcast_practice_set(%PracticeSet{} = quiz) do
+    Phoenix.PubSub.broadcast(
+      Wasomi.PubSub,
+      practice_set_topic(quiz),
+      {:practice_set_updated, quiz}
+    )
+  end
+
+  defp practice_set_topic(%CourseModule{id: id}), do: "practice_set:module:#{id}"
+  defp practice_set_topic(%Lecture{id: id}), do: "practice_set:lecture:#{id}"
+
+  defp practice_set_topic(%PracticeSet{module_id: id}) when not is_nil(id),
+    do: "practice_set:module:#{id}"
+
+  defp practice_set_topic(%PracticeSet{lecture_id: id}) when not is_nil(id),
+    do: "practice_set:lecture:#{id}"
 end

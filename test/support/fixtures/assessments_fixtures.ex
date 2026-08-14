@@ -169,4 +169,75 @@ defmodule Wasomi.AssessmentsFixtures do
 
     question
   end
+
+  @doc """
+  Generate a flashcard set, defaulting to a freshly created course module
+  when neither `:module` nor `:lecture` is given.
+  """
+  def flashcard_set_fixture(attrs \\ %{}) do
+    attrs = Map.new(attrs)
+    {:ok, set} = Assessments.get_or_create_flashcard_set(module_or_lecture_scope(attrs))
+    set
+  end
+
+  defp module_or_lecture_scope(%{lecture: lecture}), do: lecture
+
+  defp module_or_lecture_scope(attrs),
+    do: Map.get_lazy(attrs, :module, fn -> Wasomi.CatalogFixtures.course_module_fixture() end)
+
+  @doc """
+  Generate a valid draft flashcard map, in the shape returned by a
+  `Wasomi.Assessments.FlashcardGenerator` implementation.
+  """
+  def draft_flashcard_attrs(overrides \\ %{}) do
+    Map.merge(%{front: "What is the capital of France?", back: "Paris."}, overrides)
+  end
+
+  @doc """
+  Generate a flashcard, defaulting to a freshly created flashcard set when
+  none is given. Cards only exist via
+  `Assessments.mark_flashcard_set_ready/2` (there's no per-card create) so
+  this fixture goes through that path and reads the card back — pass
+  distinguishing `:front`/`:back` overrides when creating more than one
+  card against the same explicit `:flashcard_set`.
+  """
+  def flashcard_fixture(attrs \\ %{}) do
+    attrs = Map.new(attrs)
+    set = Map.get_lazy(attrs, :flashcard_set, fn -> flashcard_set_fixture() end)
+    overrides = Map.delete(attrs, :flashcard_set)
+
+    {:ok, _count} = Assessments.mark_flashcard_set_ready(set, [draft_flashcard_attrs(overrides)])
+
+    set
+    |> Assessments.list_flashcards()
+    |> List.last()
+  end
+
+  @doc """
+  Generate a practice set, defaulting to a freshly created course module
+  when neither `:module` nor `:lecture` is given.
+  """
+  def practice_set_fixture(attrs \\ %{}) do
+    attrs = Map.new(attrs)
+    {:ok, quiz} = Assessments.get_or_create_practice_set(module_or_lecture_scope(attrs))
+    quiz
+  end
+
+  @doc """
+  Generate a practice question, defaulting to a freshly created practice
+  quiz when none is given. Mirrors `flashcard_fixture/1`'s reasoning:
+  questions only exist via `Assessments.mark_practice_set_ready/2`, so
+  this fixture goes through that path and reads the question back.
+  """
+  def practice_set_question_fixture(attrs \\ %{}) do
+    attrs = Map.new(attrs)
+    quiz = Map.get_lazy(attrs, :practice_set, fn -> practice_set_fixture() end)
+    overrides = Map.delete(attrs, :practice_set)
+
+    {:ok, _count} = Assessments.mark_practice_set_ready(quiz, [draft_question_attrs(overrides)])
+
+    quiz
+    |> Assessments.list_practice_set_questions()
+    |> List.last()
+  end
 end

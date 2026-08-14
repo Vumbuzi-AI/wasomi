@@ -159,10 +159,6 @@ defmodule WasomiWeb.LectureLive.FormComponent do
     >
       <div>
         <h3 class="font-semibold text-ink">Lecture video</h3>
-        <p class="mt-1 text-sm text-muted">
-          The file uploads directly to Mux. Wasomi stores only the signed playback ID once
-          processing is complete.
-        </p>
       </div>
 
       <div
@@ -409,9 +405,8 @@ defmodule WasomiWeb.LectureLive.FormComponent do
       <div>
         <h3 class="font-semibold text-ink">AI video overview</h3>
         <p class="mt-1 text-sm text-muted">
-          Turns this lecture's saved document/link resources into a narrated video. Once
-          generated, you can review it below and use it as this lecture's actual video — a
-          lecture's video is either uploaded directly or generated this way, never both.
+          Generates a narrated video from this lecture's resources — an alternative to uploading
+          one directly.
         </p>
       </div>
 
@@ -668,8 +663,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
     ~H"""
     <form id="lecture-video-form" phx-target={@myself} phx-submit="save-video">
       <p class="mb-4 text-sm text-muted">
-        Optional — a lecture just needs a video or at least one resource, not necessarily both.
-        You'll get a chance to add resources next either way.
+        Optional — you can add resources instead on the next step.
       </p>
 
       <.video_section
@@ -719,9 +713,9 @@ defmodule WasomiWeb.LectureLive.FormComponent do
     >
       <p class="mb-4 text-sm text-muted">
         <%= if @video_ready do %>
-          Optional — add supporting documents or links, or continue with just the video.
+          Optional — add supporting documents or links.
         <% else %>
-          No video was added, so this lecture needs at least one resource — a document, or a link.
+          Add at least one document or link — no video was added.
         <% end %>
       </p>
 
@@ -764,9 +758,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
     ~H"""
     <div>
       <p class="mb-4 text-sm text-muted">
-        Optional — no video was added, so here's a chance to turn the resources you just saved
-        into a narrated video overview instead. You can always skip this and add a real video
-        later.
+        Optional — generate a video from your resources, or skip and add one later.
       </p>
 
       <.overview_generation_section
@@ -811,8 +803,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
       phx-submit="save-questions"
     >
       <p class="mb-4 text-sm text-muted">
-        Optional — answer common questions learners are likely to ask. You can skip this and add
-        it later from the lecture's edit page.
+        Optional — you can add these later from the edit page.
       </p>
 
       <.questions_section myself={@myself} question_rows={@question_rows} />
@@ -1616,7 +1607,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
 
       seconds < @generation_stuck_threshold_seconds ->
         "Generating… running for #{format_duration(seconds)}. Can take several minutes — " <>
-          "longer lectures with more scenes take longer."
+          "longer lectures with more resources take longer."
 
       true ->
         "Generating… running for #{format_duration(seconds)}. This is taking longer than " <>

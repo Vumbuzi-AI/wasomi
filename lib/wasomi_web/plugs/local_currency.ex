@@ -74,6 +74,8 @@ defmodule WasomiWeb.Plugs.LocalCurrency do
   end
 
   defp get_country_code(conn) do
+    default_country = Application.get_env(:wasomi, :default_country, "US")
+
     # Try Cloudflare header first
     case get_req_header(conn, "cf-ipcountry") do
       [country | _] when country not in ["XX", "T1"] ->
@@ -82,14 +84,14 @@ defmodule WasomiWeb.Plugs.LocalCurrency do
       _ ->
         case conn.remote_ip do
           nil ->
-            "KE"
+            default_country
 
           ip_tuple ->
             if private_ip?(ip_tuple) do
               # Default for local dev or internal networks
-              "KE"
+              default_country
             else
-              ip = ip_tuple |> :inet.ntoa() |> to_string()
+              ip = ip_tuple |> :inet.ntoa() |> to_string() |> URI.encode_www_form()
 
               # Fallback to IP Geolocation API using HTTPS
               case Req.get("https://get.geojs.io/v1/ip/country/#{ip}.json",
@@ -97,7 +99,7 @@ defmodule WasomiWeb.Plugs.LocalCurrency do
                      retry: false
                    ) do
                 {:ok, %{status: 200, body: %{"country" => code}}} -> code
-                _ -> "KE"
+                _ -> default_country
               end
             end
         end

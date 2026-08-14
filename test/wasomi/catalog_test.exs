@@ -136,6 +136,33 @@ defmodule Wasomi.CatalogTest do
       assert %Money{amount: 15_000_00, currency: :KES} = Catalog.price(course)
       assert Catalog.format_price(course) =~ "KES"
     end
+
+    test "format_price returns Free when is_free is true" do
+      free_course = course_fixture(is_free: true, price_minor: nil)
+      assert Catalog.format_price(free_course) == "Free"
+    end
+
+    test "create_course/1 and update_course/2 handle is_free boolean and null price_minor" do
+      {:ok, free_course} =
+        Catalog.create_course(%{
+          title: "Free Elixir Basics",
+          description: "Learn for free",
+          slug: "free-elixir-basics",
+          is_free: true,
+          price_minor: nil,
+          currency: "KES",
+          status: :draft,
+          position: 1,
+          thumbnail_key: "thumb.jpg"
+        })
+
+      assert free_course.is_free == true
+      assert free_course.price_minor == nil
+
+      {:ok, updated} = Catalog.update_course(free_course, %{is_free: false, price_minor: 5000})
+      assert updated.is_free == false
+      assert updated.price_minor == 5000
+    end
   end
 
   describe "modules" do
@@ -531,6 +558,14 @@ defmodule Wasomi.CatalogTest do
 
     test "PublishGuard.check/1 treats a free (zero-price) course as having its price set" do
       course = course_fixture(price_minor: 0, thumbnail_key: "cover.jpg")
+      course_module = course_module_fixture(course_id: course.id, position: 1)
+      lecture_fixture(module_id: course_module.id, position: 1, video_asset_id: "abc123")
+
+      assert PublishGuard.check(Catalog.get_course_with_outline!(course.id)) == :ok
+    end
+
+    test "PublishGuard.check/1 passes pricing stage when is_free is true and price_minor is nil" do
+      course = course_fixture(is_free: true, price_minor: nil, thumbnail_key: "cover.jpg")
       course_module = course_module_fixture(course_id: course.id, position: 1)
       lecture_fixture(module_id: course_module.id, position: 1, video_asset_id: "abc123")
 

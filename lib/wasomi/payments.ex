@@ -257,20 +257,30 @@ defmodule Wasomi.Payments do
         phone \\ nil,
         provider \\ provider()
       ) do
-    with {:ok, %{enrollment: enrollment, payment: payment}} <-
-           create_pending_checkout(user, course, phone),
-         {:ok, response} <- provider.initiate(Repo.preload(payment, :user)),
-         {:ok, authorization_url} <- Map.fetch(response, "authorization_url"),
-         {:ok, payment} <- store_initialization(payment, response) do
-      {:ok,
-       %{
-         enrollment: enrollment,
-         payment: payment,
-         authorization_url: authorization_url
-       }}
+    if course.is_free do
+      case Enrollments.enroll_free_course(user, course) do
+        {:ok, enrollment} ->
+          {:ok, %{enrollment: enrollment, payment: nil, authorization_url: nil}}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
     else
-      :error -> {:error, :missing_authorization_url}
-      {:error, reason} -> {:error, reason}
+      with {:ok, %{enrollment: enrollment, payment: payment}} <-
+             create_pending_checkout(user, course, phone),
+           {:ok, response} <- provider.initiate(Repo.preload(payment, :user)),
+           {:ok, authorization_url} <- Map.fetch(response, "authorization_url"),
+           {:ok, payment} <- store_initialization(payment, response) do
+        {:ok,
+         %{
+           enrollment: enrollment,
+           payment: payment,
+           authorization_url: authorization_url
+         }}
+      else
+        :error -> {:error, :missing_authorization_url}
+        {:error, reason} -> {:error, reason}
+      end
     end
   end
 

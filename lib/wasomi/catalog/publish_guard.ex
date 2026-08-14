@@ -88,9 +88,11 @@ defmodule Wasomi.Catalog.PublishGuard do
       },
       %{
         stage: "Pricing",
-        status: status(not is_nil(course.price_minor)),
+        status: status(course.is_free or not is_nil(course.price_minor)),
         reasons:
-          [] |> add_issue(is_nil(course.price_minor), "Set a course price.") |> Enum.reverse()
+          []
+          |> add_issue(not course.is_free and is_nil(course.price_minor), "Set a course price.")
+          |> Enum.reverse()
       },
       %{
         stage: "Thumbnail",

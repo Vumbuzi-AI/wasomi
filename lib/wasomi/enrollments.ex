@@ -225,6 +225,22 @@ defmodule Wasomi.Enrollments do
   end
 
   @doc """
+  Enrolls a user in a free course, creating and activating the enrollment immediately.
+  """
+  def enroll_free_course(%User{} = user, %Course{is_free: true} = course) do
+    Repo.transaction(fn ->
+      with {:ok, enrollment} <- create_pending_enrollment(user, course),
+           {:ok, active_enrollment} <- activate_enrollment(enrollment) do
+        active_enrollment
+      else
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
+  end
+
+  def enroll_free_course(%User{}, %Course{}), do: {:error, :course_not_free}
+
+  @doc """
   Returns a changeset for the admin "Grant access" form.
   """
   def change_grant_access(attrs \\ %{}) do

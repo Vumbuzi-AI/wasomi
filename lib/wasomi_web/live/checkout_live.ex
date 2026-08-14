@@ -10,19 +10,36 @@ defmodule WasomiWeb.CheckoutLive do
     course = Catalog.get_published_course_by_slug!(slug)
     user = socket.assigns.current_user
 
-    if connected?(socket), do: Payments.subscribe(user)
+    cond do
+      Enrollments.can_access_course?(user, course) ->
+        {:ok, redirect(socket, to: ~p"/learn/courses/#{course.slug}")}
 
-    if Enrollments.can_access_course?(user, course) do
-      {:ok, redirect(socket, to: ~p"/learn/courses/#{course.slug}")}
-    else
-      {:ok,
-       socket
-       |> assign(:page_title, "Checkout · #{course.title}")
-       |> assign(:course, course)
-       |> assign(:submitting, false)
-       |> assign(:waiting, false)
-       |> assign(:phone, "")
-       |> assign(:phone_error, nil)}
+      course.is_free ->
+        case Enrollments.enroll_free_course(user, course) do
+          {:ok, _enrollment} ->
+            {:ok,
+             socket
+             |> put_flash(:info, "Enrolled in #{course.title} successfully.")
+             |> redirect(to: ~p"/learn/courses/#{course.slug}")}
+
+          {:error, _reason} ->
+            {:ok,
+             socket
+             |> put_flash(:error, "Could not enroll in course. Please try again.")
+             |> redirect(to: ~p"/courses/#{course.slug}")}
+        end
+
+      true ->
+        if connected?(socket), do: Payments.subscribe(user)
+
+        {:ok,
+         socket
+         |> assign(:page_title, "Checkout · #{course.title}")
+         |> assign(:course, course)
+         |> assign(:submitting, false)
+         |> assign(:waiting, false)
+         |> assign(:phone, "")
+         |> assign(:phone_error, nil)}
     end
   end
 

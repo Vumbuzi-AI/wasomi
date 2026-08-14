@@ -25,7 +25,7 @@ defmodule Wasomi.Media.Mux do
           passthrough: "lecture:#{lecture_id}",
           playback_policies: ["signed"],
           video_quality: "basic",
-          mp4_support: "standard"
+          mp4_support: "capped-1080p"
         }
       }
     )

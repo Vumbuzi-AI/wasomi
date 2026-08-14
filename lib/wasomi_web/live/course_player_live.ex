@@ -1026,11 +1026,9 @@ defmodule WasomiWeb.CoursePlayerLive do
   defp certificate_title(%{type: :course, course: course}), do: course.title
 
   defp result_passed?(%{passed: passed}), do: passed
-  defp result_passed?(%Wasomi.Assessments.QuizSubmission{passed: passed}), do: passed
   defp result_passed?(_), do: false
 
   defp result_score(%{score_percent: score}), do: score
-  defp result_score(%Wasomi.Assessments.QuizSubmission{score_percent: score}), do: score
   defp result_score(_), do: 0
 
   defp preview_result?(%{preview?: preview?}), do: preview?

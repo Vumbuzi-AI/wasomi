@@ -134,7 +134,7 @@ defmodule WasomiWeb.CoreComponents do
   def confirm_modal(assigns) do
     ~H"""
     <.modal id={@id} show on_cancel={@cancel}>
-      <h2 class="text-lg font-semibold text-dark">{@title}</h2>
+      <h2 class="text-lg font-semibold text-ink">{@title}</h2>
       <p class="mt-2 text-sm text-body">{render_slot(@inner_block)}</p>
       <div class="mt-6 flex items-center gap-4">
         <button
@@ -143,7 +143,7 @@ defmodule WasomiWeb.CoreComponents do
           class={[
             "rounded-full px-5 py-2 text-sm font-medium text-white transition",
             @variant == :danger && "bg-red-600 hover:bg-red-700",
-            @variant == :primary && "bg-primary hover:bg-dark"
+            @variant == :primary && "bg-primary hover:bg-ink"
           ]}
         >
           {@confirm_label}
@@ -151,7 +151,7 @@ defmodule WasomiWeb.CoreComponents do
         <button
           type="button"
           phx-click={@cancel}
-          class="text-sm font-medium text-muted hover:text-dark"
+          class="text-sm font-medium text-muted hover:text-ink"
         >
           Cancel
         </button>

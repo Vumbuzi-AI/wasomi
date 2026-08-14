@@ -131,6 +131,7 @@ defmodule Wasomi.Accounts.User do
       # would keep the database transaction open longer and hurt performance.
       |> put_change(:hashed_password, Bcrypt.hash_pwd_salt(password))
       |> delete_change(:password)
+      |> delete_change(:password_confirmation)
     else
       changeset
     end

@@ -1309,7 +1309,7 @@ defmodule Wasomi.AssessmentsTest do
     end
   end
 
-  describe "practice questions" do
+  describe "practice sets" do
     test "get_or_create_practice_set/1 creates a pending quiz, then returns the same row" do
       module = course_module_fixture()
 

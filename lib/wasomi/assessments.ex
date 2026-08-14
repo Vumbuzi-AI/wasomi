@@ -1294,6 +1294,7 @@ defmodule Wasomi.Assessments do
       "Subject Matter Domain: #{module_title}\n\nOverview:\n#{module_desc}\n\nStudy Material:\n#{lecture_texts}"
     end
   end
+
   ## Flashcards
   #
   # Self-study content: there's no admin authoring step, so (unlike

@@ -35,13 +35,18 @@ config :wasomi,
   pdf_extractor: Wasomi.PdfExtractorMock,
   question_generator: Wasomi.QuestionGeneratorMock,
   transcriber: Wasomi.TranscriberMock,
+  lecture_question_scorer: Wasomi.LectureQuestionScorerMock,
   lecture_resource_reader: Wasomi.LectureResourceReaderMock,
   docx_extractor: Wasomi.DocxExtractorMock,
   r2_public_url: "https://test-storage.example.com",
   req_options: [plug: {Req.Test, Wasomi.Assessments.LectureResourceReader.Storage}],
   paystack_secret_key: "test_paystack_secret",
   paystack_callback_url: "http://www.example.com/payments/paystack/callback",
-  openai_api_key: "test_openai_key"
+  openai_api_key: "test_openai_key",
+  openai_scorer_req_options: [
+    plug: {Req.Test, Wasomi.Catalog.LectureQuestionScorer.OpenAI},
+    retry: false
+  ]
 
 config :wasomi, Oban, testing: :manual, queues: false, plugins: false
 

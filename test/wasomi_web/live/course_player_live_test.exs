@@ -83,7 +83,7 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
            )
 
     assert html =~ question.question
-    assert html =~ question.answer
+    assert has_element?(view, "#lecture-faq form[phx-submit='submit-lecture-question']")
   end
 
   test "a lecture with no resources or FAQ shows neither panel", %{conn: conn, user: user} do
@@ -606,7 +606,7 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
              )
 
       assert html =~ question.question
-      assert html =~ question.answer
+      assert has_element?(view, "#lecture-faq")
     end
   end
 end

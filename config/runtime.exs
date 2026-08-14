@@ -70,6 +70,14 @@ for {env_name, config_key} <- [
   config :wasomi, config_key, value
 end
 
+if config_env() == :dev do
+  if System.get_env("MUX_TOKEN_ID") not in [nil, ""] do
+    config :wasomi, media_provider: Wasomi.Media.Mux
+  else
+    config :wasomi, media_provider: Wasomi.Media.Demo
+  end
+end
+
 for {env_name, config_key} <- [
       {"OPENAI_API_KEY", :openai_api_key},
       {"OPENAI_MODEL", :openai_model}

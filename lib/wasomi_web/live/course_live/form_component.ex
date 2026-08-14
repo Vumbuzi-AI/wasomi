@@ -1,6 +1,7 @@
 defmodule WasomiWeb.CourseLive.FormComponent do
   use WasomiWeb, :live_component
 
+  alias Phoenix.HTML.Form
   alias Phoenix.LiveView.JS
   alias Wasomi.{Catalog, Learning}
   alias Wasomi.Catalog.PublishGuard
@@ -108,7 +109,6 @@ defmodule WasomiWeb.CourseLive.FormComponent do
                     <.icon name="hero-x-mark" class="h-4 w-4" />
                   </button>
                 </div>
-
               <% thumbnail_preview(@form[:thumbnail_key].value) -> %>
                 <div class="relative h-44 w-full overflow-hidden rounded-lg bg-zinc-100">
                   <img
@@ -117,7 +117,6 @@ defmodule WasomiWeb.CourseLive.FormComponent do
                     class="h-full w-full object-cover"
                   />
                 </div>
-
               <% true -> %>
                 <div class="flex flex-col items-center justify-center py-4 text-center">
                   <.icon name="hero-photo" class="h-8 w-8 text-zinc-400" />
@@ -139,7 +138,10 @@ defmodule WasomiWeb.CourseLive.FormComponent do
               >
               </div>
             </div>
-            <p :for={err <- upload_errors(@uploads.thumbnail, entry)} class="text-sm font-medium text-rose-600">
+            <p
+              :for={err <- upload_errors(@uploads.thumbnail, entry)}
+              class="text-sm font-medium text-rose-600"
+            >
               {upload_error_to_string(err)}
             </p>
           </div>
@@ -330,7 +332,7 @@ defmodule WasomiWeb.CourseLive.FormComponent do
   end
 
   defp free_course?(form) do
-    Phoenix.HTML.Form.normalize_value("checkbox", form[:is_free].value)
+    Form.normalize_value("checkbox", form[:is_free].value)
   end
 
   defp normalize_price_params(params) do
@@ -351,9 +353,14 @@ defmodule WasomiWeb.CourseLive.FormComponent do
       end
     else
       cond do
-        Map.has_key?(params, "price_minor") -> Map.update!(params, "price_minor", &major_to_minor/1)
-        Map.has_key?(params, :price_minor) -> Map.update!(params, :price_minor, &major_to_minor/1)
-        true -> params
+        Map.has_key?(params, "price_minor") ->
+          Map.update!(params, "price_minor", &major_to_minor/1)
+
+        Map.has_key?(params, :price_minor) ->
+          Map.update!(params, :price_minor, &major_to_minor/1)
+
+        true ->
+          params
       end
     end
   end

@@ -329,12 +329,6 @@ defmodule WasomiWeb.LectureLive.FormComponent do
         </section>
 
         <:actions>
-          <p
-            :if={save_disabled?(@form, @resource_rows, @question_rows, @video_ready)}
-            class="text-sm text-amber-700"
-          >
-            Upload a video and finish all resource uploads before saving.
-          </p>
           <.button
             disabled={save_disabled?(@form, @resource_rows, @question_rows, @video_ready)}
             phx-disable-with="Saving..."

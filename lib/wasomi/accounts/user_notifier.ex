@@ -71,19 +71,13 @@ defmodule Wasomi.Accounts.UserNotifier do
   Tells a learner that a generated certificate is ready to download.
   """
   def deliver_certificate_issued(certificate) do
-    title =
-      case certificate.type do
-        :module -> certificate.module.title
-        :course -> certificate.course.title
-      end
-
     url = "#{WasomiWeb.Endpoint.url()}/certificates/#{certificate.id}/download"
 
     deliver(certificate.user.email, "Your Wasomi certificate is ready", %{
       title: "You earned it!",
       intro: "Hi #{certificate.user.name},",
       body: [
-        "Huge congratulations on completing \"#{title}\"! Your hard work paid off, and your official certificate is ready to download.",
+        "Huge congratulations on completing \"#{certificate.course.title}\"! Your hard work paid off, and your official certificate is ready to download.",
         "Sign in to your Wasomi account to claim your certificate and celebrate your achievement."
       ],
       cta: %{label: "Download certificate", url: url}

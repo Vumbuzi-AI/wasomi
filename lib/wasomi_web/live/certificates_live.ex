@@ -45,9 +45,9 @@ defmodule WasomiWeb.CertificatesLive do
           >
             <div class="min-w-0">
               <p class="text-xs font-semibold uppercase tracking-wider text-primary">
-                {certificate_type(certificate)}
+                Course certificate
               </p>
-              <h3 class="mt-1 truncate font-medium text-dark">{certificate_title(certificate)}</h3>
+              <h3 class="mt-1 truncate font-medium text-dark">{certificate.course.title}</h3>
               <p class="mt-1 text-xs text-muted">{certificate.serial_number}</p>
             </div>
             <.link
@@ -69,7 +69,7 @@ defmodule WasomiWeb.CertificatesLive do
           </span>
           <h3 class="mt-5 text-xl font-semibold text-dark">No certificates yet.</h3>
           <p class="mx-auto mt-2 max-w-lg text-body">
-            Certificates will appear here as you complete modules and courses.
+            Complete every course lecture and required quiz to earn its certificate.
           </p>
           <.link
             navigate={~p"/courses-taken"}
@@ -86,9 +86,4 @@ defmodule WasomiWeb.CertificatesLive do
   defp load_certificates(socket) do
     assign(socket, :certificates, Certificates.list_for_user(socket.assigns.current_user))
   end
-
-  defp certificate_type(%{type: :module}), do: "Module certificate"
-  defp certificate_type(%{type: :course}), do: "Course certificate"
-  defp certificate_title(%{type: :module, module: module}), do: module.title
-  defp certificate_title(%{type: :course, course: course}), do: course.title
 end

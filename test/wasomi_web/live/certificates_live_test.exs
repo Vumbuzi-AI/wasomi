@@ -4,7 +4,6 @@ defmodule WasomiWeb.CertificatesLiveTest do
   import Phoenix.LiveViewTest
   import Wasomi.CatalogFixtures
   import Wasomi.CertificatesFixtures
-  import Wasomi.EnrollmentsFixtures
 
   alias Wasomi.Certificates
 
@@ -21,15 +20,12 @@ defmodule WasomiWeb.CertificatesLiveTest do
     user: user
   } do
     course = course_fixture(status: :published)
-    module = course_module_fixture(course_id: course.id)
-    enrollment_fixture(user_id: user.id, course_id: course.id, status: :active)
 
     {:ok, view, _html} = live(conn, ~p"/certificates")
     refute has_element?(view, "[id^='certificate-']")
     assert has_element?(view, "#certificates-empty")
 
-    certificate =
-      certificate_fixture(user_id: user.id, course_id: course.id, module_id: module.id)
+    certificate = certificate_fixture(user_id: user.id, course_id: course.id)
 
     :ok = Certificates.broadcast_ready(certificate)
 

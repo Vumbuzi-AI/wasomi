@@ -1,6 +1,6 @@
 defmodule Wasomi.Certificates do
   @moduledoc """
-  Issues and serves learner-owned module and course certificates.
+  Issues and serves learner-owned course certificates.
 
   Scope uniqueness is enforced both by Oban and partial database indexes. A
   deterministic serial and object key make retries safe even if a worker dies
@@ -10,7 +10,7 @@ defmodule Wasomi.Certificates do
   import Ecto.Query, warn: false
 
   alias Wasomi.Accounts.User
-  alias Wasomi.Catalog.{Course, CourseModule}
+  alias Wasomi.Catalog.Course
   alias Wasomi.Certificates.Certificate
   alias Wasomi.Certificates.Workers.IssueCertificate
   alias Wasomi.Learning
@@ -25,9 +25,8 @@ defmodule Wasomi.Certificates do
   end
 
   @doc """
-  Counts course-level (not module-level) certificates issued, optionally
-  scoped to a single course. Used by the admin conversion funnel as its
-  terminal "Certified" step.
+  Counts course certificates issued, optionally scoped to a single course.
+  Used by the admin conversion funnel as its terminal "Certified" step.
   """
   def count_course_certificates(opts \\ []) do
     course_id = Keyword.get(opts, :course_id)
@@ -45,7 +44,7 @@ defmodule Wasomi.Certificates do
     Certificate
     |> where([certificate], certificate.user_id == ^user_id)
     |> order_by([certificate], desc: certificate.issued_at)
-    |> preload([:course, :module])
+    |> preload(:course)
     |> Repo.all()
   end
 
@@ -55,8 +54,8 @@ defmodule Wasomi.Certificates do
       [certificate],
       certificate.user_id == ^user_id and certificate.course_id == ^course_id
     )
-    |> order_by([certificate], asc: certificate.type, asc: certificate.issued_at)
-    |> preload([:course, :module])
+    |> order_by([certificate], asc: certificate.issued_at)
+    |> preload(:course)
     |> Repo.all()
   end
 
@@ -87,16 +86,13 @@ defmodule Wasomi.Certificates do
   end
 
   @doc """
-  Enqueues certificate jobs for newly completed module/course transitions.
+  Enqueues a certificate job for a newly completed course.
   """
   def enqueue_for_completion_events(%User{} = user, events) when is_list(events) do
     events
     |> Enum.flat_map(fn
-      {:module_completed, %CourseModule{id: scope_id}} ->
-        [IssueCertificate.new(user.id, :module, scope_id)]
-
-      {:course_completed, %Course{id: scope_id}} ->
-        [IssueCertificate.new(user.id, :course, scope_id)]
+      {:course_completed, %Course{id: course_id}} ->
+        [IssueCertificate.for_course(user.id, course_id)]
 
       _ ->
         []
@@ -110,16 +106,16 @@ defmodule Wasomi.Certificates do
   @doc """
   Performs one idempotent issuance after re-checking completion.
   """
-  def issue(user_id, type, scope_id) when type in [:module, :course] do
+  def issue(user_id, course_id) do
     with %User{} = user <- Repo.get(User, user_id),
-         {:ok, scope} <- load_completed_scope(user, type, scope_id) do
-      case get_by_scope(user.id, type, scope_id) do
+         {:ok, course} <- load_completed_course(user, course_id) do
+      case get_by_course(user.id, course.id) do
         %Certificate{} = certificate ->
           {:ok, preload_certificate(certificate), :existing}
 
         nil ->
-          if course_for(type, scope).certificate_enabled do
-            issue_new(user, type, scope)
+          if course.certificate_enabled do
+            issue_new(user, course)
           else
             {:error, :certificates_disabled}
           end
@@ -129,8 +125,6 @@ defmodule Wasomi.Certificates do
       {:error, reason} -> {:error, reason}
     end
   end
-
-  def issue(_user_id, _type, _scope_id), do: {:error, :invalid_scope}
 
   def subscribe(%User{id: id}) do
     Phoenix.PubSub.subscribe(Wasomi.PubSub, user_topic(id))
@@ -161,17 +155,15 @@ defmodule Wasomi.Certificates do
     end
   end
 
-  defp issue_new(user, type, scope) do
+  defp issue_new(user, course) do
     issued_at = DateTime.utc_now() |> DateTime.truncate(:second)
-    scope_id = scope_id(type, scope)
-    serial_number = serial_number(user.id, type, scope_id)
-    file_key = file_key(user.id, type, scope_id)
-    course = course_for(type, scope)
+    serial_number = serial_number(user.id, course.id)
+    file_key = file_key(user.id, course.id)
 
     assigns = %{
       learner_name: user.name,
-      title: scope.title,
-      type_label: if(type == :module, do: "Module Achievement", else: "Course Achievement"),
+      title: course.title,
+      type_label: "Course Achievement",
       issued_on: Calendar.strftime(issued_at, "%B %-d, %Y"),
       serial_number: serial_number,
       issuer_name: course.certificate_issuer_name || "Wasomi Business Institute",
@@ -184,18 +176,17 @@ defmodule Wasomi.Certificates do
          :ok <- storage().upload(file_key, pdf),
          {:ok, certificate} <-
            create_certificate(%{
-             type: type,
+             type: :course,
              serial_number: serial_number,
              file_key: file_key,
              issued_at: issued_at,
              user_id: user.id,
-             course_id: course.id,
-             module_id: if(type == :module, do: scope.id)
+             course_id: course.id
            }) do
       {:ok, preload_certificate(certificate), :created}
     else
       {:error, %Ecto.Changeset{} = changeset} ->
-        case get_by_scope(user.id, type, scope_id) do
+        case get_by_course(user.id, course.id) do
           %Certificate{} = certificate -> {:ok, preload_certificate(certificate), :existing}
           nil -> {:error, changeset}
         end
@@ -205,17 +196,7 @@ defmodule Wasomi.Certificates do
     end
   end
 
-  defp load_completed_scope(user, :module, module_id) do
-    case Repo.get(CourseModule, module_id) |> Repo.preload(:course) do
-      nil ->
-        {:error, :scope_not_found}
-
-      module ->
-        if Learning.module_complete?(user, module), do: {:ok, module}, else: {:error, :incomplete}
-    end
-  end
-
-  defp load_completed_scope(user, :course, course_id) do
+  defp load_completed_course(user, course_id) do
     case Repo.get(Course, course_id) do
       nil ->
         {:error, :scope_not_found}
@@ -225,32 +206,22 @@ defmodule Wasomi.Certificates do
     end
   end
 
-  defp get_by_scope(user_id, :module, module_id) do
-    Repo.get_by(Certificate, user_id: user_id, type: :module, module_id: module_id)
-  end
-
-  defp get_by_scope(user_id, :course, course_id) do
+  defp get_by_course(user_id, course_id) do
     Repo.get_by(Certificate, user_id: user_id, type: :course, course_id: course_id)
   end
 
-  defp preload_certificate(certificate), do: Repo.preload(certificate, [:user, :course, :module])
-  defp course_for(:module, module), do: module.course
-  defp course_for(:course, course), do: course
-  defp scope_id(:module, module), do: module.id
-  defp scope_id(:course, course), do: course.id
+  defp preload_certificate(certificate), do: Repo.preload(certificate, [:user, :course])
 
-  defp serial_number(user_id, type, scope_id) do
+  defp serial_number(user_id, course_id) do
     digest =
-      :crypto.hash(:sha256, "#{user_id}:#{type}:#{scope_id}")
+      :crypto.hash(:sha256, "#{user_id}:course:#{course_id}")
       |> Base.encode16(case: :upper)
       |> binary_part(0, 12)
 
-    prefix = if type == :module, do: "MOD", else: "CRS"
-    "KBI-#{prefix}-#{digest}"
+    "KBI-CRS-#{digest}"
   end
 
-  defp file_key(user_id, type, scope_id),
-    do: "certificates/#{user_id}/#{type}/#{scope_id}.pdf"
+  defp file_key(user_id, course_id), do: "certificates/#{user_id}/course/#{course_id}.pdf"
 
   defp renderer, do: Application.fetch_env!(:wasomi, :certificate_renderer)
   defp storage, do: Application.fetch_env!(:wasomi, :certificate_storage)

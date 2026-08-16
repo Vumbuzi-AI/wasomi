@@ -2,12 +2,14 @@ defmodule Wasomi.CertificatesTest do
   use Wasomi.DataCase
 
   import Wasomi.AccountsFixtures
+  import Wasomi.AssessmentsFixtures
   import Wasomi.CatalogFixtures
   import Wasomi.CertificatesFixtures
   import Wasomi.EnrollmentsFixtures
   import Wasomi.LearningFixtures
   import Mox
 
+  alias Wasomi.Assessments
   alias Wasomi.Certificates
   alias Wasomi.Certificates.Certificate
   alias Wasomi.Certificates.Workers.IssueCertificate
@@ -33,8 +35,8 @@ defmodule Wasomi.CertificatesTest do
     %{user: user, course: course, module: module, lecture: lecture}
   end
 
-  test "completion enqueues and issues module and course certificates", context do
-    expect_render_and_upload(2)
+  test "completion enqueues and issues one course certificate", context do
+    expect_render_and_upload(1)
 
     assert {:ok, _, [_lecture, {:module_completed, _}, {:course_completed, _}]} =
              complete_lecture_via_progress!(context.user, context.lecture)
@@ -44,34 +46,20 @@ defmodule Wasomi.CertificatesTest do
                where: job.worker == "Wasomi.Certificates.Workers.IssueCertificate"
              ),
              :count
-           ) == 2
+           ) == 1
 
     assert :ok =
              Oban.Testing.perform_job(
                IssueCertificate,
                %{
                  user_id: context.user.id,
-                 type: "module",
-                 scope_id: context.module.id
-               },
-               []
-             )
-
-    assert :ok =
-             Oban.Testing.perform_job(
-               IssueCertificate,
-               %{
-                 user_id: context.user.id,
-                 type: "course",
-                 scope_id: context.course.id
+                 course_id: context.course.id
                },
                []
              )
 
     certificates = Certificates.list_for_user_course(context.user, context.course)
-    assert Enum.map(certificates, & &1.type) |> Enum.sort() == [:course, :module]
-    assert Enum.all?(certificates, &String.starts_with?(&1.serial_number, "KBI-"))
-    assert Enum.uniq_by(certificates, & &1.serial_number) == certificates
+    assert [%{type: :course, serial_number: "KBI-CRS-" <> _}] = certificates
   end
 
   test "issuance is idempotent and doesn't render or upload twice", context do
@@ -82,8 +70,7 @@ defmodule Wasomi.CertificatesTest do
 
     args = %{
       user_id: context.user.id,
-      type: "module",
-      scope_id: context.module.id
+      course_id: context.course.id
     }
 
     assert :ok = Oban.Testing.perform_job(IssueCertificate, args, [])
@@ -93,7 +80,7 @@ defmodule Wasomi.CertificatesTest do
              from(certificate in Certificate,
                where:
                  certificate.user_id == ^context.user.id and
-                   certificate.module_id == ^context.module.id
+                   certificate.course_id == ^context.course.id
              ),
              :count
            ) == 1
@@ -101,17 +88,40 @@ defmodule Wasomi.CertificatesTest do
 
   test "refuses to issue before the scope is complete", context do
     assert {:error, :incomplete} =
-             Certificates.issue(context.user.id, :module, context.module.id)
+             Certificates.issue(context.user.id, context.course.id)
 
     assert Repo.aggregate(Certificate, :count) == 0
+  end
+
+  test "keeps the course certificate locked until its required quiz is passed", context do
+    expect_render_and_upload(1)
+    quiz = quiz_fixture(module: context.module)
+    question = question_fixture(quiz: quiz)
+    correct_option = Enum.find(question.question_options, & &1.correct)
+
+    assert {:ok, _, [_lecture, {:module_completed, _}]} =
+             complete_lecture_via_progress!(context.user, context.lecture)
+
+    assert {:error, :incomplete} = Certificates.issue(context.user.id, context.course.id)
+
+    assert {:ok, %{passed: true}} =
+             Assessments.submit_quiz(context.user, quiz, %{question.id => correct_option.id})
+
+    assert :ok =
+             Oban.Testing.perform_job(
+               IssueCertificate,
+               %{user_id: context.user.id, course_id: context.course.id},
+               []
+             )
+
+    assert [%{type: :course}] = Certificates.list_for_user_course(context.user, context.course)
   end
 
   test "signed downloads are learner-owned and short lived", context do
     certificate =
       certificate_fixture(
         user_id: context.user.id,
-        course_id: context.course.id,
-        module_id: context.module.id
+        course_id: context.course.id
       )
 
     expect(Wasomi.CertificateStorageMock, :signed_url, fn key, opts ->
@@ -159,10 +169,10 @@ defmodule Wasomi.CertificatesTest do
       complete_lecture_via_progress!(context.user, context.lecture)
 
     assert {:ok, _certificate, :created} =
-             Certificates.issue(context.user.id, :course, context.course.id)
+             Certificates.issue(context.user.id, context.course.id)
   end
 
-  test "issue/3 refuses to issue a new certificate when the course has certificates disabled",
+  test "issue/2 refuses to issue a new certificate when the course has certificates disabled",
        context do
     {:ok, _course} =
       Wasomi.Catalog.update_course_certificate(context.course, %{
@@ -173,7 +183,7 @@ defmodule Wasomi.CertificatesTest do
       complete_lecture_via_progress!(context.user, context.lecture)
 
     assert {:error, :certificates_disabled} =
-             Certificates.issue(context.user.id, :course, context.course.id)
+             Certificates.issue(context.user.id, context.course.id)
 
     assert Repo.aggregate(Certificate, :count) == 0
   end
@@ -196,8 +206,7 @@ defmodule Wasomi.CertificatesTest do
                IssueCertificate,
                %{
                  user_id: context.user.id,
-                 type: "course",
-                 scope_id: context.course.id
+                 course_id: context.course.id
                },
                []
              )

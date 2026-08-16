@@ -265,23 +265,36 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
   end
 
   test "certificate ready PubSub events reveal a download button", %{conn: conn, user: user} do
-    course = course_fixture(status: :published)
+    course =
+      course_fixture(
+        status: :published,
+        certificate_enabled: true,
+        certificate_issuer_name: "Wasomi Academy",
+        certificate_signatory_name: "Jane Doe",
+        certificate_signatory_title: "Head of Learning"
+      )
+
     module = course_module_fixture(course_id: course.id, position: 1)
-    lecture_fixture(module_id: module.id, position: 1)
+    lecture = lecture_fixture(module_id: module.id, position: 1, duration_seconds: 100)
     {:ok, pending} = Enrollments.create_pending_enrollment(user, course)
     {:ok, _active} = Enrollments.activate_enrollment(pending)
 
     {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
-    assert has_element?(view, "#course-certificates")
+    assert has_element?(view, "#course-certificate-tree #course-certificate[data-locked='true']")
+
+    complete_lecture_via_progress!(user, lecture)
+
+    assert has_element?(view, "#course-certificate-tree #course-certificate-pending")
+    refute has_element?(view, "#course-certificates")
 
     certificate =
-      certificate_fixture(user_id: user.id, course_id: course.id, module_id: module.id)
+      certificate_fixture(user_id: user.id, course_id: course.id)
 
     :ok = Certificates.broadcast_ready(certificate)
 
     assert has_element?(
              view,
-             "#certificate-#{certificate.id} a[href='/certificates/#{certificate.id}/download']"
+             "#course-certificate-tree #certificate-#{certificate.id}[href='/certificates/#{certificate.id}/download']"
            )
   end
 
@@ -569,7 +582,7 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
       lecture_fixture(module_id: module.id, position: 1)
 
       {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}/preview")
-      refute has_element?(view, "#course-certificates")
+      refute has_element?(view, "#course-certificate-tree")
     end
 
     test "resources and FAQ render identically in preview mode" do

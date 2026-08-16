@@ -26,9 +26,9 @@
 ## Certificate Issuing
 
 1. `Wasomi.Learning.mark_complete/2` or `record_progress/3` detects a newly completed lecture.
-2. Learning checks whether the module or course is now complete.
-3. Completion events enqueue `Wasomi.Certificates.Workers.IssueCertificate` jobs.
-4. `Wasomi.Certificates.issue/3` re-checks completion, renders a PDF, uploads it through configured storage, and inserts a unique certificate.
+2. Learning checks whether every lecture and required module quiz in the course is complete.
+3. Course completion events enqueue `Wasomi.Certificates.Workers.IssueCertificate` jobs.
+4. `Wasomi.Certificates.issue/2` re-checks completion, renders the configured course PDF, uploads it through configured storage, and inserts a unique certificate.
 5. The learner sees certificates at `/certificates` and downloads through `/certificates/:id/download`.
 
 ## Admin Course Management

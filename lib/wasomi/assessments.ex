@@ -32,8 +32,9 @@ defmodule Wasomi.Assessments do
   }
 
   alias Wasomi.Assessments.Workers.GenerateLectureQuizWorker
-  alias Wasomi.Catalog.CourseModule
+  alias Wasomi.Catalog.{Course, CourseModule}
   alias Wasomi.Catalog.Lecture
+  alias Wasomi.Learning
   alias Wasomi.Repo
 
   ## Quizzes
@@ -394,16 +395,31 @@ defmodule Wasomi.Assessments do
         score_percent = round(correct_count / length(questions) * 100)
         passed = score_percent >= quiz.passing_score_percent
 
-        %QuizSubmission{}
-        |> QuizSubmission.changeset(%{
-          quiz_id: quiz.id,
-          user_id: user.id,
-          answers: normalized,
-          score_percent: score_percent,
-          passed: passed,
-          submitted_at: DateTime.utc_now() |> DateTime.truncate(:second)
-        })
-        |> Repo.insert()
+        submission =
+          %QuizSubmission{}
+          |> QuizSubmission.changeset(%{
+            quiz_id: quiz.id,
+            user_id: user.id,
+            answers: normalized,
+            score_percent: score_percent,
+            passed: passed,
+            submitted_at: DateTime.utc_now() |> DateTime.truncate(:second)
+          })
+          |> Repo.insert()
+
+        case submission do
+          {:ok, %{passed: true} = submission} ->
+            quiz
+            |> Repo.preload(:module)
+            |> Map.fetch!(:module)
+            |> then(&Repo.get!(Course, &1.course_id))
+            |> then(&Learning.maybe_complete_course(user, &1))
+
+            {:ok, submission}
+
+          result ->
+            result
+        end
     end
   end
 

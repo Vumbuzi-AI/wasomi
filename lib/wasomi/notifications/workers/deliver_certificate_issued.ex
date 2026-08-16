@@ -17,7 +17,7 @@ defmodule Wasomi.Notifications.Workers.DeliverCertificateIssued do
     certificate =
       certificate_id
       |> Certificates.get_certificate!()
-      |> Repo.preload([:user, :course, :module])
+      |> Repo.preload([:user, :course])
 
     UserNotifier.deliver_certificate_issued(certificate)
   end

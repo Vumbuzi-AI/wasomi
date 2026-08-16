@@ -19,7 +19,6 @@ erDiagram
   enrollments ||--o{ enrollment_audits : logs
   lectures ||--o{ lecture_progress : progress
   courses ||--o{ certificates : awards
-  modules ||--o{ certificates : awards
 ```
 
 ## Tables
@@ -68,9 +67,8 @@ erDiagram
 
 `certificates`
 
-- Learner certificates with `type`, `serial_number`, `file_key`, `issued_at`, `user_id`, `course_id`, and optional `module_id`.
-- `module` certificates require `module_id`; `course` certificates require `module_id` to be null.
-- Partial unique indexes prevent duplicate module/course certificates for a user.
+- Learner course certificates with `type` (always `course`), `serial_number`, `file_key`, `issued_at`, `user_id`, and `course_id`.
+- A unique `user_id, course_id` index prevents duplicate certificates for a course.
 
 `enrollment_audits`
 

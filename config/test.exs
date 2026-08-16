@@ -14,7 +14,10 @@ config :wasomi, Wasomi.Repo,
   hostname: "localhost",
   database: "wasomi_test#{System.get_env("MIX_TEST_PARTITION")}",
   pool: Ecto.Adapters.SQL.Sandbox,
-  pool_size: System.schedulers_online() * 2
+  # Keep in step with ExUnit max_cases in test/test_helper.exs. The default
+  # schedulers*2 opens 64 Postgres backends on a 32-thread machine; leftover
+  # backends from a SIGKILL'd `mix test` then pile up on the next run.
+  pool_size: min(System.schedulers_online() * 2, 6)
 
 # We don't run a server during test. If one is required,
 # you can enable the server option below.
@@ -66,5 +69,7 @@ config :logger, level: :warning
 config :phoenix, :plug_init_mode, :runtime
 
 # Enable helpful, but potentially expensive runtime checks
-config :phoenix_live_view,
-  enable_expensive_runtime_checks: true
+# Off in test: CoursePlayerLive's HEEx tree is huge, and annotating it on
+# every render is what grows BEAM memory until the kernel SIGKILLs mix test
+# (this machine has no swap).
+config :phoenix_live_view, enable_expensive_runtime_checks: false

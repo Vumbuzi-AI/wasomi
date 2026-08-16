@@ -156,11 +156,11 @@ defmodule WasomiWeb.CourseLive.FormComponent do
             label="Price"
             value={price_input_value(assigns)}
             min="0"
-            step="0.01"
-            placeholder="15000.00"
+            step="1"
+            placeholder="15000"
           />
           <p class="text-xs text-zinc-500">
-            Enter the full amount, e.g. 15000.00 {@form[:currency].value || "KES"}.
+            Enter a whole-unit amount, e.g. 15000 {@form[:currency].value || "KES"}.
           </p>
         </div>
 
@@ -373,16 +373,8 @@ defmodule WasomiWeb.CourseLive.FormComponent do
   defp major_to_minor(value) when is_binary(value) do
     trimmed = String.trim(value)
 
-    with false <- trimmed == "",
-         {major, ""} <- Decimal.parse(trimmed),
-         minor <- Decimal.mult(major, Decimal.new(100)),
-         rounded_minor <- Decimal.round(minor, 0),
-         true <- Decimal.equal?(minor, rounded_minor) do
-      rounded_minor
-      |> Decimal.to_integer()
-      |> Integer.to_string()
-    else
-      true -> ""
+    case Integer.parse(trimmed) do
+      {major, ""} -> Integer.to_string(major * 100)
       _ -> value
     end
   end
@@ -403,13 +395,7 @@ defmodule WasomiWeb.CourseLive.FormComponent do
 
   defp minor_to_major(value), do: value
 
-  defp format_minor_as_major(value) do
-    sign = if value < 0, do: "-", else: ""
-    value = abs(value)
-    cents = value |> rem(100) |> Integer.to_string() |> String.pad_leading(2, "0")
-
-    "#{sign}#{div(value, 100)}.#{cents}"
-  end
+  defp format_minor_as_major(value), do: value |> div(100) |> Integer.to_string()
 
   defp thumbnail_preview(value) when is_binary(value) and value != "", do: value
   defp thumbnail_preview(_value), do: nil

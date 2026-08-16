@@ -136,7 +136,7 @@ defmodule WasomiWeb.CheckoutLive do
               :if={assigns[:display_currency] && assigns[:display_currency] != "KES"}
               class="mt-2 text-sm text-zinc-500"
             >
-              * Billed as KES {Catalog.price(@course) |> Money.to_string!()} at checkout.
+              * Billed as {Catalog.format_price(@course)} at checkout.
             </p>
 
             <div :if={@waiting} id="payment-waiting" class="mt-6 rounded-2xl bg-mint p-5 text-body">

@@ -130,7 +130,7 @@ defmodule WasomiWeb.AdminLiveTest do
         title: "A brand new course",
         description: "A full description",
         thumbnail_key: "thumb.jpg",
-        price_minor: "1500.00"
+        price_minor: "1500"
       }
 
       html =
@@ -187,7 +187,7 @@ defmodule WasomiWeb.AdminLiveTest do
           course: %{
             title: "Uploaded thumbnail course",
             description: "A course with an uploaded thumbnail.",
-            price_minor: "1500.00"
+            price_minor: "1500"
           }
         )
         |> render_submit()

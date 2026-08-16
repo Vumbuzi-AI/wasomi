@@ -18,6 +18,11 @@ defmodule Wasomi.PaymentsTest do
     admin
   end
 
+  test "formats payment amounts as whole units with currency codes and separators" do
+    assert Payments.format_minor(1_500_000, "KES") == "KES 15,000"
+    assert Payments.format_minor(1_500_000, "USD") == "USD 15,000"
+  end
+
   test "initialization persists a pending enrollment and payment before calling Paystack" do
     user = user_fixture()
     course = course_fixture(price_minor: 125_000, currency: "KES")

@@ -201,7 +201,13 @@ defmodule Wasomi.Catalog do
         base_price
       end
 
-    Money.to_string!(formatted)
+    format_money(formatted)
+  end
+
+  defp format_money(money) do
+    money
+    |> Money.to_string!(fractional_digits: 0, currency_symbol: :iso)
+    |> String.replace("\u00A0", " ")
   end
 
   def lecture_count(%Course{modules: modules}) when is_list(modules) do

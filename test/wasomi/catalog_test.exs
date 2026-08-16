@@ -134,7 +134,7 @@ defmodule Wasomi.CatalogTest do
       price = Catalog.price(course)
       assert price.currency == :KES
       assert Decimal.to_float(price.amount) == 15000.0
-      assert Catalog.format_price(course) =~ "KES"
+      assert Catalog.format_price(course) == "KES 15,000"
     end
 
     test "format_price returns Free when is_free is true" do

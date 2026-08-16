@@ -96,7 +96,8 @@ defmodule WasomiWeb.DashboardLiveTest do
     assert has_element?(view, "#payment-receipt-#{successful.id}")
     refute has_element?(view, "#payment-receipt-#{pending.id}")
     assert html =~ "KBI-RECEIPT-PAID"
-    assert html =~ "KES"
+    assert html =~ "KES 1,250"
+    refute html =~ "1,250.00"
     refute html =~ "KBI-RECEIPT-PENDING"
   end
 

@@ -61,19 +61,25 @@ defmodule WasomiWeb.Plugs.LocalCurrency do
     "VA"
   ]
 
-  def init(opts), do: opts
+  def init(opts) do
+    Keyword.put_new(
+      opts,
+      :geolocation_client,
+      Application.get_env(:wasomi, :geolocation_client, Wasomi.Geolocation.GeoJS)
+    )
+  end
 
-  def call(conn, _opts) do
+  def call(conn, opts) do
     if get_session(conn, :display_currency) do
       conn
     else
-      country_code = get_country_code(conn)
+      country_code = get_country_code(conn, opts)
       currency = resolve_display_currency(country_code)
       put_session(conn, :display_currency, currency)
     end
   end
 
-  defp get_country_code(conn) do
+  defp get_country_code(conn, opts) do
     default_country = Application.get_env(:wasomi, :default_country, "US")
 
     # Try Cloudflare header first
@@ -91,19 +97,30 @@ defmodule WasomiWeb.Plugs.LocalCurrency do
               # Default for local dev or internal networks
               default_country
             else
-              ip = ip_tuple |> :inet.ntoa() |> to_string() |> URI.encode_www_form()
+              case ip_to_string(ip_tuple) do
+                {:ok, ip} ->
+                  case opts[:geolocation_client].country_code(ip) do
+                    {:ok, country_code} -> country_code
+                    {:error, _reason} -> default_country
+                  end
 
-              # Fallback to IP Geolocation API using HTTPS
-              case Req.get("https://get.geojs.io/v1/ip/country/#{ip}.json",
-                     receive_timeout: 1000,
-                     retry: false
-                   ) do
-                {:ok, %{status: 200, body: %{"country" => code}}} -> code
-                _ -> default_country
+                :error ->
+                  default_country
               end
             end
         end
     end
+  end
+
+  defp ip_to_string(ip_tuple) do
+    ip = ip_tuple |> :inet.ntoa() |> to_string()
+
+    case :inet.parse_address(String.to_charlist(ip)) do
+      {:ok, _address} -> {:ok, ip}
+      {:error, _reason} -> :error
+    end
+  rescue
+    ArgumentError -> :error
   end
 
   defp private_ip?({10, _, _, _}), do: true

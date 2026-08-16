@@ -3,8 +3,11 @@ defmodule WasomiWeb.Plugs.LocalCurrencyTest do
   use Plug.Test
 
   alias WasomiWeb.Plugs.LocalCurrency
+  import Mox
 
   setup do
+    verify_on_exit!()
+
     opts =
       Plug.Session.init(
         store: :cookie,
@@ -64,11 +67,12 @@ defmodule WasomiWeb.Plugs.LocalCurrencyTest do
     assert get_session(conn2, :display_currency) == "USD"
   end
 
-  test "external API doesn't crash on public IP", %{conn: conn} do
+  test "uses the configured geolocation client for a public IP", %{conn: conn} do
+    expect(Wasomi.GeolocationMock, :country_code, fn "8.8.8.8" -> {:ok, "US"} end)
+
     conn = %{conn | remote_ip: {8, 8, 8, 8}}
     conn = LocalCurrency.call(conn, LocalCurrency.init([]))
 
-    currency = get_session(conn, :display_currency)
-    assert is_binary(currency)
+    assert get_session(conn, :display_currency) == "USD"
   end
 end

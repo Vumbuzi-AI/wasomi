@@ -29,6 +29,7 @@ config :wasomi, Wasomi.Mailer, adapter: Swoosh.Adapters.Test
 config :wasomi,
   payment_provider: Wasomi.Payments.ProviderMock,
   media_provider: Wasomi.MediaProviderMock,
+  geolocation_client: Wasomi.GeolocationMock,
   certificate_renderer: Wasomi.CertificateRendererMock,
   certificate_storage: Wasomi.CertificateStorageMock,
   assessments_storage: Wasomi.AssessmentsStorageMock,

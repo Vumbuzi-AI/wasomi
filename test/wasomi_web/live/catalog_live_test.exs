@@ -34,4 +34,24 @@ defmodule WasomiWeb.CatalogLiveTest do
     refute html =~ lecture.video_asset_id
     assert html =~ "Create account"
   end
+
+  test "displays Free and Enroll for Free on catalog course show for logged in user", %{
+    conn: conn
+  } do
+    user = Wasomi.AccountsFixtures.user_fixture()
+
+    free_course =
+      course_fixture(
+        status: :published,
+        title: "Free Course",
+        is_free: true,
+        price_minor: nil
+      )
+
+    conn = log_in_user(conn, user)
+    {:ok, _view, html} = live(conn, ~p"/courses/#{free_course.slug}")
+
+    assert html =~ "Free"
+    assert html =~ "Enroll for Free"
+  end
 end

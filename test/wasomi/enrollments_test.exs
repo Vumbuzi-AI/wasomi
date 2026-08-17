@@ -38,6 +38,26 @@ defmodule Wasomi.EnrollmentsTest do
     assert {:ok, ^lecture} = Enrollments.authorize_lecture(user, lecture)
   end
 
+  describe "enroll_free_course/2" do
+    test "creates and auto-activates enrollment for a free course" do
+      user = user_fixture()
+      free_course = course_fixture(is_free: true, price_minor: nil)
+
+      assert {:ok, enrollment} = Enrollments.enroll_free_course(user, free_course)
+      assert enrollment.status == :active
+      assert enrollment.activated_at
+      assert Enrollments.can_access_course?(user, free_course)
+    end
+
+    test "refuses to enroll a paid course as free" do
+      user = user_fixture()
+      paid_course = course_fixture(is_free: false, price_minor: 15_000)
+
+      assert {:error, :course_not_free} = Enrollments.enroll_free_course(user, paid_course)
+      refute Enrollments.can_access_course?(user, paid_course)
+    end
+  end
+
   test "playback provider is never called without an active enrollment" do
     user = user_fixture()
     course = course_fixture()

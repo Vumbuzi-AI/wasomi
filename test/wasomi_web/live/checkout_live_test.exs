@@ -88,4 +88,17 @@ defmodule WasomiWeb.CheckoutLiveTest do
 
     assert_redirect(view, ~p"/learn/courses/#{course.slug}")
   end
+
+  test "auto-enrolls a free course learner immediately without Paystack checkout", %{
+    conn: conn,
+    user: user
+  } do
+    course = course_fixture(status: :published, is_free: true, price_minor: nil)
+
+    assert {:error, {:redirect, %{to: to}}} =
+             live(conn, ~p"/courses/#{course.slug}/checkout")
+
+    assert to == ~p"/learn/courses/#{course.slug}"
+    assert Enrollments.can_access_course?(user, course)
+  end
 end

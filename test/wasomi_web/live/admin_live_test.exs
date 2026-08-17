@@ -149,6 +149,30 @@ defmodule WasomiWeb.AdminLiveTest do
                Wasomi.Catalog.get_course_by_slug!("a-brand-new-course")
     end
 
+    test "creates a free course through the modal form setting price_minor to nil", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/admin/courses/new")
+
+      attrs = %{
+        title: "A free course",
+        description: "A free description",
+        thumbnail_key: "thumb.jpg",
+        is_free: "true",
+        currency: "KES"
+      }
+
+      html =
+        view
+        |> form("#course-form", course: attrs)
+        |> render_submit()
+
+      assert_patched(view, ~p"/admin/courses")
+      assert html =~ "A free course"
+
+      created = Wasomi.Catalog.get_course_by_slug!("a-free-course")
+      assert created.is_free == true
+      assert created.price_minor == nil
+    end
+
     test "uploads a course thumbnail through the modal form", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/admin/courses/new")
 

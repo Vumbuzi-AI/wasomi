@@ -11,6 +11,7 @@ defmodule Wasomi.Catalog.Course do
     field :slug, :string
     field :thumbnail_key, :string
     field :price_minor, :integer
+    field :is_free, :boolean, default: false
 
     field :certificate_enabled, :boolean, default: true
     field :certificate_issuer_name, :string
@@ -36,17 +37,18 @@ defmodule Wasomi.Catalog.Course do
       :price_minor,
       :currency,
       :status,
-      :position
+      :position,
+      :is_free
     ])
     |> validate_required([
       :slug,
       :title,
       :description,
-      :price_minor,
       :currency,
       :status,
       :position
     ])
+    |> validate_price()
     |> update_change(:slug, &normalize_slug/1)
     |> update_change(:currency, &String.upcase/1)
     |> update_change(:title, &trim/1)
@@ -54,13 +56,22 @@ defmodule Wasomi.Catalog.Course do
       message: "must contain lowercase letters, numbers, and hyphens only"
     )
     |> validate_length(:title, min: 3, max: 160)
-    |> validate_number(:price_minor, greater_than_or_equal_to: 0)
     |> validate_number(:position, greater_than: 0)
     |> validate_format(:currency, ~r/^[A-Z]{3}$/, message: "must be a 3-letter currency code")
     |> unique_constraint(:slug)
     |> check_constraint(:price_minor, name: :courses_price_must_be_non_negative)
     |> check_constraint(:position, name: :courses_position_must_be_positive)
     |> check_constraint(:status, name: :courses_status_must_be_valid)
+  end
+
+  defp validate_price(changeset) do
+    if get_field(changeset, :is_free) do
+      put_change(changeset, :price_minor, nil)
+    else
+      changeset
+      |> validate_required([:price_minor])
+      |> validate_number(:price_minor, greater_than_or_equal_to: 0)
+    end
   end
 
   @doc """

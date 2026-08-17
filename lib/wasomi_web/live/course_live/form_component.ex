@@ -1,6 +1,7 @@
 defmodule WasomiWeb.CourseLive.FormComponent do
   use WasomiWeb, :live_component
 
+  alias Phoenix.HTML.Form
   alias Phoenix.LiveView.JS
   alias Wasomi.{Catalog, Learning}
   alias Wasomi.Catalog.PublishGuard
@@ -84,49 +85,71 @@ defmodule WasomiWeb.CourseLive.FormComponent do
           <.input field={@form[:thumbnail_key]} type="text" />
         </div>
 
-        <div class="space-y-3">
-          <span class="block text-sm font-semibold leading-6 text-zinc-800">Upload thumbnail</span>
+        <div class="space-y-2">
+          <span class="block text-sm font-semibold text-zinc-800">Upload thumbnail</span>
 
-          <img
-            :if={thumbnail_preview(@form[:thumbnail_key].value)}
-            src={thumbnail_preview(@form[:thumbnail_key].value)}
-            alt=""
-            class="h-40 w-full rounded-lg border border-zinc-200 object-cover"
-          />
+          <label
+            phx-drop-target={@uploads.thumbnail.ref}
+            class="group relative flex min-h-[160px] w-full cursor-pointer flex-col items-center justify-center overflow-hidden rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-3 transition hover:border-zinc-400 hover:bg-zinc-100/50"
+          >
+            <.live_file_input upload={@uploads.thumbnail} class="sr-only" />
 
-          <.live_file_input upload={@uploads.thumbnail} class="block w-full text-sm text-zinc-700" />
-
-          <p class="text-xs text-zinc-500">
-            JPG, PNG, WebP, GIF or SVG, up to 5 MB.
-          </p>
+            <%= cond do %>
+              <% entry = List.first(@uploads.thumbnail.entries) -> %>
+                <div class="relative h-44 w-full overflow-hidden rounded-lg bg-zinc-100">
+                  <.live_img_preview entry={entry} class="h-full w-full object-cover" />
+                  <button
+                    type="button"
+                    phx-click="cancel-upload"
+                    phx-target={@myself}
+                    phx-value-ref={entry.ref}
+                    class="absolute top-2 right-2 z-10 rounded-full bg-black/70 p-1.5 text-white transition hover:bg-rose-600"
+                    title="Remove thumbnail"
+                  >
+                    <.icon name="hero-x-mark" class="h-4 w-4" />
+                  </button>
+                </div>
+              <% thumbnail_preview(@form[:thumbnail_key].value) -> %>
+                <div class="relative h-44 w-full overflow-hidden rounded-lg bg-zinc-100">
+                  <img
+                    src={thumbnail_preview(@form[:thumbnail_key].value)}
+                    alt=""
+                    class="h-full w-full object-cover"
+                  />
+                </div>
+              <% true -> %>
+                <div class="flex flex-col items-center justify-center py-4 text-center">
+                  <.icon name="hero-photo" class="h-8 w-8 text-zinc-400" />
+                  <p class="mt-2 text-sm font-medium text-zinc-700">
+                    Click to select photo or drag and drop
+                  </p>
+                  <p class="mt-1 text-xs text-zinc-500">
+                    JPG, PNG, WebP, GIF or SVG, up to 5 MB
+                  </p>
+                </div>
+            <% end %>
+          </label>
 
           <div :for={entry <- @uploads.thumbnail.entries} class="space-y-1">
-            <div class="flex items-center justify-between gap-3 text-sm text-zinc-700">
-              <span>{entry.client_name}</span>
-              <button
-                type="button"
-                phx-click="cancel-upload"
-                phx-target={@myself}
-                phx-value-ref={entry.ref}
-                class="font-medium text-rose-600 hover:text-rose-700"
-              >
-                Remove
-              </button>
-            </div>
-            <div class="h-2 overflow-hidden rounded-full bg-zinc-100">
+            <div :if={entry.progress > 0} class="h-2 overflow-hidden rounded-full bg-zinc-100">
               <div
-                class="h-full rounded-full bg-emerald-500 transition-all"
+                class="h-full rounded-full bg-dark transition-all"
                 style={"width: #{entry.progress}%"}
               >
               </div>
             </div>
-            <p :for={err <- upload_errors(@uploads.thumbnail, entry)} class="text-sm text-rose-600">
+            <p
+              :for={err <- upload_errors(@uploads.thumbnail, entry)}
+              class="text-sm font-medium text-rose-600"
+            >
               {upload_error_to_string(err)}
             </p>
           </div>
         </div>
 
-        <div class="space-y-2">
+        <.input field={@form[:is_free]} type="checkbox" label="This course is free" />
+
+        <div :if={not free_course?(@form)} class="space-y-2">
           <.input
             field={@form[:price_minor]}
             type="number"
@@ -308,13 +331,37 @@ defmodule WasomiWeb.CourseLive.FormComponent do
     end
   end
 
+  defp free_course?(form) do
+    Form.normalize_value("checkbox", form[:is_free].value)
+  end
+
   defp normalize_price_params(params) do
     params = Map.new(params)
 
-    cond do
-      Map.has_key?(params, "price_minor") -> Map.update!(params, "price_minor", &major_to_minor/1)
-      Map.has_key?(params, :price_minor) -> Map.update!(params, :price_minor, &major_to_minor/1)
-      true -> params
+    is_free =
+      case params do
+        %{"is_free" => val} -> val in ["true", true, "1", 1]
+        %{is_free: val} -> val in ["true", true, "1", 1]
+        _ -> false
+      end
+
+    if is_free do
+      if Enum.any?(Map.keys(params), &is_atom/1) do
+        Map.put(params, :price_minor, nil)
+      else
+        Map.put(params, "price_minor", nil)
+      end
+    else
+      cond do
+        Map.has_key?(params, "price_minor") ->
+          Map.update!(params, "price_minor", &major_to_minor/1)
+
+        Map.has_key?(params, :price_minor) ->
+          Map.update!(params, :price_minor, &major_to_minor/1)
+
+        true ->
+          params
+      end
     end
   end
 

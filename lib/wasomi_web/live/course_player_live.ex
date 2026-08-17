@@ -31,6 +31,8 @@ defmodule WasomiWeb.CoursePlayerLive do
 
   alias Wasomi.{Assessments, Catalog, Certificates, Enrollments, Learning}
 
+  import WasomiWeb.StudyComponents, only: [quiz_taking_panel: 1]
+
   @impl true
   def mount(%{"slug" => slug}, _session, socket) do
     preview? = socket.assigns.live_action == :preview
@@ -74,6 +76,7 @@ defmodule WasomiWeb.CoursePlayerLive do
          |> assign(:current_practice_module, nil)
          |> assign(:practice_answers, %{})
          |> assign(:generating_practice?, false)
+         |> assign(:active_section, :lessons)
          |> assign(:preview?, preview?)
          |> assign(:preview_progress, %{})
          |> assign(:lq_submissions, %{})
@@ -116,6 +119,26 @@ defmodule WasomiWeb.CoursePlayerLive do
   defp resource_icon(:document), do: "hero-document-text"
   defp resource_icon(:video), do: "hero-film"
   defp resource_icon(:link), do: "hero-link"
+
+  @sections ~w(lessons module_quiz)a
+
+  @impl true
+  def handle_event("select-section", %{"section" => section_str}, socket) do
+    case safe_section(section_str) do
+      {:ok, section} -> {:noreply, enter_section(socket, section)}
+      :error -> {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_event("exit-quiz", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:current_quiz, nil)
+     |> assign(:quiz_result, nil)
+     |> assign(:quiz_answers, %{})
+     |> assign(:current_question_index, 0)}
+  end
 
   @impl true
   def handle_event("select-lecture", %{"id" => id}, socket) do
@@ -210,31 +233,7 @@ defmodule WasomiWeb.CoursePlayerLive do
         answers = socket.assigns.quiz_answers
 
         if socket.assigns.preview? do
-          normalized = Map.new(answers, fn {k, v} -> {to_string(k), to_string(v)} end)
-
-          correct_count =
-            Enum.count(questions, fn q ->
-              selected = Map.get(normalized, to_string(q.id))
-
-              Enum.any?(
-                q.question_options,
-                &(to_string(&1.id) == selected and &1.correct)
-              )
-            end)
-
-          score_percent =
-            if questions != [], do: round(correct_count / length(questions) * 100), else: 0
-
-          passed = score_percent >= quiz.passing_score_percent
-
-          result = %{
-            score_percent: score_percent,
-            passed: passed,
-            preview?: true,
-            correct_count: correct_count,
-            total_count: length(questions)
-          }
-
+          result = preview_quiz_result(quiz, questions, answers)
           {:noreply, assign(socket, :quiz_result, result)}
         else
           case Assessments.submit_quiz(socket.assigns.current_user, quiz, answers) do
@@ -444,6 +443,84 @@ defmodule WasomiWeb.CoursePlayerLive do
     end
   end
 
+  defp safe_section(section_str) do
+    section = String.to_existing_atom(section_str)
+    if section in @sections, do: {:ok, section}, else: :error
+  rescue
+    ArgumentError -> :error
+  end
+
+  defp enter_section(socket, :module_quiz = section) do
+    socket
+    |> assign(:active_section, section)
+    |> maybe_auto_select_module_quiz()
+  end
+
+  defp enter_section(socket, section), do: assign(socket, :active_section, section)
+
+  # A single-module course has nothing to pick, so skip the module picker and
+  # go straight to that module's quiz — mirrors what a learner would do
+  # manually anyway, without an extra click for a "choice" that isn't one.
+  defp maybe_auto_select_module_quiz(socket) do
+    case socket.assigns.course.modules do
+      [module] -> select_quiz_silently(socket, module)
+      _modules -> socket
+    end
+  end
+
+  defp select_quiz_silently(socket, module) do
+    if socket.assigns.current_quiz do
+      socket
+    else
+      with quiz when not is_nil(quiz) <- Map.get(socket.assigns.quizzes_by_module, module.id),
+           true <-
+             module_quiz_unlocked?(module, socket.assigns.progress, socket.assigns.preview?),
+           questions when questions != [] <- Assessments.list_published_questions(quiz) do
+        existing_submission =
+          if socket.assigns.preview? do
+            nil
+          else
+            socket.assigns.current_user
+            |> Assessments.list_submissions_for_user(quiz)
+            |> List.first()
+          end
+
+        socket
+        |> assign(:current_lecture, nil)
+        |> assign(:current_quiz, %{quiz: quiz, module: module, questions: questions})
+        |> assign(:quiz_answers, %{})
+        |> assign(:quiz_result, existing_submission)
+        |> assign(:current_question_index, 0)
+      else
+        _ -> socket
+      end
+    end
+  end
+
+  # Shared by the untimed "submit-quiz" handler and the timed quiz's own
+  # scoring path — an admin previewing never gets a persisted
+  # `QuizSubmission`, so both compute the same shape in memory instead.
+  defp preview_quiz_result(quiz, questions, answers) do
+    normalized = Map.new(answers, fn {k, v} -> {to_string(k), to_string(v)} end)
+
+    correct_count =
+      Enum.count(questions, fn q ->
+        selected = Map.get(normalized, to_string(q.id))
+        Enum.any?(q.question_options, &(to_string(&1.id) == selected and &1.correct))
+      end)
+
+    score_percent =
+      if questions != [], do: round(correct_count / length(questions) * 100), else: 0
+
+    %{
+      score_percent: score_percent,
+      passed: score_percent >= quiz.passing_score_percent,
+      preview?: true,
+      correct_count: correct_count,
+      total_count: length(questions)
+    }
+  end
+
   defp persist_progress(socket, lecture, position, explicit_complete?) do
     result =
       if explicit_complete? do
@@ -622,212 +699,41 @@ defmodule WasomiWeb.CoursePlayerLive do
             </div>
           </div>
 
-          <div class="mt-10 grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_340px] lg:gap-12">
+          <nav class="mt-8 flex flex-wrap gap-1.5 rounded-2xl bg-soft p-1.5">
+            <button
+              :for={{section, label, icon} <- section_nav_items()}
+              type="button"
+              phx-click="select-section"
+              phx-value-section={section}
+              class={[
+                "inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition",
+                @active_section == section && "bg-white text-primary shadow-sm",
+                @active_section != section && "text-body hover:text-ink"
+              ]}
+            >
+              <.icon name={icon} class="h-4 w-4" /> {label}
+            </button>
+            <.link
+              :for={{mode, label, icon} <- study_hub_nav_items()}
+              navigate={study_hub_path(@course, current_module(assigns), mode)}
+              class="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium text-body transition hover:text-ink"
+            >
+              <.icon name={icon} class="h-4 w-4" /> {label}
+            </.link>
+          </nav>
+
+          <div
+            :if={@active_section == :lessons}
+            class="mt-6 grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_340px] lg:gap-12"
+          >
             <section class="overflow-hidden rounded-3xl border border-black/5 bg-white">
               <%= if @current_quiz do %>
-                <div class="p-8 lg:p-10">
-                  <div class="flex flex-wrap items-center justify-between gap-4 border-b border-black/5 pb-6">
-                    <div>
-                      <h2 class="text-2xl font-semibold tracking-tight text-ink">
-                        Module {@current_quiz.module.position} Quiz
-                      </h2>
-                      <p class="mt-1 text-sm font-medium text-ink/70">
-                        {@current_quiz.module.title}
-                      </p>
-                    </div>
-                    <div>
-                      <span class="inline-flex items-center gap-2 rounded-full bg-mint px-3.5 py-1.5 text-xs font-semibold uppercase tracking-wider text-primary">
-                        <.icon name="hero-academic-cap" class="h-4 w-4" />
-                        Passing requirement: {@current_quiz.quiz.passing_score_percent}% score
-                      </span>
-                    </div>
-                  </div>
-
-                  <%= if @quiz_result do %>
-                    <div class={[
-                      "mt-8 rounded-2xl p-6 text-center sm:p-8",
-                      if(result_passed?(@quiz_result), do: "bg-mint", else: "bg-red-50")
-                    ]}>
-                      <div class={[
-                        "mx-auto flex h-16 w-16 items-center justify-center rounded-full",
-                        if(result_passed?(@quiz_result),
-                          do: "bg-white text-primary",
-                          else: "bg-white text-red-600"
-                        )
-                      ]}>
-                        <.icon
-                          name={
-                            if(result_passed?(@quiz_result),
-                              do: "hero-check-circle",
-                              else: "hero-x-circle"
-                            )
-                          }
-                          class="h-8 w-8"
-                        />
-                      </div>
-
-                      <h3 class="mt-4 text-2xl font-bold text-ink">
-                        {if result_passed?(@quiz_result), do: "Quiz Passed!", else: "Quiz Not Passed"}
-                      </h3>
-                      <p class={[
-                        "mt-2 text-3xl font-extrabold",
-                        if(result_passed?(@quiz_result), do: "text-primary", else: "text-red-600")
-                      ]}>
-                        {result_score(@quiz_result)}%
-                      </p>
-
-                      <p :if={preview_result?(@quiz_result)} class="mt-3 text-xs text-muted">
-                        Admin Preview Result — score was evaluated in-memory and not saved.
-                      </p>
-
-                      <div class="mt-6 flex justify-center gap-4">
-                        <button
-                          type="button"
-                          phx-click="retake-quiz"
-                          class="rounded-full border border-black/10 bg-white px-5 py-2.5 text-sm font-semibold text-ink transition hover:bg-ink hover:text-white"
-                        >
-                          Retake Quiz
-                        </button>
-                      </div>
-                    </div>
-
-                    <% q_results = question_results(@current_quiz.questions, @quiz_answers) %>
-                    <div :if={q_results != []} class="mt-8 space-y-4">
-                      <h4 class="text-lg font-bold tracking-tight text-ink">
-                        Question Breakdown
-                      </h4>
-                      <ol class="divide-y divide-black/5 border-t border-black/5">
-                        <li :for={{r, idx} <- Enum.with_index(q_results, 1)} class="py-4">
-                          <div class="flex items-start gap-3">
-                            <div class={[
-                              "mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full text-white",
-                              if(r.correct?, do: "bg-green-500", else: "bg-red-500")
-                            ]}>
-                              <.icon
-                                name={if r.correct?, do: "hero-check", else: "hero-x-mark"}
-                                class="h-3.5 w-3.5 stroke-[2.5]"
-                              />
-                            </div>
-                            <div class="min-w-0 flex-1">
-                              <p class="text-sm font-semibold text-ink">
-                                {idx}. {r.question.prompt}
-                              </p>
-                              <p class="mt-1 text-sm text-ink/70">
-                                Your answer:
-                                <span class={
-                                  if(r.correct?,
-                                    do: "font-medium text-green-700",
-                                    else: "font-medium text-red-600"
-                                  )
-                                }>
-                                  {(r.selected_option && r.selected_option.label) || "—"}
-                                </span>
-                              </p>
-                              <p
-                                :if={!r.correct? && r.correct_option}
-                                class="mt-1 text-sm font-medium text-green-700"
-                              >
-                                Correct answer: {r.correct_option.label}
-                              </p>
-                              <p
-                                :if={r.question.explanation && r.question.explanation != ""}
-                                class="mt-2 text-xs text-body/70"
-                              >
-                                {r.question.explanation}
-                              </p>
-                            </div>
-                          </div>
-                        </li>
-                      </ol>
-                    </div>
-                  <% else %>
-                    <% question = Enum.at(@current_quiz.questions, @current_question_index) %>
-                    <% total = length(@current_quiz.questions) %>
-                    <% last_question? = @current_question_index == total - 1 %>
-                    <form phx-submit="submit-quiz" class="mt-8 space-y-6">
-                      <div class="h-1.5 overflow-hidden rounded-full bg-mint">
-                        <div
-                          class="h-full rounded-full bg-primary transition-all duration-300"
-                          style={"width: #{round((@current_question_index + 1) / total * 100)}%"}
-                        >
-                        </div>
-                      </div>
-
-                      <div class="min-h-[480px] rounded-2xl border border-black/5 p-6">
-                        <p class="text-xs font-semibold uppercase tracking-wider text-primary">
-                          Question {@current_question_index + 1} of {total}
-                        </p>
-                        <h3 class="mt-2 text-lg font-medium leading-snug text-ink">
-                          {question.prompt}
-                        </h3>
-
-                        <div class="mt-4 space-y-2.5">
-                          <label
-                            :for={option <- question.question_options}
-                            class={[
-                              "flex items-center gap-3 rounded-xl border p-3.5 transition cursor-pointer",
-                              if(
-                                to_string(Map.get(@quiz_answers, to_string(question.id))) ==
-                                  to_string(option.id),
-                                do: "border-primary bg-mint text-ink font-medium",
-                                else:
-                                  "border-black/10 text-body hover:border-primary/40 hover:bg-mint/40"
-                              )
-                            ]}
-                          >
-                            <input
-                              type="radio"
-                              name={"question_#{question.id}"}
-                              value={option.id}
-                              checked={
-                                to_string(Map.get(@quiz_answers, to_string(question.id))) ==
-                                  to_string(option.id)
-                              }
-                              phx-click="select-quiz-option"
-                              phx-value-question-id={question.id}
-                              phx-value-option-id={option.id}
-                              class="h-4 w-4 border-black/20 bg-white text-primary focus:ring-primary"
-                            />
-                            <span class="text-sm">{option.label}</span>
-                          </label>
-                        </div>
-                      </div>
-
-                      <div class="flex items-center justify-between border-t border-black/5 pt-6">
-                        <button
-                          type="button"
-                          phx-click="prev-question"
-                          disabled={@current_question_index == 0}
-                          class="inline-flex items-center gap-1.5 rounded-full border border-black/10 px-5 py-2.5 text-sm font-semibold text-ink transition hover:bg-mint disabled:cursor-not-allowed disabled:opacity-40"
-                        >
-                          <.icon name="hero-arrow-left" class="h-4 w-4" /> Back
-                        </button>
-
-                        <span class="text-xs text-muted">
-                          Answered {map_size(@quiz_answers)} of {total} questions
-                        </span>
-
-                        <button
-                          :if={!last_question?}
-                          type="button"
-                          phx-click="next-question"
-                          class="inline-flex items-center gap-1.5 rounded-full bg-primary px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-ink"
-                        >
-                          Next <.icon name="hero-arrow-right" class="h-4 w-4" />
-                        </button>
-
-                        <button
-                          :if={last_question?}
-                          type="submit"
-                          disabled={map_size(@quiz_answers) < total}
-                          class="rounded-full bg-primary px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-ink disabled:cursor-not-allowed disabled:opacity-40"
-                        >
-                          Submit Quiz
-                        </button>
-                      </div>
-                    </form>
-                  <% end %>
-                </div>
+                <.quiz_taking_panel
+                  current_quiz={@current_quiz}
+                  quiz_result={@quiz_result}
+                  quiz_answers={@quiz_answers}
+                  current_question_index={@current_question_index}
+                />
               <% else %>
                 <%= if @current_practice_module do %>
                   <div class="p-8 lg:p-10">
@@ -1318,6 +1224,88 @@ defmodule WasomiWeb.CoursePlayerLive do
           </div>
 
           <section
+            :if={@active_section == :module_quiz}
+            class="mt-6 overflow-hidden rounded-3xl border border-black/5 bg-white"
+          >
+            <%= if @current_quiz do %>
+              <div class="flex items-center justify-between gap-4 border-b border-black/5 px-8 pt-6 lg:px-10">
+                <button
+                  :if={length(@course.modules) > 1}
+                  type="button"
+                  phx-click="exit-quiz"
+                  class="inline-flex items-center gap-1.5 text-sm font-medium text-muted transition hover:text-primary"
+                >
+                  <.icon name="hero-arrow-left" class="h-4 w-4" /> Choose a different module
+                </button>
+              </div>
+              <.quiz_taking_panel
+                current_quiz={@current_quiz}
+                quiz_result={@quiz_result}
+                quiz_answers={@quiz_answers}
+                current_question_index={@current_question_index}
+              />
+            <% else %>
+              <div class="p-8 lg:p-10">
+                <span class="inline-flex items-center gap-2 rounded-full bg-mint px-3 py-1 text-xs font-semibold uppercase tracking-wider text-primary">
+                  <.icon name="hero-academic-cap" class="h-4 w-4" /> Module Quiz
+                </span>
+                <h2 class="mt-3 text-2xl font-semibold tracking-tight text-ink">
+                  Choose a module to take its quiz
+                </h2>
+                <p class="mt-2 text-body">
+                  Each module quiz covers everything in that module's lessons.
+                </p>
+
+                <div class="mt-6 grid gap-3 sm:grid-cols-2">
+                  <%= for module <- @course.modules do %>
+                    <% module_quiz = Map.get(@quizzes_by_module, module.id) %>
+                    <% unlocked? = module_quiz_unlocked?(module, @progress, @preview?) %>
+                    <button
+                      type="button"
+                      phx-click="select-quiz"
+                      phx-value-module_id={module.id}
+                      disabled={!module_quiz || !unlocked?}
+                      class={[
+                        "flex items-center justify-between gap-3 rounded-2xl border p-4 text-left text-sm transition",
+                        module_quiz && unlocked? &&
+                          "border-black/10 text-body hover:border-primary/40 hover:bg-mint/40 hover:text-ink",
+                        (!module_quiz || !unlocked?) &&
+                          "cursor-not-allowed border-black/5 text-muted"
+                      ]}
+                    >
+                      <span class="min-w-0">
+                        <span class="block truncate font-medium text-ink">
+                          Module {module.position}: {module.title}
+                        </span>
+                        <span class="mt-0.5 block text-xs text-muted">
+                          <%= cond do %>
+                            <% !module_quiz -> %>
+                              No quiz available yet
+                            <% !unlocked? -> %>
+                              Locked — finish this module's lessons first
+                            <% true -> %>
+                              {length(module.lectures)} lectures covered
+                          <% end %>
+                        </span>
+                      </span>
+                      <.icon
+                        :if={!module_quiz || !unlocked?}
+                        name="hero-lock-closed"
+                        class="h-4 w-4 shrink-0"
+                      />
+                      <.icon
+                        :if={module_quiz && unlocked?}
+                        name="hero-arrow-right"
+                        class="h-4 w-4 shrink-0 text-primary"
+                      />
+                    </button>
+                  <% end %>
+                </div>
+              </div>
+            <% end %>
+          </section>
+
+          <section
             :if={!@preview?}
             id="course-certificates"
             class="mt-8 rounded-3xl border border-black/5 bg-white p-6 lg:p-8"
@@ -1379,6 +1367,38 @@ defmodule WasomiWeb.CoursePlayerLive do
       </div>
     </.student_layout>
     """
+  end
+
+  defp section_nav_items do
+    [
+      {:lessons, "Lessons", "hero-play-circle"},
+      {:module_quiz, "Module quiz", "hero-academic-cap"}
+    ]
+  end
+
+  # Flashcards/Extra practice/Timed quiz moved to the cross-course
+  # `WasomiWeb.StudyHubLive` — these render as plain navigation links here,
+  # not `@active_section` tabs, pre-scoped to whatever module the learner is
+  # currently watching so switching to self-study tools for "this" module
+  # stays one click away.
+  defp study_hub_nav_items do
+    [
+      {"flashcards", "Flashcards", "hero-rectangle-stack"},
+      {"practice", "Extra practice", "hero-pencil-square"},
+      {"timed_quiz", "Timed quiz", "hero-clock"}
+    ]
+  end
+
+  defp current_module(%{current_lecture: nil}), do: nil
+
+  defp current_module(%{current_lecture: lecture, course: course}) do
+    Enum.find(course.modules, &(&1.id == lecture.module_id))
+  end
+
+  defp study_hub_path(course, nil, _mode), do: ~p"/learn/study?#{%{course: course.slug}}"
+
+  defp study_hub_path(course, module, mode) do
+    ~p"/learn/study?#{%{course: course.slug, module: module.id, scope: "module", mode: mode}}"
   end
 
   defp lecture_page_title(socket, lecture),
@@ -1529,33 +1549,6 @@ defmodule WasomiWeb.CoursePlayerLive do
 
   defp certificate_title(%{type: :module, module: module}), do: module.title
   defp certificate_title(%{type: :course, course: course}), do: course.title
-
-  defp result_passed?(%{passed: passed}), do: passed
-  defp result_passed?(_), do: false
-
-  defp result_score(%{score_percent: score}), do: score
-  defp result_score(_), do: 0
-
-  defp preview_result?(%{preview?: preview?}), do: preview?
-  defp preview_result?(%Wasomi.Assessments.QuizSubmission{}), do: false
-  defp preview_result?(_), do: false
-
-  defp question_results(questions, answers) do
-    answers = answers || %{}
-
-    Enum.map(questions, fn question ->
-      selected_id = Map.get(answers, to_string(question.id))
-      selected_option = Enum.find(question.question_options, &(to_string(&1.id) == selected_id))
-      correct_option = Enum.find(question.question_options, & &1.correct)
-
-      %{
-        question: question,
-        selected_option: selected_option,
-        correct_option: correct_option,
-        correct?: selected_option != nil and selected_option.correct
-      }
-    end)
-  end
 
   defp load_lq_submissions(socket, lecture) do
     if socket.assigns.preview? do

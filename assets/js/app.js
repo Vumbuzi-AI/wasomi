@@ -615,6 +615,42 @@ Hooks.TogglePassword = {
   }
 }
 
+Hooks.QuizCountdown = {
+  // Display-only: the server owns the deadline and auto-submits via its own
+  // `Process.send_after` timer, so this never drives submission itself —
+  // just a smooth per-second readout between LiveView renders.
+  mounted() {
+    this.tick()
+    this.timer = window.setInterval(() => this.tick(), 1000)
+  },
+  destroyed() {
+    window.clearInterval(this.timer)
+  },
+  tick() {
+    const deadline = new Date(this.el.dataset.deadline).getTime()
+    const totalMs = (parseInt(this.el.dataset.totalSeconds, 10) || 0) * 1000
+    const remainingMs = Math.max(0, deadline - Date.now())
+    const remainingSeconds = Math.ceil(remainingMs / 1000)
+    const minutes = Math.floor(remainingSeconds / 60)
+    const seconds = remainingSeconds % 60
+    this.el.textContent = `${minutes}:${String(seconds).padStart(2, "0")}`
+
+    const ratio = totalMs > 0 ? remainingMs / totalMs : 0
+    this.el.classList.remove("text-primary", "text-amber-500", "text-red-600")
+    if (ratio <= 0.1) {
+      this.el.classList.add("text-red-600")
+    } else if (ratio <= 0.25) {
+      this.el.classList.add("text-amber-500")
+    } else {
+      this.el.classList.add("text-primary")
+    }
+
+    if (remainingMs <= 0) {
+      window.clearInterval(this.timer)
+    }
+  }
+}
+
 Hooks.FlashAutoDismiss = {
   mounted() {
     this.schedule()

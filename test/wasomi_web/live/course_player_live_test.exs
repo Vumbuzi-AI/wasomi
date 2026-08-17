@@ -412,6 +412,199 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
     refute html =~ "Admin Preview Result"
   end
 
+  describe "section nav and the Module quiz panel" do
+    test "the nav renders Lessons and Module quiz tabs, active by default on Lessons", %{
+      conn: conn,
+      user: user
+    } do
+      course = course_fixture(status: :published)
+      module = course_module_fixture(course_id: course.id, position: 1)
+      lecture_fixture(module_id: module.id, position: 1)
+      {:ok, pending} = Enrollments.create_pending_enrollment(user, course)
+      {:ok, _active} = Enrollments.activate_enrollment(pending)
+
+      {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
+
+      for label <- ["Lessons", "Module quiz"] do
+        assert has_element?(view, "nav button", label)
+      end
+
+      assert has_element?(view, "nav button.bg-white.text-primary", "Lessons")
+    end
+
+    test "the nav links Flashcards/Extra practice/Timed quiz to the study hub, pre-scoped to the current module",
+         %{conn: conn, user: user} do
+      course = course_fixture(status: :published)
+      module = course_module_fixture(course_id: course.id, position: 1)
+      lecture = lecture_fixture(module_id: module.id, position: 1)
+      {:ok, pending} = Enrollments.create_pending_enrollment(user, course)
+      {:ok, _active} = Enrollments.activate_enrollment(pending)
+
+      {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
+      view |> element("button[data-lecture-id='#{lecture.id}']") |> render_click()
+
+      for {label, mode} <- [
+            {"Flashcards", "flashcards"},
+            {"Extra practice", "practice"},
+            {"Timed quiz", "timed_quiz"}
+          ] do
+        assert has_element?(
+                 view,
+                 "nav a[href*='course=#{course.slug}'][href*='module=#{module.id}']" <>
+                   "[href*='scope=module'][href*='mode=#{mode}']",
+                 label
+               )
+      end
+    end
+
+    test "the nav falls back to the study hub's own picker when no lecture is selected", %{
+      conn: conn,
+      user: user
+    } do
+      course = course_fixture(status: :published)
+      course_module_fixture(course_id: course.id, position: 1)
+      {:ok, pending} = Enrollments.create_pending_enrollment(user, course)
+      {:ok, _active} = Enrollments.activate_enrollment(pending)
+
+      {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
+
+      assert has_element?(
+               view,
+               "nav a[href='/learn/study?course=#{course.slug}']",
+               "Flashcards"
+             )
+    end
+
+    test "an unknown section value is ignored rather than crashing the view", %{
+      conn: conn,
+      user: user
+    } do
+      course = course_fixture(status: :published)
+      module = course_module_fixture(course_id: course.id, position: 1)
+      lecture_fixture(module_id: module.id, position: 1)
+      {:ok, pending} = Enrollments.create_pending_enrollment(user, course)
+      {:ok, _active} = Enrollments.activate_enrollment(pending)
+
+      {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
+      render_hook(view, "select-section", %{"section" => "not_a_real_section"})
+
+      assert has_element?(view, "nav button.bg-white.text-primary", "Lessons")
+    end
+
+    test "a multi-module course shows a module picker for the Module quiz section", %{
+      conn: conn,
+      user: user
+    } do
+      course = course_fixture(status: :published)
+      module1 = course_module_fixture(course_id: course.id, position: 1)
+      lecture_fixture(module_id: module1.id, position: 1)
+      module2 = course_module_fixture(course_id: course.id, position: 2)
+      lecture_fixture(module_id: module2.id, position: 1)
+      quiz = Wasomi.AssessmentsFixtures.quiz_fixture(%{module: module1})
+      Wasomi.AssessmentsFixtures.question_fixture(%{quiz: quiz})
+      {:ok, pending} = Enrollments.create_pending_enrollment(user, course)
+      {:ok, _active} = Enrollments.activate_enrollment(pending)
+
+      {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
+      html = view |> element("nav button", "Module quiz") |> render_click()
+
+      assert html =~ "Choose a module to take its quiz"
+      assert html =~ "No quiz available yet"
+      refute html =~ "Question 1 of"
+    end
+
+    test "picking an unlocked module from the picker shows that module's quiz", %{
+      conn: conn,
+      user: user
+    } do
+      course = course_fixture(status: :published)
+      module1 = course_module_fixture(course_id: course.id, position: 1)
+      lecture1 = lecture_fixture(module_id: module1.id, position: 1)
+      module2 = course_module_fixture(course_id: course.id, position: 2)
+      lecture_fixture(module_id: module2.id, position: 1)
+      quiz = Wasomi.AssessmentsFixtures.quiz_fixture(%{module: module1})
+      Wasomi.AssessmentsFixtures.question_fixture(%{quiz: quiz})
+      {:ok, pending} = Enrollments.create_pending_enrollment(user, course)
+      {:ok, _active} = Enrollments.activate_enrollment(pending)
+      {:ok, _progress, _events} = complete_lecture_via_progress!(user, lecture1)
+
+      {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
+      view |> element("nav button", "Module quiz") |> render_click()
+
+      html =
+        view
+        |> element("button[phx-value-module_id='#{module1.id}']")
+        |> render_click()
+
+      assert html =~ "Question 1 of 1"
+      assert has_element?(view, "button", "Choose a different module")
+    end
+
+    test "exit-quiz returns to the module picker", %{conn: conn, user: user} do
+      course = course_fixture(status: :published)
+      module1 = course_module_fixture(course_id: course.id, position: 1)
+      lecture1 = lecture_fixture(module_id: module1.id, position: 1)
+      module2 = course_module_fixture(course_id: course.id, position: 2)
+      lecture_fixture(module_id: module2.id, position: 1)
+      quiz = Wasomi.AssessmentsFixtures.quiz_fixture(%{module: module1})
+      Wasomi.AssessmentsFixtures.question_fixture(%{quiz: quiz})
+      {:ok, pending} = Enrollments.create_pending_enrollment(user, course)
+      {:ok, _active} = Enrollments.activate_enrollment(pending)
+      {:ok, _progress, _events} = complete_lecture_via_progress!(user, lecture1)
+
+      {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
+      view |> element("nav button", "Module quiz") |> render_click()
+      view |> element("button[phx-value-module_id='#{module1.id}']") |> render_click()
+      assert has_element?(view, "form[phx-submit='submit-quiz']")
+
+      html = view |> element("button", "Choose a different module") |> render_click()
+
+      assert html =~ "Choose a module to take its quiz"
+      refute has_element?(view, "form[phx-submit='submit-quiz']")
+    end
+
+    test "a single-module course skips the picker and shows the quiz directly", %{
+      conn: conn,
+      user: user
+    } do
+      course = course_fixture(status: :published)
+      module = course_module_fixture(course_id: course.id, position: 1)
+      lecture = lecture_fixture(module_id: module.id, position: 1)
+      quiz = Wasomi.AssessmentsFixtures.quiz_fixture(%{module: module})
+      Wasomi.AssessmentsFixtures.question_fixture(%{quiz: quiz})
+      {:ok, pending} = Enrollments.create_pending_enrollment(user, course)
+      {:ok, _active} = Enrollments.activate_enrollment(pending)
+      {:ok, _progress, _events} = complete_lecture_via_progress!(user, lecture)
+
+      {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
+      html = view |> element("nav button", "Module quiz") |> render_click()
+
+      assert html =~ "Question 1 of 1"
+      refute html =~ "Choose a module to take its quiz"
+      # A single-module course has nothing to pick, so the "change module"
+      # escape hatch would be pointless — it's hidden rather than shown-disabled.
+      refute html =~ "Choose a different module"
+    end
+
+    test "the Lessons two-column layout still renders after switching sections and back", %{
+      conn: conn,
+      user: user
+    } do
+      course = course_fixture(status: :published)
+      module = course_module_fixture(course_id: course.id, position: 1)
+      lecture = lecture_fixture(module_id: module.id, position: 1)
+      {:ok, pending} = Enrollments.create_pending_enrollment(user, course)
+      {:ok, _active} = Enrollments.activate_enrollment(pending)
+
+      {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
+      view |> element("nav button", "Module quiz") |> render_click()
+      html = view |> element("nav button", "Lessons") |> render_click()
+
+      assert html =~ lecture.title
+      assert has_element?(view, "#protected-player-#{lecture.id}")
+    end
+  end
+
   describe "admin preview mode" do
     defp admin_fixture(attrs \\ %{}) do
       user = Wasomi.AccountsFixtures.user_fixture(attrs)

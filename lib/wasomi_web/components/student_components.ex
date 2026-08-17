@@ -20,6 +20,7 @@ defmodule WasomiWeb.StudentComponents do
   @nav_items [
     %{key: :dashboard, label: "Dashboard", icon: "hero-squares-2x2", path: "/dashboard"},
     %{key: :courses, label: "My courses", icon: "hero-academic-cap", path: "/courses-taken"},
+    %{key: :study, label: "Study", icon: "hero-rectangle-stack", path: "/learn/study"},
     %{key: :certificates, label: "Certificates", icon: "hero-trophy", path: "/certificates"},
     %{key: :browse, label: "Browse catalog", icon: "hero-magnifying-glass", path: "/courses"},
     %{key: :account, label: "Account", icon: "hero-cog-6-tooth", path: "/users/settings"}
@@ -31,7 +32,7 @@ defmodule WasomiWeb.StudentComponents do
   ## Attributes
 
     * `:active` - the key of the active nav item (`:dashboard`, `:courses`,
-      `:certificates`, `:browse`, `:account`). Defaults to `nil`.
+      `:study`, `:certificates`, `:browse`, `:account`). Defaults to `nil`.
     * `:current_user` - the signed-in user, used for the profile footer.
   """
   attr :active, :atom, default: nil

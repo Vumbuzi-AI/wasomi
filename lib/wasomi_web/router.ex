@@ -85,6 +85,7 @@ defmodule WasomiWeb.Router do
       live "/certificates", CertificatesLive, :index
       live "/courses/:slug/checkout", CheckoutLive, :show
       live "/learn/courses/:slug", CoursePlayerLive, :show
+      live "/learn/study", StudyHubLive, :index
     end
 
     get "/media/lectures/:id/playback", MediaController, :playback

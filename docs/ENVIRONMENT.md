@@ -28,6 +28,10 @@ Development uses local Swoosh mail storage and watches esbuild/Tailwind assets.
 - `Wasomi.CertificateStorageMock`
 - Oban testing mode with queues/plugins disabled
 
+Do not seed the test database (`MIX_ENV=test mix ecto.reset` will refuse). Sandbox only rolls back rows created inside a test; committed seed data stays visible and admin LiveViews will render the full catalogue. `test/test_helper.exs` truncates leftover tables on boot.
+
+`./scripts/check_linters.sh` starts the test VM with `ERL_AFLAGS="+S 4:4 …"` so a 32-thread CPU does not pre-allocate 32 BEAM scheduler arenas. Raw `mix test` should use the same flags on this machine (swap is off, so an OOM is a SIGKILL).
+
 ## Runtime and Production Variables
 
 | Variable | Required in prod | Purpose |

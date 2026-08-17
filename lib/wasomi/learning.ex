@@ -11,6 +11,7 @@ defmodule Wasomi.Learning do
 
   alias Wasomi.Accounts.User
   alias Wasomi.Assessments
+  alias Wasomi.Assessments.Quiz
   alias Wasomi.Catalog.{Course, CourseModule, Lecture}
   alias Wasomi.Certificates
   alias Wasomi.Enrollments
@@ -396,7 +397,19 @@ defmodule Wasomi.Learning do
       |> join(:inner, [lecture], module in CourseModule, on: module.id == lecture.module_id)
       |> where([_lecture, module], module.course_id == ^course_id)
 
-    completion_counts(user.id, lectures)
+    completion_counts(user.id, lectures) and course_quizzes_complete?(user, course_id)
+  end
+
+  @doc """
+  Re-evaluates a course after a quiz passes and emits the course completion
+  event when that quiz was the learner's last outstanding requirement.
+  """
+  def maybe_complete_course(%User{} = user, %Course{} = course) do
+    if course_complete?(user, course) do
+      broadcast_events(user, [{:course_completed, course}])
+    else
+      :ok
+    end
   end
 
   @doc """
@@ -455,6 +468,14 @@ defmodule Wasomi.Learning do
       |> Repo.aggregate(:count)
 
     total > 0 and completed == total
+  end
+
+  defp course_quizzes_complete?(user, course_id) do
+    Quiz
+    |> join(:inner, [quiz], module in CourseModule, on: module.id == quiz.module_id)
+    |> where([quiz, module], module.course_id == ^course_id and quiz.active == true)
+    |> Repo.all()
+    |> Enum.all?(&Assessments.passed_quiz?(user, &1))
   end
 
   defp broadcast_events(user, events) do

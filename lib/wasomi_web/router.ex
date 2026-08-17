@@ -11,6 +11,7 @@ defmodule WasomiWeb.Router do
     plug :protect_from_forgery
     plug :put_secure_browser_headers
     plug :fetch_current_user
+    plug WasomiWeb.Plugs.LocalCurrency
   end
 
   pipeline :api do

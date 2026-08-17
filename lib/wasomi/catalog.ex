@@ -174,21 +174,40 @@ defmodule Wasomi.Catalog do
   @doc """
   Converts the persisted integer minor units into a currency-aware value.
   """
-  def price(%Course{is_free: true, currency: currency}), do: Money.from_integer(0, currency || "KES")
+  def price(%Course{is_free: true, currency: currency}),
+    do: Money.from_integer(0, currency || "KES")
 
   def price(%Course{price_minor: amount, currency: currency}) do
     Money.from_integer(amount || 0, currency || "KES")
   end
 
   @doc """
-  Formats a course price for public display.
+  Formats a course price for public display, optionally converting it to a target currency.
   """
-  def format_price(%Course{is_free: true}), do: "Free"
+  def format_price(course, target_currency \\ nil)
 
-  def format_price(%Course{} = course) do
-    course
-    |> price()
-    |> Money.to_string!()
+  def format_price(%Course{is_free: true}, _target_currency), do: "Free"
+
+  def format_price(%Course{} = course, target_currency) do
+    base_price = price(course)
+
+    formatted =
+      if target_currency && target_currency != to_string(base_price.currency) do
+        case Money.to_currency(base_price, target_currency) do
+          {:ok, converted} -> converted
+          _error -> base_price
+        end
+      else
+        base_price
+      end
+
+    format_money(formatted)
+  end
+
+  defp format_money(money) do
+    money
+    |> Money.to_string!(fractional_digits: 0, currency_symbol: :iso)
+    |> String.replace("\u00A0", " ")
   end
 
   def lecture_count(%Course{modules: modules}) when is_list(modules) do

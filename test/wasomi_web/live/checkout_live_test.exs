@@ -16,6 +16,8 @@ defmodule WasomiWeb.CheckoutLiveTest do
 
     assert {:ok, view, html} = live(conn, ~p"/courses/#{course.slug}/checkout")
     assert html =~ "Enroll &amp; Pay"
+    assert html =~ "KES 800"
+    refute html =~ "800.00"
     assert has_element?(view, "#pay-with-paystack")
   end
 

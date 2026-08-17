@@ -1311,68 +1311,62 @@ defmodule WasomiWeb.CoursePlayerLive do
                     </button>
                   </div>
                 </section>
+
+                <section
+                  :if={!@preview? && @course.certificate_enabled}
+                  id="course-certificate-tree"
+                  class="border-t border-black/5 pt-6"
+                >
+                  <% certificate = course_certificate(@certificates) %>
+                  <.link
+                    :if={certificate}
+                    id={"certificate-#{certificate.id}"}
+                    href={~p"/certificates/#{certificate.id}/download"}
+                    class="group flex w-full items-center gap-3 rounded-xl bg-mint px-3 py-3 text-sm text-primary transition-colors hover:bg-primary hover:text-white"
+                  >
+                    <span class="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-primary text-white transition-colors group-hover:bg-white group-hover:text-primary">
+                      <.icon name="hero-document-check" class="h-4 w-4" />
+                    </span>
+                    <span class="min-w-0 flex-1">
+                      <span class="block font-semibold">Course certificate</span>
+                      <span class="mt-0.5 block text-xs opacity-70">Earned · Download</span>
+                    </span>
+                    <.icon name="hero-arrow-down-tray" class="h-4 w-4 shrink-0" />
+                  </.link>
+
+                  <div
+                    :if={!certificate && @course_certificate_ready?}
+                    id="course-certificate-pending"
+                    class="flex w-full items-center gap-3 rounded-xl bg-soft px-3 py-3 text-sm text-body"
+                  >
+                    <span class="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-mint text-primary">
+                      <.icon name="hero-clock" class="h-4 w-4" />
+                    </span>
+                    <span class="min-w-0 flex-1">
+                      <span class="block font-semibold text-dark">Course certificate</span>
+                      <span class="mt-0.5 block text-xs text-muted">Preparing your download…</span>
+                    </span>
+                  </div>
+
+                  <div
+                    :if={!certificate && !@course_certificate_ready?}
+                    id="course-certificate"
+                    data-locked="true"
+                    aria-disabled="true"
+                    class="flex w-full cursor-not-allowed items-center gap-3 rounded-xl px-3 py-3 text-sm text-muted"
+                  >
+                    <span class="grid h-7 w-7 shrink-0 place-items-center text-muted/60">
+                      <.icon name="hero-lock-closed" class="h-4 w-4" />
+                    </span>
+                    <span class="min-w-0 flex-1">
+                      <span class="block font-medium">Course certificate</span>
+                      <span class="mt-0.5 block text-xs">Complete the course to unlock</span>
+                    </span>
+                  </div>
+                </section>
               </div>
             </aside>
           </div>
-
-          <section
-            :if={!@preview?}
-            id="course-certificates"
-            class="mt-8 rounded-3xl border border-black/5 bg-white p-6 lg:p-8"
-          >
-            <div class="flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <span class="rounded-full bg-mint px-3 py-1 text-sm font-medium text-primary">
-                  Achievements
-                </span>
-                <h2 class="mt-4 text-2xl font-semibold text-dark">Your certificates</h2>
-                <p class="mt-2 text-body">
-                  Module certificates appear as each module is completed. Your course certificate
-                  appears after every lecture is complete.
-                </p>
-              </div>
-              <span
-                :if={@course_progress.complete? && !course_certificate?(@certificates)}
-                id="course-certificate-pending"
-                class="rounded-full border border-black/10 px-4 py-2 text-sm font-medium text-body"
-              >
-                Preparing course certificate…
-              </span>
-            </div>
-
-            <div :if={@certificates != []} class="mt-6 grid gap-4 md:grid-cols-2">
-              <article
-                :for={certificate <- @certificates}
-                id={"certificate-#{certificate.id}"}
-                class="flex items-center justify-between gap-4 rounded-2xl border border-black/5 bg-soft p-5"
-              >
-                <div class="min-w-0">
-                  <p class="text-xs font-semibold uppercase tracking-wider text-primary">
-                    {if certificate.type == :module,
-                      do: "Module certificate",
-                      else: "Course certificate"}
-                  </p>
-                  <h3 class="mt-1 truncate font-medium text-dark">
-                    {certificate_title(certificate)}
-                  </h3>
-                  <p class="mt-1 text-xs text-muted">{certificate.serial_number}</p>
-                </div>
-                <.link
-                  href={~p"/certificates/#{certificate.id}/download"}
-                  class="inline-flex shrink-0 items-center gap-2 rounded-full bg-dark px-4 py-2 text-sm font-medium text-white transition hover:bg-primary"
-                >
-                  <.icon name="hero-arrow-down-tray" class="h-4 w-4" /> Download
-                </.link>
-              </article>
-            </div>
-
-            <p
-              :if={@certificates == [] && !@course_progress.complete?}
-              class="mt-6 rounded-2xl bg-mint p-5 text-sm text-body"
-            >
-              Complete your first module to earn your first certificate.
-            </p>
-          </section>
         </div>
       </div>
     </.student_layout>
@@ -1395,11 +1389,19 @@ defmodule WasomiWeb.CoursePlayerLive do
       end
 
     course_progress = Learning.summarize_progress(course, progress)
+
+    # Only hit `course_complete?/2` once lectures are done — `and` short-circuits
+    # the quiz queries that made every video-progress tick expensive.
+    course_certificate_ready? =
+      not preview? and course_progress.complete? and
+        Learning.course_complete?(socket.assigns.current_user, course)
+
     unlocked_lecture_ids = unlocked_lecture_ids(lectures, progress, preview?)
     current_lecture = pick_current_lecture(socket, lectures, progress)
 
     socket
     |> assign(:course_progress, course_progress)
+    |> assign(:course_certificate_ready?, course_certificate_ready?)
     |> assign(:progress, progress)
     |> assign(:unlocked_lecture_ids, unlocked_lecture_ids)
     |> assign(:current_lecture, current_lecture)
@@ -1522,11 +1524,8 @@ defmodule WasomiWeb.CoursePlayerLive do
     |> min(100)
   end
 
-  defp course_certificate?(certificates),
-    do: Enum.any?(certificates, &(&1.type == :course))
-
-  defp certificate_title(%{type: :module, module: module}), do: module.title
-  defp certificate_title(%{type: :course, course: course}), do: course.title
+  defp course_certificate(certificates),
+    do: Enum.find(certificates, &(&1.type == :course))
 
   defp result_passed?(%{passed: passed}), do: passed
   defp result_passed?(_), do: false

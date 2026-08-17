@@ -127,8 +127,17 @@ defmodule WasomiWeb.CheckoutLive do
 
             <div class="mt-8 flex items-center justify-between rounded-2xl bg-soft p-5">
               <span class="font-medium text-dark">One-time course fee</span>
-              <span class="text-2xl font-semibold text-dark">{Catalog.format_price(@course)}</span>
+              <span class="text-2xl font-semibold text-dark">
+                {Catalog.format_price(@course, assigns[:display_currency])}
+              </span>
             </div>
+
+            <p
+              :if={assigns[:display_currency] && assigns[:display_currency] != "KES"}
+              class="mt-2 text-sm text-zinc-500"
+            >
+              * Billed as {Catalog.format_price(@course)} at checkout.
+            </p>
 
             <div :if={@waiting} id="payment-waiting" class="mt-6 rounded-2xl bg-mint p-5 text-body">
               Payment confirmation is still processing. You can leave this page; access will unlock

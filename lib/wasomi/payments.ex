@@ -43,8 +43,9 @@ defmodule Wasomi.Payments do
     # Note: Paystack configured/verified for KES when using M-Pesa.
     # The currency here acts as a pass-through to Paystack's initialization,
     # so it must match what the account is enabled to process.
-    Money.from_integer(amount || 0, currency)
-    |> Money.to_string!()
+    Money.from_integer(amount || 0, currency || "KES")
+    |> Money.to_string!(fractional_digits: 0, currency_symbol: :iso)
+    |> String.replace("\u00A0", " ")
   end
 
   @doc """

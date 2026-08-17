@@ -2,6 +2,26 @@
 #
 #     mix run priv/repo/seeds.exs
 #
+# Never seed `wasomi_test`. SQL sandbox only rolls back rows created inside a
+# test; committed seed data stays visible, so admin LiveViews render the full
+# catalogue and `mix test` OOMs.
+
+if Mix.env() == :test do
+  Mix.raise("""
+  Refusing to seed the test database.
+
+  MIX_ENV=test mix ecto.reset loads the full catalogue into wasomi_test.
+  Sandbox cannot hide those rows, and admin tests then render every seeded
+  course/payment (and dump that HTML on failure).
+
+  Reset the test DB without seeds:
+
+      MIX_ENV=test mix ecto.drop --force
+      MIX_ENV=test mix ecto.create
+      MIX_ENV=test mix ecto.migrate
+  """)
+end
+
 # Inside the script, you can read and write to any of your
 # repositories directly:
 #

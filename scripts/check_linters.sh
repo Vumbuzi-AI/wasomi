@@ -18,6 +18,10 @@ echo "==> Running Credo"
 mix credo --strict
 
 echo "==> Running tests"
+# i9-14900HX exposes 32 schedulers. BEAM allocator arenas for all of them,
+# plus LiveView tests, plus no swap → kernel SIGKILL. Cap the VM at boot
+# (too late to do this from test_helper.exs).
+export ERL_AFLAGS="+S 4:4 +SDcpu 2:2 +SDio 2 ${ERL_AFLAGS:-}"
 mix test
 
 echo "==> Checks passed"

@@ -93,9 +93,14 @@ config :logger, :console,
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
 
-config :ex_money, 
+config :ex_money,
   default_cldr_backend: Wasomi.Cldr,
+  # To enable live exchange rates for the Dynamic Currency GUI:
+  # 1. Set auto_start_exchange_rate_service: true
+  # 2. Provide your OpenExchangeRates App ID below
   auto_start_exchange_rate_service: false
+
+# open_exchange_rates_app_id: System.get_env("OPEN_EXCHANGE_RATES_APP_ID")
 
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.

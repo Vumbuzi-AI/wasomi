@@ -53,7 +53,9 @@ defmodule WasomiWeb.CatalogLive.Show do
               <div id="enroll" class="flex items-center justify-between gap-5 p-6">
                 <div>
                   <p class="text-sm text-muted">One-time course fee</p>
-                  <p class="text-2xl font-semibold text-dark">{Catalog.format_price(@course)}</p>
+                  <p class="text-2xl font-semibold text-dark">
+                    {Catalog.format_price(@course, assigns[:display_currency])}
+                  </p>
                 </div>
                 <.link
                   href={

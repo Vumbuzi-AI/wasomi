@@ -289,28 +289,7 @@ defmodule WasomiWeb.AdminLive.Analytics do
     end)
   end
 
-  # Chart labels need to stay short, so amounts past 10k KES collapse to
-  # "12.5K"/"1.2M" instead of the full "12,500.00 KES" used everywhere
-  # else in the admin area (stat cards, top courses, recent payments).
-  defp compact_revenue_label(amount_minor) do
-    major = amount_minor / 100
-
-    cond do
-      major >= 1_000_000 -> compact_number(major / 1_000_000) <> "M KES"
-      major >= 10_000 -> compact_number(major / 1_000) <> "K KES"
-      true -> Payments.format_minor(amount_minor)
-    end
-  end
-
-  defp compact_number(number) do
-    rounded = Float.round(number, 1)
-
-    if rounded == trunc(rounded) do
-      Integer.to_string(trunc(rounded))
-    else
-      :erlang.float_to_binary(rounded, decimals: 1)
-    end
-  end
+  defp compact_revenue_label(amount_minor), do: Payments.format_minor(amount_minor)
 
   defp raw_query_params(params) do
     [course_id: params["course_id"], from: params["from"], to: params["to"]]

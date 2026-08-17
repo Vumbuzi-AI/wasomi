@@ -74,7 +74,7 @@ Schema:
 
 - `Wasomi.Learning.LectureProgress` backed by `lecture_progress`
 
-Responsibility: playback progress, lecture completion, sequential unlocks, module/course completion detection, and completion events.
+Responsibility: playback progress, lecture completion, sequential unlocks, module/course completion detection (including required module quizzes for a course), and completion events.
 
 Key functions include `record_progress/3`, `mark_complete/2`, `progress_for_course/2`, `course_progress/2`, `lecture_unlocked?/3`, `next_lecture/2`, `module_complete?/2`, and `course_complete?/2`.
 
@@ -88,9 +88,9 @@ Schema:
 
 - `Wasomi.Certificates.Certificate` backed by `certificates`
 
-Responsibility: idempotent module and course certificate issuance, serial numbers, object keys, signed download URLs, and user notifications.
+Responsibility: idempotent course certificate issuance, serial numbers, object keys, signed download URLs, and user notifications.
 
-Key functions include `enqueue_for_completion_events/2`, `issue/3`, `download_url/3`, `list_for_user/1`, `list_for_user_course/2`, and CRUD helpers.
+Key functions include `enqueue_for_completion_events/2`, `issue/2`, `download_url/3`, `list_for_user/1`, `list_for_user_course/2`, and CRUD helpers.
 
 Certificates use `Wasomi.Certificates.Workers.IssueCertificate`, a renderer module from `:certificate_renderer`, and a storage module from `:certificate_storage`.
 

@@ -996,7 +996,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
     # component — is what actually has a `handle_info/2` for them; see the
     # targeted `update/2` clause above for how they get routed back in.
     socket =
-      if (connected?(socket) and lecture.id) &&
+      if connected?(socket) and lecture.id &&
            socket.assigns.overview_subscribed_lecture_id != lecture.id do
         Catalog.subscribe_to_overview_generation(lecture)
         assign(socket, :overview_subscribed_lecture_id, lecture.id)

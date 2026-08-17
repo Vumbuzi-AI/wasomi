@@ -31,10 +31,10 @@ defmodule WasomiWeb.AdminLive.Components.ResourceUploader do
     <section id={@id} class="space-y-4" phx-drop-target={@upload_config.ref}>
       <div class="group rounded-2xl border-2 border-dashed border-primary/40 bg-mint/30 p-6 text-center transition hover:border-primary hover:bg-mint/50">
         <.icon name="hero-cloud-arrow-up" class="mx-auto h-9 w-9 text-primary" />
-        <h3 class="mt-3 font-semibold text-dark">{@title}</h3>
+        <h3 class="mt-3 font-semibold text-ink">{@title}</h3>
         <p class="mt-1 text-sm text-muted">{@description}</p>
         <p class="mt-2 text-xs text-muted">PDF, ZIP, PPTX or DOCX · up to 50 MB each</p>
-        <label class="mt-4 inline-flex cursor-pointer items-center gap-2 rounded-full bg-dark px-4 py-2.5 text-sm font-medium text-white transition hover:bg-primary">
+        <label class="mt-4 inline-flex cursor-pointer items-center gap-2 rounded-full bg-ink px-4 py-2.5 text-sm font-medium text-white transition hover:bg-primary">
           <.icon name="hero-folder-open" class="h-4 w-4" /> Choose files
           <.live_file_input upload={@upload_config} class="sr-only" />
         </label>
@@ -55,7 +55,7 @@ defmodule WasomiWeb.AdminLive.Components.ResourceUploader do
           </span>
           <div class="min-w-0 flex-1">
             <div class="flex items-center justify-between gap-3">
-              <p class="truncate text-sm font-medium text-dark">{entry.client_name}</p>
+              <p class="truncate text-sm font-medium text-ink">{entry.client_name}</p>
               <span class="shrink-0 text-xs tabular-nums text-muted">{entry.progress}%</span>
             </div>
             <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-neutral-50">

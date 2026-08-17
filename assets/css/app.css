@@ -29,18 +29,29 @@ body {
   animation: fade-in 300ms cubic-bezier(0.2, 0, 0, 1);
 }
 
+/* Login form is phx-update="ignore" (kept plain so password managers/
+   autofill behave correctly), so its submit button can't react to a
+   LiveView-driven "valid?" assign — this reads the same "has content"
+   signal client-side instead, once both fields have been typed into. */
+#login_form:has(input[name="user[email]"]:not(:placeholder-shown)):has(
+    input[name="user[password]"]:not(:placeholder-shown)
+  )
+  button[type="submit"] {
+  @apply bg-dark text-white;
+}
+
 /* ==========================================
-   Collapsible Admin Sidebar
+   Collapsible Sidebar (admin + learner areas)
    ========================================== */
-#admin-sidebar {
+.app-sidebar {
   transition: width 220ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-#admin-sidebar.is-collapsed {
+.app-sidebar.is-collapsed {
   width: 5rem !important;
 }
 
-#admin-sidebar .sidebar-label {
+.app-sidebar .sidebar-label {
   display: inline-block;
   max-width: 12rem;
   opacity: 1;
@@ -51,34 +62,34 @@ body {
     opacity 120ms ease;
 }
 
-#admin-sidebar.is-collapsed .sidebar-label {
+.app-sidebar.is-collapsed .sidebar-label {
   max-width: 0;
   opacity: 0;
 }
 
-#admin-sidebar.is-collapsed .sidebar-row {
+.app-sidebar.is-collapsed .sidebar-row {
   gap: 0;
 }
 
-#admin-sidebar.is-collapsed a,
-#admin-sidebar.is-collapsed .sidebar-row,
-#admin-sidebar.is-collapsed .sidebar-header {
+.app-sidebar.is-collapsed a,
+.app-sidebar.is-collapsed .sidebar-row,
+.app-sidebar.is-collapsed .sidebar-header {
   justify-content: center;
 }
 
-#admin-sidebar .sidebar-toggle-icon {
+.app-sidebar .sidebar-toggle-icon {
   transition: transform 200ms ease;
 }
 
-#admin-sidebar .sidebar-tooltip {
+.app-sidebar .sidebar-tooltip {
   display: none;
 }
 
-#admin-sidebar.is-collapsed .group:hover .sidebar-tooltip {
+.app-sidebar.is-collapsed .group:hover .sidebar-tooltip {
   display: block;
 }
 
-#admin-sidebar.is-collapsed .sidebar-toggle-icon {
+.app-sidebar.is-collapsed .sidebar-toggle-icon {
   transform: rotate(180deg);
 }
 

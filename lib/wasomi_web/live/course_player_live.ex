@@ -423,17 +423,18 @@ defmodule WasomiWeb.CoursePlayerLive do
 
       lecture ->
         cond do
-          not Learning.watched_enough?(
-            progress_position(socket.assigns.progress, lecture.id),
-            lecture.duration_seconds
-          ) ->
+          not (is_nil(lecture.duration_seconds) or
+                   Learning.watched_enough?(
+                     progress_position(socket.assigns.progress, lecture.id),
+                     lecture.duration_seconds
+                   )) ->
             {:noreply,
              put_flash(socket, :error, "Watch more of this lecture before marking it complete.")}
 
           socket.assigns.preview? ->
             {:noreply,
              socket
-             |> put_preview_progress(lecture.id, :completed, lecture.duration_seconds)
+             |> put_preview_progress(lecture.id, :completed, lecture.duration_seconds || 0)
              |> refresh_progress()
              |> put_flash(:info, "Lecture marked complete — preview only, nothing was saved.")}
 
@@ -563,7 +564,7 @@ defmodule WasomiWeb.CoursePlayerLive do
           <div
             :if={@preview?}
             id="admin-preview-banner"
-            class="mb-6 flex flex-col items-start justify-between gap-3 rounded-2xl bg-dark px-5 py-3.5 text-white sm:flex-row sm:items-center sm:px-6"
+            class="mb-6 flex flex-col items-start justify-between gap-3 rounded-2xl bg-ink px-5 py-3.5 text-white sm:flex-row sm:items-center sm:px-6"
           >
             <div class="flex flex-wrap items-center gap-3">
               <span class="inline-flex items-center gap-2 rounded-full bg-amber-500/20 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-amber-400">
@@ -576,7 +577,7 @@ defmodule WasomiWeb.CoursePlayerLive do
             </div>
             <.link
               navigate={~p"/admin/courses/#{@course.slug}"}
-              class="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/20 bg-white/10 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-white hover:text-dark"
+              class="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/20 bg-white/10 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-white hover:text-ink"
             >
               <.icon name="hero-x-mark" class="h-4 w-4" /> Exit Preview
             </.link>
@@ -597,7 +598,7 @@ defmodule WasomiWeb.CoursePlayerLive do
             </div>
 
             <div class="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-              <h1 class="text-3xl font-semibold tracking-tight text-dark sm:text-4xl">
+              <h1 class="text-3xl font-semibold tracking-tight text-ink sm:text-4xl">
                 {@course.title}
               </h1>
               <div class="w-full lg:w-72">
@@ -627,10 +628,10 @@ defmodule WasomiWeb.CoursePlayerLive do
                 <div class="p-8 lg:p-10">
                   <div class="flex flex-wrap items-center justify-between gap-4 border-b border-black/5 pb-6">
                     <div>
-                      <h2 class="text-2xl font-semibold tracking-tight text-dark">
+                      <h2 class="text-2xl font-semibold tracking-tight text-ink">
                         Module {@current_quiz.module.position} Quiz
                       </h2>
-                      <p class="mt-1 text-sm font-medium text-dark/70">
+                      <p class="mt-1 text-sm font-medium text-ink/70">
                         {@current_quiz.module.title}
                       </p>
                     </div>
@@ -665,7 +666,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                         />
                       </div>
 
-                      <h3 class="mt-4 text-2xl font-bold text-dark">
+                      <h3 class="mt-4 text-2xl font-bold text-ink">
                         {if result_passed?(@quiz_result), do: "Quiz Passed!", else: "Quiz Not Passed"}
                       </h3>
                       <p class={[
@@ -683,7 +684,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                         <button
                           type="button"
                           phx-click="retake-quiz"
-                          class="rounded-full border border-black/10 bg-white px-5 py-2.5 text-sm font-semibold text-dark transition hover:bg-dark hover:text-white"
+                          class="rounded-full border border-black/10 bg-white px-5 py-2.5 text-sm font-semibold text-ink transition hover:bg-ink hover:text-white"
                         >
                           Retake Quiz
                         </button>
@@ -692,7 +693,7 @@ defmodule WasomiWeb.CoursePlayerLive do
 
                     <% q_results = question_results(@current_quiz.questions, @quiz_answers) %>
                     <div :if={q_results != []} class="mt-8 space-y-4">
-                      <h4 class="text-lg font-bold tracking-tight text-dark">
+                      <h4 class="text-lg font-bold tracking-tight text-ink">
                         Question Breakdown
                       </h4>
                       <ol class="divide-y divide-black/5 border-t border-black/5">
@@ -708,10 +709,10 @@ defmodule WasomiWeb.CoursePlayerLive do
                               />
                             </div>
                             <div class="min-w-0 flex-1">
-                              <p class="text-sm font-semibold text-dark">
+                              <p class="text-sm font-semibold text-ink">
                                 {idx}. {r.question.prompt}
                               </p>
-                              <p class="mt-1 text-sm text-dark/70">
+                              <p class="mt-1 text-sm text-ink/70">
                                 Your answer:
                                 <span class={
                                   if(r.correct?,
@@ -756,7 +757,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                         <p class="text-xs font-semibold uppercase tracking-wider text-primary">
                           Question {@current_question_index + 1} of {total}
                         </p>
-                        <h3 class="mt-2 text-lg font-medium leading-snug text-dark">
+                        <h3 class="mt-2 text-lg font-medium leading-snug text-ink">
                           {question.prompt}
                         </h3>
 
@@ -768,7 +769,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                               if(
                                 to_string(Map.get(@quiz_answers, to_string(question.id))) ==
                                   to_string(option.id),
-                                do: "border-primary bg-mint text-dark font-medium",
+                                do: "border-primary bg-mint text-ink font-medium",
                                 else:
                                   "border-black/10 text-body hover:border-primary/40 hover:bg-mint/40"
                               )
@@ -797,7 +798,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                           type="button"
                           phx-click="prev-question"
                           disabled={@current_question_index == 0}
-                          class="inline-flex items-center gap-1.5 rounded-full border border-black/10 px-5 py-2.5 text-sm font-semibold text-dark transition hover:bg-mint disabled:cursor-not-allowed disabled:opacity-40"
+                          class="inline-flex items-center gap-1.5 rounded-full border border-black/10 px-5 py-2.5 text-sm font-semibold text-ink transition hover:bg-mint disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           <.icon name="hero-arrow-left" class="h-4 w-4" /> Back
                         </button>
@@ -810,7 +811,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                           :if={!last_question?}
                           type="button"
                           phx-click="next-question"
-                          class="inline-flex items-center gap-1.5 rounded-full bg-primary px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-dark"
+                          class="inline-flex items-center gap-1.5 rounded-full bg-primary px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-ink"
                         >
                           Next <.icon name="hero-arrow-right" class="h-4 w-4" />
                         </button>
@@ -819,7 +820,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                           :if={last_question?}
                           type="submit"
                           disabled={map_size(@quiz_answers) < total}
-                          class="rounded-full bg-primary px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-dark disabled:cursor-not-allowed disabled:opacity-40"
+                          class="rounded-full bg-primary px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-ink disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           Submit Quiz
                         </button>
@@ -835,7 +836,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                         <span class="inline-flex items-center gap-2 rounded-full bg-mint px-3 py-1 text-xs font-semibold uppercase tracking-wider text-primary">
                           <.icon name="hero-beaker" class="h-4 w-4" /> Extra practice
                         </span>
-                        <h2 class="mt-2 text-2xl font-semibold tracking-tight text-dark">
+                        <h2 class="mt-2 text-2xl font-semibold tracking-tight text-ink">
                           {@current_practice_module.module.title}
                         </h2>
                         <p class="mt-1 text-sm text-muted">
@@ -849,7 +850,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                         phx-value-module_id={@current_practice_module.module.id}
                         phx-disable-with="Generating questions..."
                         disabled={@generating_practice?}
-                        class="inline-flex items-center gap-2 rounded-full bg-dark px-4 py-2 text-xs font-semibold text-white transition hover:bg-primary disabled:cursor-not-allowed disabled:opacity-50 active:scale-[0.96]"
+                        class="inline-flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-xs font-semibold text-white transition hover:bg-primary disabled:cursor-not-allowed disabled:opacity-50 active:scale-[0.96]"
                       >
                         <svg
                           :if={@generating_practice?}
@@ -885,7 +886,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                       class="mt-8 rounded-3xl border border-dashed border-black/10 p-10 text-center"
                     >
                       <.icon name="hero-beaker" class="mx-auto h-10 w-10 text-primary/70" />
-                      <h3 class="mt-3 text-lg font-semibold text-dark">No practice questions yet</h3>
+                      <h3 class="mt-3 text-lg font-semibold text-ink">No practice questions yet</h3>
                       <p class="mx-auto mt-1 max-w-md text-sm text-muted">
                         Quiz yourself! Generate a set of practice questions based on this module's lectures and resources.
                       </p>
@@ -895,7 +896,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                         phx-value-module_id={@current_practice_module.module.id}
                         phx-disable-with="Generating questions..."
                         disabled={@generating_practice?}
-                        class="mt-5 inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-dark disabled:cursor-not-allowed disabled:opacity-50 active:scale-[0.96]"
+                        class="mt-5 inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-ink disabled:cursor-not-allowed disabled:opacity-50 active:scale-[0.96]"
                       >
                         <svg
                           :if={@generating_practice?}
@@ -937,7 +938,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                         <p class="text-xs font-semibold uppercase tracking-wider text-muted">
                           Question {idx}
                         </p>
-                        <p class="mt-2 text-sm font-medium text-dark">{question.prompt}</p>
+                        <p class="mt-2 text-sm font-medium text-ink">{question.prompt}</p>
 
                         <div class="mt-4 space-y-2">
                           <div :for={option <- question.practice_question_options}>
@@ -1000,7 +1001,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                   </div>
                 <% else %>
                   <%= if @current_lecture do %>
-                    <div class="flex justify-center p-3">
+                    <div :if={@current_lecture.duration_seconds} class="flex justify-center p-3">
                       <div
                         id={"protected-player-#{@current_lecture.id}"}
                         phx-hook="ProtectedVideo"
@@ -1032,7 +1033,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                       <p class="text-xs font-medium uppercase tracking-widest text-primary">
                         Now playing
                       </p>
-                      <h2 class="mt-3 text-2xl font-semibold tracking-tight text-dark">
+                      <h2 class="mt-3 text-2xl font-semibold tracking-tight text-ink">
                         {@current_lecture.title}
                       </h2>
                       <p class="mt-3 max-w-2xl leading-relaxed text-body">
@@ -1040,10 +1041,11 @@ defmodule WasomiWeb.CoursePlayerLive do
                       </p>
 
                       <% watched_enough? =
-                        Learning.watched_enough?(
-                          progress_position(@progress, @current_lecture.id),
-                          @current_lecture.duration_seconds
-                        ) %>
+                        is_nil(@current_lecture.duration_seconds) or
+                          Learning.watched_enough?(
+                            progress_position(@progress, @current_lecture.id),
+                            @current_lecture.duration_seconds
+                          ) %>
                       <div class="mt-8 flex flex-wrap items-center gap-3">
                         <button
                           :if={progress_status(@progress, @current_lecture.id) != :completed}
@@ -1056,7 +1058,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                             if !watched_enough?,
                               do: "Watch at least 80% of this lecture to unlock this button."
                           }
-                          class="rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-white transition hover:bg-dark disabled:cursor-not-allowed disabled:opacity-40"
+                          class="rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-white transition hover:bg-ink disabled:cursor-not-allowed disabled:opacity-40"
                         >
                           Mark complete
                         </button>
@@ -1091,7 +1093,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                           <.link
                             href={resource_download_path(resource.id, @preview?)}
                             target={if resource.kind == :link, do: "_blank"}
-                            class="flex items-center gap-3 rounded-xl border border-black/5 px-4 py-3 text-sm text-body transition hover:border-primary/40 hover:bg-mint/40 hover:text-dark"
+                            class="flex items-center gap-3 rounded-xl border border-black/5 px-4 py-3 text-sm text-body transition hover:border-primary/40 hover:bg-mint/40 hover:text-ink"
                           >
                             <span class="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-mint text-primary">
                               <.icon name={resource_icon(resource.kind)} class="h-4 w-4" />
@@ -1125,7 +1127,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                         <%= for question <- @current_lecture.questions do %>
                           <% submission = Map.get(@lq_submissions, question.id) %>
                           <div class="rounded-2xl border border-black/5 p-5">
-                            <p class="text-sm font-medium text-dark">{question.question}</p>
+                            <p class="text-sm font-medium text-ink">{question.question}</p>
                             <%= if submission do %>
                               <% band = lq_feedback_band(submission.similarity_score) %>
                               <div class={[
@@ -1138,7 +1140,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                                 :if={submission.similarity_score < 0.5}
                                 class="mt-3 text-sm text-body"
                               >
-                                <span class="font-medium text-dark">Model answer:</span>
+                                <span class="font-medium text-ink">Model answer:</span>
                                 {question.answer}
                               </p>
                             <% else %>
@@ -1149,11 +1151,11 @@ defmodule WasomiWeb.CoursePlayerLive do
                                   rows="3"
                                   placeholder="Type your answer here…"
                                   required
-                                  class="block w-full rounded-xl border border-black/10 bg-soft px-4 py-2.5 text-sm text-dark placeholder-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                                  class="block w-full rounded-xl border border-black/10 bg-soft px-4 py-2.5 text-sm text-ink placeholder-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                                 ></textarea>
                                 <button
                                   type="submit"
-                                  class="rounded-full bg-primary px-5 py-2 text-sm font-semibold text-white transition hover:bg-dark"
+                                  class="rounded-full bg-primary px-5 py-2 text-sm font-semibold text-white transition hover:bg-ink"
                                 >
                                   Submit answer
                                 </button>
@@ -1176,7 +1178,7 @@ defmodule WasomiWeb.CoursePlayerLive do
               <h2 class="text-xs font-medium uppercase tracking-widest text-muted">Course content</h2>
               <div class="-mr-3 mt-6 space-y-8 overflow-y-auto pr-3">
                 <section :for={module <- @course.modules}>
-                  <h3 class="px-1 text-sm font-semibold text-dark">
+                  <h3 class="px-1 text-sm font-semibold text-ink">
                     {module.position}. {module.title}
                   </h3>
                   <div class="mt-3 space-y-0.5">
@@ -1198,7 +1200,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                           "bg-mint font-medium text-primary",
                         (!@current_lecture || @current_lecture.id != lecture.id) &&
                           lecture_unlocked?(@unlocked_lecture_ids, lecture.id) &&
-                          "text-body hover:bg-soft hover:text-dark",
+                          "text-body hover:bg-soft hover:text-ink",
                         !lecture_unlocked?(@unlocked_lecture_ids, lecture.id) &&
                           "cursor-not-allowed text-muted"
                       ]}
@@ -1254,7 +1256,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                           "bg-mint font-medium text-primary",
                         (!@current_quiz || @current_quiz.quiz.id != module_quiz.id) &&
                           quiz_unlocked? &&
-                          "text-body hover:bg-soft hover:text-dark",
+                          "text-body hover:bg-soft hover:text-ink",
                         !quiz_unlocked? && "cursor-not-allowed text-muted"
                       ]}
                     >
@@ -1293,7 +1295,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                         (!@current_practice_module ||
                            @current_practice_module.module.id != module.id) &&
                           practice_unlocked? &&
-                          "text-body hover:bg-soft hover:text-dark",
+                          "text-body hover:bg-soft hover:text-ink",
                         !practice_unlocked? && "cursor-not-allowed text-muted"
                       ]}
                     >
@@ -1325,7 +1327,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                 <span class="rounded-full bg-mint px-3 py-1 text-sm font-medium text-primary">
                   Achievements
                 </span>
-                <h2 class="mt-4 text-2xl font-semibold text-dark">Your certificates</h2>
+                <h2 class="mt-4 text-2xl font-semibold text-ink">Your certificates</h2>
                 <p class="mt-2 text-body">
                   Module certificates appear as each module is completed. Your course certificate
                   appears after every lecture is complete.
@@ -1352,14 +1354,14 @@ defmodule WasomiWeb.CoursePlayerLive do
                       do: "Module certificate",
                       else: "Course certificate"}
                   </p>
-                  <h3 class="mt-1 truncate font-medium text-dark">
+                  <h3 class="mt-1 truncate font-medium text-ink">
                     {certificate_title(certificate)}
                   </h3>
                   <p class="mt-1 text-xs text-muted">{certificate.serial_number}</p>
                 </div>
                 <.link
                   href={~p"/certificates/#{certificate.id}/download"}
-                  class="inline-flex shrink-0 items-center gap-2 rounded-full bg-dark px-4 py-2 text-sm font-medium text-white transition hover:bg-primary"
+                  class="inline-flex shrink-0 items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-medium text-white transition hover:bg-primary"
                 >
                   <.icon name="hero-arrow-down-tray" class="h-4 w-4" /> Download
                 </.link>

@@ -181,6 +181,47 @@ defmodule Wasomi.LearningTest do
       refute Learning.get_lecture_progress(context.user, context.lecture).status == :completed
     end
 
+    test "mark_complete/2 completes a video-less lecture immediately, with nothing to watch" do
+      user = user_fixture()
+      course = course_fixture(status: :published)
+      module = course_module_fixture(course_id: course.id, position: 1)
+
+      lecture =
+        lecture_fixture(
+          module_id: module.id,
+          position: 1,
+          duration_seconds: nil,
+          video_asset_id: nil,
+          video_provider: nil
+        )
+
+      enrollment_fixture(user_id: user.id, course_id: course.id, status: :active)
+
+      assert {:ok, progress, _events} = Learning.mark_complete(user, lecture)
+      assert progress.status == :completed
+      assert progress.last_position_seconds == 0
+    end
+
+    test "record_progress/3 rejects a video-progress event forged for a video-less lecture" do
+      user = user_fixture()
+      course = course_fixture(status: :published)
+      module = course_module_fixture(course_id: course.id, position: 1)
+
+      lecture =
+        lecture_fixture(
+          module_id: module.id,
+          position: 1,
+          duration_seconds: nil,
+          video_asset_id: nil,
+          video_provider: nil
+        )
+
+      enrollment_fixture(user_id: user.id, course_id: course.id, status: :active)
+
+      assert {:error, :no_video} = Learning.record_progress(user, lecture, 30)
+      refute Learning.get_lecture_progress(user, lecture)
+    end
+
     test "rejects progress without an active enrollment", context do
       outsider = user_fixture()
 

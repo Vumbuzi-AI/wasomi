@@ -293,6 +293,14 @@ defmodule WasomiWeb.AdminLiveTest do
       %{conn: log_in_user(conn, admin_fixture())}
     end
 
+    defp submit_basics(view, title, description) do
+      view
+      |> form("#lecture-basics-form", %{
+        "lecture" => %{"title" => title, "description" => description}
+      })
+      |> render_submit()
+    end
+
     test "shows enrolled students, revenue and the thumbnail image", %{conn: conn} do
       course = course_fixture(title: "Detailed Course", thumbnail_key: "cover.jpg")
       {:ok, _view, html} = live(conn, ~p"/admin/courses/#{course.slug}")
@@ -597,8 +605,12 @@ defmodule WasomiWeb.AdminLiveTest do
       module = course_module_fixture(course_id: course.id, title: "Module One")
       {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
 
-      # Open the "add lecture" form, drive the Mux upload/poll flow, then save.
+      # Open the "add lecture" form, save the basics, then drive the Mux upload/poll flow.
       render_click(view, "new_lecture", %{"module-id" => to_string(module.id)})
+
+      refute has_element?(view, "#lecture-basics-form input[name='lecture[position]']")
+
+      submit_basics(view, "Opening hook", "How to start")
 
       expect(Wasomi.MediaProviderMock, :create_upload, fn %Wasomi.Catalog.Lecture{}, [] ->
         {:ok, %{id: "upload-123", url: "https://storage.mux.test/direct-upload"}}
@@ -618,17 +630,7 @@ defmodule WasomiWeb.AdminLiveTest do
       html = render_hook(upload, "check-upload", %{})
       assert html =~ "https://image.mux.test/signed-playback-456/thumbnail.jpg?token=abc"
 
-      refute has_element?(view, "#lecture-form input[name='lecture[position]']")
-
-      html =
-        view
-        |> form("#lecture-form",
-          lecture: %{
-            title: "Opening hook",
-            description: "How to start"
-          }
-        )
-        |> render_submit()
+      html = view |> element("#lecture-video-form") |> render_submit()
 
       assert html =~ "Opening hook"
       [lecture] = Wasomi.Catalog.list_lectures()
@@ -729,10 +731,12 @@ defmodule WasomiWeb.AdminLiveTest do
       {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
 
       render_click(view, "new_lecture", %{"module-id" => to_string(module.id)})
+      submit_basics(view, "Opening hook", "How to start")
+      view |> element("#lecture-video-form") |> render_submit()
 
       # 1. Invalid extension: .exe
       resources_exe =
-        file_input(view, "#lecture-form", :resources, [
+        file_input(view, "#lecture-resources-form", :resources, [
           %{name: "lesson.exe", content: "fake-exe-bytes", type: "application/x-msdownload"}
         ])
 
@@ -741,7 +745,7 @@ defmodule WasomiWeb.AdminLiveTest do
 
       # 2. No extension at all
       resources_no_ext =
-        file_input(view, "#lecture-form", :resources, [
+        file_input(view, "#lecture-resources-form", :resources, [
           %{name: "lesson", content: "fake-bytes", type: "application/octet-stream"}
         ])
 
@@ -765,10 +769,12 @@ defmodule WasomiWeb.AdminLiveTest do
       {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
 
       render_click(view, "new_lecture", %{"module-id" => to_string(module.id)})
+      submit_basics(view, "Opening hook", "How to start")
+      view |> element("#lecture-video-form") |> render_submit()
 
       # Upload a valid PDF file
       resources_pdf =
-        file_input(view, "#lecture-form", :resources, [
+        file_input(view, "#lecture-resources-form", :resources, [
           %{name: "lesson.pdf", content: "fake-pdf-bytes", type: "application/pdf"}
         ])
 

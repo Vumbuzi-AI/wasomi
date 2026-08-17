@@ -44,7 +44,7 @@ defmodule WasomiWeb.AdminComponents do
     assigns = assign(assigns, :nav_items, @nav_items)
 
     ~H"""
-    <div class="min-h-screen bg-neutral-50 text-dark lg:flex">
+    <div class="min-h-screen bg-neutral-50 text-ink lg:flex">
       <%!-- Mobile top bar --%>
       <div class="flex items-center justify-between border-b border-black/5 bg-white px-5 py-4 lg:hidden">
         <.link navigate={~p"/admin"} class="flex flex-col items-start">
@@ -54,7 +54,7 @@ defmodule WasomiWeb.AdminComponents do
         <button
           type="button"
           phx-click={JS.toggle(to: "#admin-sidebar")}
-          class="grid h-10 w-10 place-items-center rounded-xl border border-black/10 text-dark"
+          class="grid h-10 w-10 place-items-center rounded-xl border border-black/10 text-ink"
         >
           <.icon name="hero-bars-3" class="h-5 w-5" />
         </button>
@@ -64,7 +64,7 @@ defmodule WasomiWeb.AdminComponents do
       <aside
         id="admin-sidebar"
         phx-update="ignore"
-        class="hidden w-full shrink-0 border-b border-black/5 bg-white lg:flex lg:h-screen lg:w-72 lg:flex-col lg:border-b-0 lg:border-r"
+        class="app-sidebar hidden w-full shrink-0 border-b border-black/5 bg-white lg:flex lg:h-screen lg:w-72 lg:flex-col lg:border-b-0 lg:border-r"
       >
         <div class="sidebar-header hidden items-center justify-between px-6 py-7 lg:flex">
           <.link navigate={~p"/admin"} class="sidebar-label flex flex-col items-start">
@@ -75,7 +75,7 @@ defmodule WasomiWeb.AdminComponents do
             type="button"
             id="sidebar-toggle"
             phx-hook="SidebarToggle"
-            class="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-black/10 text-dark transition hover:border-primary hover:text-primary"
+            class="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-black/10 text-ink transition hover:border-primary hover:text-primary"
             title="Collapse sidebar"
           >
             <.icon name="hero-chevron-double-left" class="sidebar-toggle-icon h-4 w-4" />
@@ -100,7 +100,7 @@ defmodule WasomiWeb.AdminComponents do
               {String.first(@current_user.name || @current_user.email)}
             </span>
             <div class="sidebar-label min-w-0">
-              <p class="truncate text-sm font-semibold text-dark">
+              <p class="truncate text-sm font-semibold text-ink">
                 {@current_user.name || "Administrator"}
               </p>
               <p class="truncate text-xs text-muted">{@current_user.email}</p>
@@ -142,7 +142,7 @@ defmodule WasomiWeb.AdminComponents do
         <p :if={@eyebrow} class="text-sm font-semibold uppercase tracking-wider text-primary">
           {@eyebrow}
         </p>
-        <h1 class="mt-1 text-3xl font-semibold text-dark sm:text-4xl">{@title}</h1>
+        <h1 class="mt-1 text-3xl font-semibold text-ink sm:text-4xl">{@title}</h1>
         <p :if={@subtitle != []} class="mt-2 max-w-2xl text-body">{render_slot(@subtitle)}</p>
       </div>
       <div :if={@actions != []} class="flex items-center gap-3">{render_slot(@actions)}</div>
@@ -167,7 +167,7 @@ defmodule WasomiWeb.AdminComponents do
           <.icon name={@icon} class="h-5 w-5" />
         </span>
       </div>
-      <p class="mt-4 text-3xl font-semibold text-dark">{@value}</p>
+      <p class="mt-4 text-3xl font-semibold text-ink">{@value}</p>
       <p :if={@hint} class="mt-1 text-xs text-muted">{@hint}</p>
     </div>
     """
@@ -368,7 +368,7 @@ defmodule WasomiWeb.AdminComponents do
             x={bar.center_x}
             y={bar.y - 6}
             text-anchor="middle"
-            class="fill-dark text-[10px] font-semibold"
+            class="fill-ink text-[10px] font-semibold"
           >
             {bar.value_label}
           </text>
@@ -388,7 +388,7 @@ defmodule WasomiWeb.AdminComponents do
               width={bar.tooltip_width}
               height="16"
               rx="4"
-              class="fill-dark"
+              class="fill-ink"
             />
             <text
               x={bar.tooltip_x + bar.tooltip_width / 2}
@@ -451,7 +451,7 @@ defmodule WasomiWeb.AdminComponents do
 
   defp sidebar_tooltip(assigns) do
     ~H"""
-    <span class="sidebar-tooltip pointer-events-none absolute left-full top-1/2 z-50 ml-3 -translate-y-1/2 whitespace-nowrap rounded-lg bg-dark px-2.5 py-1.5 text-xs font-medium text-white shadow-lg">
+    <span class="sidebar-tooltip pointer-events-none absolute left-full top-1/2 z-50 ml-3 -translate-y-1/2 whitespace-nowrap rounded-lg bg-ink px-2.5 py-1.5 text-xs font-medium text-white shadow-lg">
       {@label}
     </span>
     """
@@ -507,7 +507,7 @@ defmodule WasomiWeb.AdminComponents do
       />
 
       <fieldset>
-        <legend class="mb-3 text-sm font-semibold text-dark">
+        <legend class="mb-3 text-sm font-semibold text-ink">
           Answer options <span class="font-normal text-body">(select the correct answer)</span>
         </legend>
         <div class="space-y-3">
@@ -556,7 +556,7 @@ defmodule WasomiWeb.AdminComponents do
               type="button"
               phx-click="add_option"
               phx-value-id={if @question, do: @question.id, else: "new"}
-              class="inline-flex items-center gap-1.5 rounded-full border border-black/10 px-3 py-1.5 text-xs font-semibold text-dark transition hover:bg-neutral-50 hover:text-primary active:scale-[0.96]"
+              class="inline-flex items-center gap-1.5 rounded-full border border-black/10 px-3 py-1.5 text-xs font-semibold text-ink transition hover:bg-neutral-50 hover:text-primary active:scale-[0.96]"
             >
               <.icon name="hero-plus-circle" class="h-4 w-4" /> Add option
             </button>
@@ -569,7 +569,7 @@ defmodule WasomiWeb.AdminComponents do
         <button
           type="submit"
           disabled={@question && !@dirty}
-          class="rounded-full bg-dark px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-primary active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40"
+          class="rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-primary active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40"
         >
           {if @question, do: "Save question", else: "Add question"}
         </button>
@@ -577,7 +577,7 @@ defmodule WasomiWeb.AdminComponents do
           :if={is_nil(@question)}
           type="button"
           phx-click="cancel_new_question"
-          class="text-sm font-medium text-muted hover:text-dark transition active:scale-[0.96]"
+          class="text-sm font-medium text-muted hover:text-ink transition active:scale-[0.96]"
         >
           Cancel
         </button>

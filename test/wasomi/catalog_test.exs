@@ -3,7 +3,7 @@ defmodule Wasomi.CatalogTest do
   use Oban.Testing, repo: Wasomi.Repo
 
   alias Wasomi.Catalog
-  alias Wasomi.Catalog.Workers.TranscribeLecture
+  alias Wasomi.Catalog.Workers.{GenerateLectureOverviewWorker, TranscribeLecture}
 
   describe "courses" do
     alias Wasomi.Catalog.Course
@@ -332,6 +332,71 @@ defmodule Wasomi.CatalogTest do
       assert {:error, %Ecto.Changeset{}} = Catalog.create_lecture(@invalid_attrs)
     end
 
+    test "create_lecture/1 no longer requires a video — a lecture can exist with resources instead" do
+      course_module = course_module_fixture()
+
+      assert {:ok, %Lecture{} = lecture} =
+               Catalog.create_lecture(%{
+                 module_id: course_module.id,
+                 position: 1,
+                 description: "some description",
+                 title: "some title"
+               })
+
+      assert lecture.video_provider == nil
+      assert lecture.video_asset_id == nil
+      assert lecture.duration_seconds == nil
+    end
+
+    test "create_lecture/1 rejects a video_provider without a matching video_asset_id" do
+      course_module = course_module_fixture()
+
+      assert {:error, changeset} =
+               Catalog.create_lecture(%{
+                 module_id: course_module.id,
+                 position: 1,
+                 description: "some description",
+                 title: "some title",
+                 video_provider: :mux
+               })
+
+      assert %{video_asset_id: ["can't be blank when a video provider is set"]} =
+               errors_on(changeset)
+    end
+
+    test "create_lecture/1 rejects a video_asset_id without a matching video_provider" do
+      course_module = course_module_fixture()
+
+      assert {:error, changeset} =
+               Catalog.create_lecture(%{
+                 module_id: course_module.id,
+                 position: 1,
+                 description: "some description",
+                 title: "some title",
+                 video_asset_id: "abc123"
+               })
+
+      assert %{video_provider: ["can't be blank when a video asset id is set"]} =
+               errors_on(changeset)
+    end
+
+    test "create_lecture/1 requires duration_seconds once a real video is attached" do
+      course_module = course_module_fixture()
+
+      assert {:error, changeset} =
+               Catalog.create_lecture(%{
+                 module_id: course_module.id,
+                 position: 1,
+                 description: "some description",
+                 title: "some title",
+                 video_provider: :mux,
+                 video_asset_id: "abc123"
+               })
+
+      assert %{duration_seconds: ["can't be blank when a video is attached"]} =
+               errors_on(changeset)
+    end
+
     test "create_lecture/1 rejects a duplicate title (case-insensitive) within the same module" do
       course_module = course_module_fixture()
       lecture_fixture(module_id: course_module.id, position: 1, title: "Welcome")
@@ -439,6 +504,57 @@ defmodule Wasomi.CatalogTest do
       assert [%{question: "Why?", position: 1}] = updated.questions
     end
 
+    test "create_lecture_content/3 rejects a lecture with neither a video nor any resources" do
+      course_module = course_module_fixture()
+
+      assert {:error, :video_or_resource_required} =
+               Catalog.create_lecture_content(
+                 %{
+                   module_id: course_module.id,
+                   position: 1,
+                   title: "Empty lecture",
+                   description: "some description"
+                 },
+                 [],
+                 []
+               )
+
+      refute Catalog.list_lectures() |> Enum.any?(&(&1.title == "Empty lecture"))
+    end
+
+    test "create_lecture_content/3 accepts a video-less lecture that has at least one resource" do
+      course_module = course_module_fixture()
+
+      assert {:ok, lecture} =
+               Catalog.create_lecture_content(
+                 %{
+                   module_id: course_module.id,
+                   position: 1,
+                   title: "Resource-only lecture",
+                   description: "some description"
+                 },
+                 [%{kind: :link, name: "Reading", url: "https://example.com/reading"}],
+                 []
+               )
+
+      assert lecture.video_asset_id == nil
+      assert [%{kind: :link}] = lecture.resources
+    end
+
+    test "update_lecture_content/4 rejects removing the video with no resources left either" do
+      lecture = lecture_fixture()
+
+      assert {:error, :video_or_resource_required} =
+               Catalog.update_lecture_content(
+                 lecture,
+                 %{title: "Updated lecture", video_provider: nil, video_asset_id: nil},
+                 [],
+                 []
+               )
+
+      assert Catalog.get_lecture!(lecture.id).title == lecture.title
+    end
+
     test "returns a changeset and rolls back invalid lecture content" do
       lecture = lecture_fixture()
       resource = lecture_resource_fixture(lecture_id: lecture.id)
@@ -535,6 +651,24 @@ defmodule Wasomi.CatalogTest do
                later_lecture.id
              ]
     end
+
+    test "duration_seconds/1 treats a video-less lecture's nil duration as 0, not a crash" do
+      course = course_fixture()
+      course_module = course_module_fixture(course_id: course.id)
+      lecture_fixture(module_id: course_module.id, position: 1, duration_seconds: 100)
+
+      lecture_fixture(
+        module_id: course_module.id,
+        position: 2,
+        video_provider: nil,
+        video_asset_id: nil,
+        duration_seconds: nil
+      )
+
+      loaded = Catalog.get_course_with_outline!(course.id)
+
+      assert Catalog.duration_seconds(loaded) == 100
+    end
   end
 
   describe "publish lifecycle" do
@@ -596,29 +730,42 @@ defmodule Wasomi.CatalogTest do
       refute "Add at least one lecture." in issues
     end
 
-    test "PublishGuard.check/1 flags a lecture with no video attached" do
-      # `Wasomi.Catalog.Lecture`'s own changeset already requires
-      # `video_asset_id`, so a real persisted lecture can never actually
-      # reach the guard in this state today — build the struct directly to
-      # unit-test the guard's own logic in isolation (defense in depth: if
-      # that requirement is ever relaxed for a "video pending upload" draft
-      # lecture, this check is already correctly in place).
+    test "PublishGuard.check/1 flags a lecture with neither a video nor resources attached" do
       course = %Wasomi.Catalog.Course{
         modules: [
           %Wasomi.Catalog.CourseModule{
-            lectures: [%Wasomi.Catalog.Lecture{video_asset_id: nil}]
+            lectures: [%Wasomi.Catalog.Lecture{video_asset_id: nil, resources: []}]
           }
         ]
       }
 
       assert {:error, issues} = PublishGuard.check(course)
-      assert "Every lecture needs a video attached." in issues
+
+      assert "Every lecture needs a video or at least one resource (document, link, etc.) attached." in issues
     end
 
     test "PublishGuard.check/1 passes a fully-prepared course" do
       course = course_fixture(price_minor: 150_000, thumbnail_key: "cover.jpg")
       course_module = course_module_fixture(course_id: course.id, position: 1)
       lecture_fixture(module_id: course_module.id, position: 1, video_asset_id: "abc123")
+
+      assert PublishGuard.check(Catalog.get_course_with_outline!(course.id)) == :ok
+    end
+
+    test "PublishGuard.check/1 passes a video-less lecture that has at least one resource" do
+      course = course_fixture(price_minor: 150_000, thumbnail_key: "cover.jpg")
+      course_module = course_module_fixture(course_id: course.id, position: 1)
+
+      lecture =
+        lecture_fixture(
+          module_id: course_module.id,
+          position: 1,
+          video_provider: nil,
+          video_asset_id: nil,
+          duration_seconds: nil
+        )
+
+      lecture_resource_fixture(lecture_id: lecture.id, kind: :document)
 
       assert PublishGuard.check(Catalog.get_course_with_outline!(course.id)) == :ok
     end
@@ -1032,6 +1179,178 @@ defmodule Wasomi.CatalogTest do
       assert transcript.text == "Full transcript."
 
       assert Catalog.get_lecture_transcript(lecture.id).text == "Full transcript."
+    end
+  end
+
+  describe "lecture overview generations" do
+    import Wasomi.{AccountsFixtures, CatalogFixtures}
+
+    defp admin_fixture do
+      user = user_fixture()
+      {:ok, admin} = Wasomi.Accounts.update_user_role(user, :admin)
+      admin
+    end
+
+    test "create_overview_generation/2 records a :pending request" do
+      lecture = lecture_fixture()
+      admin = admin_fixture()
+
+      assert {:ok, generation} = Catalog.create_overview_generation(lecture, admin)
+      assert generation.status == :pending
+      assert generation.lecture_id == lecture.id
+      assert generation.requested_by_id == admin.id
+    end
+
+    test "list_overview_generations_for_lecture/1 returns only that lecture's generations, newest first" do
+      lecture = lecture_fixture()
+      other_lecture = lecture_fixture()
+      admin = admin_fixture()
+
+      {:ok, first} = Catalog.create_overview_generation(lecture, admin)
+      {:ok, second} = Catalog.create_overview_generation(lecture, admin)
+      {:ok, _other} = Catalog.create_overview_generation(other_lecture, admin)
+
+      assert [^second, ^first] = Catalog.list_overview_generations_for_lecture(lecture)
+    end
+
+    test "mark_overview_generation_processing/1 flips status and broadcasts" do
+      lecture = lecture_fixture()
+      admin = admin_fixture()
+      {:ok, generation} = Catalog.create_overview_generation(lecture, admin)
+
+      Catalog.subscribe_to_overview_generation(lecture)
+      updated = Catalog.mark_overview_generation_processing(generation)
+
+      assert updated.status == :processing
+      assert_receive {:lecture_overview_generation_updated, ^updated}
+    end
+
+    test "mark_overview_generation_failed/2 records the error message and broadcasts" do
+      lecture = lecture_fixture()
+      admin = admin_fixture()
+      {:ok, generation} = Catalog.create_overview_generation(lecture, admin)
+
+      Catalog.subscribe_to_overview_generation(lecture)
+      updated = Catalog.mark_overview_generation_failed(generation, "boom")
+
+      assert updated.status == :failed
+      assert updated.error_message == "boom"
+      assert_receive {:lecture_overview_generation_updated, ^updated}
+    end
+
+    test "cancel_overview_generation/1 cancels the pending Oban job and marks the generation failed" do
+      lecture = lecture_fixture()
+      admin = admin_fixture()
+      {:ok, generation} = Catalog.create_overview_generation(lecture, admin)
+
+      {:ok, job} =
+        %{"generation_id" => generation.id}
+        |> GenerateLectureOverviewWorker.new()
+        |> Oban.insert()
+
+      Catalog.subscribe_to_overview_generation(lecture)
+      updated = Catalog.cancel_overview_generation(generation)
+
+      assert updated.status == :failed
+      assert updated.error_message == "Cancelled by admin."
+      assert_receive {:lecture_overview_generation_updated, ^updated}
+
+      assert Wasomi.Repo.get!(Oban.Job, job.id).state == "cancelled"
+    end
+
+    test "cancel_overview_generation/1 doesn't touch a different generation's job" do
+      lecture = lecture_fixture()
+      admin = admin_fixture()
+      {:ok, target} = Catalog.create_overview_generation(lecture, admin)
+      {:ok, other} = Catalog.create_overview_generation(lecture, admin)
+
+      {:ok, other_job} =
+        %{"generation_id" => other.id}
+        |> GenerateLectureOverviewWorker.new()
+        |> Oban.insert()
+
+      Catalog.cancel_overview_generation(target)
+
+      assert Wasomi.Repo.get!(Oban.Job, other_job.id).state == "available"
+    end
+
+    test "mark_overview_generation_ready/2 records scene count and storage key, then broadcasts" do
+      lecture = lecture_fixture()
+      admin = admin_fixture()
+      {:ok, generation} = Catalog.create_overview_generation(lecture, admin)
+
+      Catalog.subscribe_to_overview_generation(lecture)
+
+      assert {:ok, updated} =
+               Catalog.mark_overview_generation_ready(generation, %{
+                 scene_count: 3,
+                 video_storage_key: "lecture-overviews/#{generation.id}.mp4"
+               })
+
+      assert updated.status == :ready
+      assert updated.scene_count == 3
+      assert updated.video_storage_key == "lecture-overviews/#{generation.id}.mp4"
+      assert_receive {:lecture_overview_generation_updated, ^updated}
+    end
+
+    test "mark_overview_video_attaching/1 flips attach_status and clears any prior asset/error" do
+      lecture = lecture_fixture()
+      admin = admin_fixture()
+      {:ok, generation} = Catalog.create_overview_generation(lecture, admin)
+
+      Catalog.subscribe_to_overview_generation(lecture)
+      updated = Catalog.mark_overview_video_attaching(generation)
+
+      assert updated.attach_status == :attaching
+      assert is_nil(updated.attach_asset_id)
+      assert is_nil(updated.attach_error_message)
+      assert_receive {:lecture_overview_generation_updated, ^updated}
+    end
+
+    test "record_overview_video_attach_asset/2 stores the Mux asset id and broadcasts" do
+      lecture = lecture_fixture()
+      admin = admin_fixture()
+      {:ok, generation} = Catalog.create_overview_generation(lecture, admin)
+
+      Catalog.subscribe_to_overview_generation(lecture)
+      updated = Catalog.record_overview_video_attach_asset(generation, "asset_123")
+
+      assert updated.attach_asset_id == "asset_123"
+      assert_receive {:lecture_overview_generation_updated, ^updated}
+    end
+
+    test "mark_overview_video_attached/1 flips attach_status and broadcasts" do
+      lecture = lecture_fixture()
+      admin = admin_fixture()
+      {:ok, generation} = Catalog.create_overview_generation(lecture, admin)
+
+      Catalog.subscribe_to_overview_generation(lecture)
+      updated = Catalog.mark_overview_video_attached(generation)
+
+      assert updated.attach_status == :attached
+      assert_receive {:lecture_overview_generation_updated, ^updated}
+    end
+
+    test "mark_overview_video_attach_failed/2 records the error message and broadcasts" do
+      lecture = lecture_fixture()
+      admin = admin_fixture()
+      {:ok, generation} = Catalog.create_overview_generation(lecture, admin)
+
+      Catalog.subscribe_to_overview_generation(lecture)
+      updated = Catalog.mark_overview_video_attach_failed(generation, "boom")
+
+      assert updated.attach_status == :attach_failed
+      assert updated.attach_error_message == "boom"
+      assert_receive {:lecture_overview_generation_updated, ^updated}
+    end
+
+    test "attach_lecture_video/3 sets the lecture's video fields to the given Mux asset" do
+      lecture = lecture_fixture(video_asset_id: nil, video_provider: nil, duration_seconds: nil)
+
+      assert {:ok, updated} = Catalog.attach_lecture_video(lecture, "playback_abc", 42)
+      assert updated.video_provider == :mux
+      assert updated.video_asset_id == "playback_abc"
+      assert updated.duration_seconds == 42
     end
   end
 end

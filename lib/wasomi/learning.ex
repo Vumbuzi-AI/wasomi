@@ -28,8 +28,15 @@ defmodule Wasomi.Learning do
   Saves a playback position and automatically completes the lecture at 95%.
 
   The persisted position is clamped to the lecture duration. Only active
-  learners may record progress.
+  learners may record progress. A lecture with no video (`duration_seconds`
+  is nil) has no playback to report a position of — a real video player
+  never emits this for one, so reaching this clause means a forged or
+  stale client event; rejected outright rather than trying to make the
+  percent-of-duration completion math below handle a nil duration.
   """
+  def record_progress(%User{}, %Lecture{duration_seconds: nil}, _position_seconds),
+    do: {:error, :no_video}
+
   def record_progress(%User{} = user, %Lecture{} = lecture, position_seconds)
       when is_number(position_seconds) do
     persist_progress(user, lecture, position_seconds, false)
@@ -43,9 +50,21 @@ defmodule Wasomi.Learning do
 
   Requires >= 80% watched (lower than `record_progress/3`'s 95%
   auto-complete, so the button has a real enabled window), checked against
-  last recorded position, not the caller's claim. Returns
-  `{:error, :insufficient_watch_time}` otherwise.
+  last recorded position, not the caller's claim, for a lecture with a
+  video. A lecture without one (`duration_seconds` is only ever set
+  alongside a video, see `Lecture.changeset/2`) has nothing to "watch", so
+  it completes as soon as the learner clicks the button. Returns
+  `{:error, :insufficient_watch_time}` for a video lecture watched too
+  little.
   """
+  def mark_complete(%User{} = user, %Lecture{duration_seconds: nil} = lecture) do
+    if Enrollments.can_access_lecture?(user, lecture) do
+      persist_progress(user, lecture, 0, true)
+    else
+      {:error, :forbidden}
+    end
+  end
+
   def mark_complete(%User{} = user, %Lecture{} = lecture) do
     if Enrollments.can_access_lecture?(user, lecture) do
       watched_position =
@@ -301,7 +320,7 @@ defmodule Wasomi.Learning do
         position_seconds
         |> trunc()
         |> max(0)
-        |> min(lecture.duration_seconds)
+        |> clamp_to_duration(lecture.duration_seconds)
 
       case Repo.transaction(fn ->
              Repo.query!("SELECT pg_advisory_xact_lock($1, $2)", [user.id, lecture.id])
@@ -467,6 +486,12 @@ defmodule Wasomi.Learning do
 
   defp maybe_add_event(events, true, event), do: events ++ [event]
   defp maybe_add_event(events, false, _event), do: events
+
+  # A video-less lecture has no duration to clamp against; explicit
+  # completion (the only caller for such a lecture — see `mark_complete/2`)
+  # already bypasses `completion_position/1` too.
+  defp clamp_to_duration(position, nil), do: position
+  defp clamp_to_duration(position, duration_seconds), do: min(position, duration_seconds)
 
   defp completion_position(duration_seconds),
     do: duration_seconds * @completion_ratio

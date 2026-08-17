@@ -134,7 +134,7 @@ defmodule WasomiWeb.AdminLive.CourseCertificate do
           <.icon name="hero-arrow-left-mini" class="h-4 w-4" /> Back to {@course.title}
         </.link>
 
-        <h1 class="text-3xl font-semibold text-dark">Certificate settings</h1>
+        <h1 class="text-3xl font-semibold text-ink">Certificate settings</h1>
 
         <div class="grid gap-8 lg:grid-cols-2">
           <section class="rounded-3xl border border-black/5 bg-white p-6">
@@ -213,7 +213,7 @@ defmodule WasomiWeb.AdminLive.CourseCertificate do
               type="button"
               phx-click="test_pdf"
               disabled={@generating_pdf?}
-              class="mt-4 inline-flex items-center gap-2 rounded-full border border-dark px-5 py-2.5 text-sm font-medium text-dark transition hover:bg-dark hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+              class="mt-4 inline-flex items-center gap-2 rounded-full border border-ink px-5 py-2.5 text-sm font-medium text-ink transition hover:bg-ink hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
             >
               <.icon name="hero-arrow-down-tray" class="h-4 w-4" />
               {if @generating_pdf?, do: "Generating…", else: "Test PDF"}
@@ -221,7 +221,7 @@ defmodule WasomiWeb.AdminLive.CourseCertificate do
           </section>
 
           <section class="rounded-3xl border border-black/5 bg-white p-3">
-            <p class="mb-2 px-3 pt-1 text-sm font-semibold text-dark">Live preview</p>
+            <p class="mb-2 px-3 pt-1 text-sm font-semibold text-ink">Live preview</p>
             <iframe
               srcdoc={@preview_html}
               title="Certificate preview"

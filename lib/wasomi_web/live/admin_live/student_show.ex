@@ -97,7 +97,7 @@ defmodule WasomiWeb.AdminLive.StudentShow do
               {String.first(@user.name || @user.email)}
             </span>
             <div>
-              <h1 class="text-3xl font-semibold text-dark">{@user.name || "Learner"}</h1>
+              <h1 class="text-3xl font-semibold text-ink">{@user.name || "Learner"}</h1>
               <p class="text-body">{@user.email}</p>
               <div class="mt-2 flex flex-wrap items-center gap-3 text-sm text-muted">
                 <span :if={@user.phone}>{@user.phone}</span>
@@ -116,10 +116,10 @@ defmodule WasomiWeb.AdminLive.StudentShow do
                 do: "This learner already has active access to every course.",
                 else: "Grant course access"
             }
-            class="group inline-flex shrink-0 items-center gap-2 rounded-full bg-dark py-1.5 pl-6 pr-1.5 font-medium text-white transition hover:bg-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-dark"
+            class="group inline-flex shrink-0 items-center gap-2 rounded-full bg-ink py-1.5 pl-6 pr-1.5 font-medium text-white transition hover:bg-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-ink"
           >
             Grant access
-            <span class="grid h-9 w-9 place-items-center rounded-full bg-primary text-white transition group-hover:bg-dark">
+            <span class="grid h-9 w-9 place-items-center rounded-full bg-primary text-white transition group-hover:bg-ink">
               <.icon name="hero-key" class="h-4 w-4" />
             </span>
           </button>
@@ -142,7 +142,7 @@ defmodule WasomiWeb.AdminLive.StudentShow do
         <div class="grid gap-6 lg:grid-cols-2">
           <%!-- Enrolled courses --%>
           <section class="rounded-3xl border border-black/5 bg-white p-6">
-            <h2 class="text-xl font-semibold text-dark">Enrolled courses</h2>
+            <h2 class="text-xl font-semibold text-ink">Enrolled courses</h2>
 
             <div :if={@enrollments != []} class="mt-5 divide-y divide-black/5">
               <.link
@@ -151,7 +151,7 @@ defmodule WasomiWeb.AdminLive.StudentShow do
                 class="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0 transition hover:opacity-80"
               >
                 <div class="min-w-0">
-                  <p class="truncate font-medium text-dark">{enrollment.course.title}</p>
+                  <p class="truncate font-medium text-ink">{enrollment.course.title}</p>
                   <p class="text-xs text-muted">Enrolled {format_date(enrollment.activated_at)}</p>
                 </div>
                 <.icon name="hero-chevron-right-mini" class="h-4 w-4 shrink-0 text-muted" />
@@ -165,13 +165,13 @@ defmodule WasomiWeb.AdminLive.StudentShow do
 
           <%!-- Payment history --%>
           <section class="rounded-3xl border border-black/5 bg-white p-6">
-            <h2 class="text-xl font-semibold text-dark">Payment history</h2>
+            <h2 class="text-xl font-semibold text-ink">Payment history</h2>
 
             <div :if={@payments != []} class="mt-5 divide-y divide-black/5">
               <div :for={payment <- @payments} class="py-3 first:pt-0 last:pb-0">
                 <div class="flex items-center justify-between gap-4">
                   <div class="min-w-0">
-                    <p class="truncate font-medium text-dark">
+                    <p class="truncate font-medium text-ink">
                       {payment.course && payment.course.title}
                     </p>
                     <p class="text-xs text-muted">
@@ -179,7 +179,7 @@ defmodule WasomiWeb.AdminLive.StudentShow do
                     </p>
                   </div>
                   <div class="shrink-0 text-right">
-                    <p class="font-semibold text-dark">{Payments.format_amount(payment)}</p>
+                    <p class="font-semibold text-ink">{Payments.format_amount(payment)}</p>
                     <.status_badge status={payment.status} />
                   </div>
                 </div>
@@ -214,7 +214,7 @@ defmodule WasomiWeb.AdminLive.StudentShow do
           phx-submit="grant_access"
         >
           <div>
-            <p class="text-sm font-medium text-dark">Learner</p>
+            <p class="text-sm font-medium text-ink">Learner</p>
             <p class="mt-1 rounded-xl bg-neutral-50 px-3 py-2.5 text-sm text-body">
               {@user.name || "Learner"} · {@user.email}
             </p>

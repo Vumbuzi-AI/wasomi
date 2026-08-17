@@ -35,8 +35,6 @@ defmodule WasomiWeb.UserSessionController do
   end
 
   def delete(conn, _params) do
-    conn
-    |> put_flash(:info, "Logged out successfully.")
-    |> UserAuth.log_out_user()
+    UserAuth.log_out_user(conn)
   end
 end

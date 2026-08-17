@@ -68,8 +68,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
      |> assign(:form_title, "New lecture")
      |> assign(:lecture, %Lecture{
        module_id: module.id,
-       position: length(module.lectures) + 1,
-       video_provider: :mux
+       position: length(module.lectures) + 1
      })}
   end
 
@@ -203,6 +202,52 @@ defmodule WasomiWeb.AdminLive.CourseShow do
   end
 
   @impl true
+  def handle_info({LectureLive.FormComponent, {:content_saved, _lecture}}, socket) do
+    {:noreply, load_course(socket, socket.assigns.course.slug)}
+  end
+
+  # `Catalog.subscribe_to_overview_generation/1` is called from inside the
+  # lecture form component's own `update/2`, but PubSub subscriptions are
+  # process-scoped, not component-scoped — the broadcast lands on this
+  # LiveView's mailbox, so this is the only place that can have a
+  # `handle_info/2` for it. The lecture modal's mounted component id is
+  # either the real lecture id (editing) or the fixed atom `:new_lecture`
+  # (creating, for the whole wizard session — see the id-staleness note on
+  # the live_component call below), so target both; `send_update/3` is a
+  # silent no-op for whichever one isn't actually mounted.
+  def handle_info({:lecture_overview_generation_updated, generation}, socket) do
+    send_update(LectureLive.FormComponent,
+      id: generation.lecture_id,
+      overview_generation: generation
+    )
+
+    send_update(LectureLive.FormComponent, id: :new_lecture, overview_generation: generation)
+    {:noreply, socket}
+  end
+
+  # Drives the live-ticking "running for Xs" counter on the generation
+  # form component (see `maybe_start_ticking/1` there, which kicks off
+  # the first one of these) — self-perpetuating for as long as the
+  # generation stays `:pending`/`:processing`, stopping on its own the
+  # moment it doesn't (no explicit cleanup needed either way, since a
+  # stale scheduled message here is harmless: it just re-checks the
+  # generation's current status and finds there's nothing left to do).
+  def handle_info({:tick_overview_generation, generation_id}, socket) do
+    generation = Catalog.get_overview_generation!(generation_id)
+
+    if generation.status in [:pending, :processing] do
+      send_update(LectureLive.FormComponent,
+        id: generation.lecture_id,
+        overview_generation: generation
+      )
+
+      send_update(LectureLive.FormComponent, id: :new_lecture, overview_generation: generation)
+      Process.send_after(self(), {:tick_overview_generation, generation_id}, 1000)
+    end
+
+    {:noreply, socket}
+  end
+
   def handle_info({mod, {:saved, _record}}, socket)
       when mod in [
              CourseLive.FormComponent,
@@ -286,7 +331,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                 </span>
                 <.status_badge status={@course.status} />
               </div>
-              <h1 class="mt-4 text-3xl font-semibold leading-tight text-dark sm:text-4xl">
+              <h1 class="mt-4 text-3xl font-semibold leading-tight text-ink sm:text-4xl">
                 {@course.title}
               </h1>
               <p class="mt-4 max-w-xl text-body">{@course.description}</p>
@@ -295,10 +340,10 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                 <button
                   type="button"
                   phx-click={JS.push("edit_course")}
-                  class="group inline-flex items-center gap-2 rounded-full bg-dark py-1.5 pl-6 pr-1.5 font-medium text-white transition hover:bg-primary"
+                  class="group inline-flex items-center gap-2 rounded-full bg-ink py-1.5 pl-6 pr-1.5 font-medium text-white transition hover:bg-primary"
                 >
                   Edit course
-                  <span class="grid h-9 w-9 place-items-center rounded-full bg-primary text-white transition group-hover:bg-dark">
+                  <span class="grid h-9 w-9 place-items-center rounded-full bg-primary text-white transition group-hover:bg-ink">
                     <.icon name="hero-pencil-square" class="h-4 w-4" />
                   </span>
                 </button>
@@ -306,19 +351,19 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                   :if={@course.status == :published}
                   href={~p"/courses/#{@course.slug}"}
                   target="_blank"
-                  class="inline-flex items-center gap-2 rounded-full border border-dark px-5 py-2.5 text-sm font-medium text-dark transition hover:bg-dark hover:text-white"
+                  class="inline-flex items-center gap-2 rounded-full border border-ink px-5 py-2.5 text-sm font-medium text-ink transition hover:bg-ink hover:text-white"
                 >
                   <.icon name="hero-arrow-top-right-on-square" class="h-4 w-4" /> View public page
                 </.link>
                 <.link
                   navigate={~p"/admin/courses/#{@course.slug}/preview"}
-                  class="inline-flex items-center gap-2 rounded-full border border-dark px-5 py-2.5 text-sm font-medium text-dark transition hover:bg-dark hover:text-white"
+                  class="inline-flex items-center gap-2 rounded-full border border-ink px-5 py-2.5 text-sm font-medium text-ink transition hover:bg-ink hover:text-white"
                 >
                   <.icon name="hero-eye" class="h-4 w-4" /> Preview course
                 </.link>
                 <.link
                   navigate={~p"/admin/courses/#{@course.slug}/certificate"}
-                  class="inline-flex items-center gap-2 rounded-full border border-dark px-5 py-2.5 text-sm font-medium text-dark transition hover:bg-dark hover:text-white"
+                  class="inline-flex items-center gap-2 rounded-full border border-ink px-5 py-2.5 text-sm font-medium text-ink transition hover:bg-ink hover:text-white"
                 >
                   <.icon name="hero-academic-cap" class="h-4 w-4" /> Certificate
                 </.link>
@@ -330,7 +375,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
               <div class="flex items-center justify-between gap-4 p-6">
                 <div>
                   <p class="text-sm text-muted">One-time course fee</p>
-                  <p class="text-2xl font-semibold text-dark">{Catalog.format_price(@course)}</p>
+                  <p class="text-2xl font-semibold text-ink">{Catalog.format_price(@course)}</p>
                 </div>
                 <div class="text-right">
                   <p class="text-sm text-muted">Revenue to date</p>
@@ -363,8 +408,8 @@ defmodule WasomiWeb.AdminLive.CourseShow do
             class={[
               "flex-1 rounded-full px-5 py-2.5 text-sm font-medium transition sm:flex-none",
               if(@active_tab == :curriculum,
-                do: "bg-dark text-white",
-                else: "text-body hover:text-dark"
+                do: "bg-ink text-white",
+                else: "text-body hover:text-ink"
               )
             ]}
           >
@@ -376,8 +421,8 @@ defmodule WasomiWeb.AdminLive.CourseShow do
             class={[
               "flex-1 rounded-full px-5 py-2.5 text-sm font-medium transition sm:flex-none",
               if(@active_tab == :students,
-                do: "bg-dark text-white",
-                else: "text-body hover:text-dark"
+                do: "bg-ink text-white",
+                else: "text-body hover:text-ink"
               )
             ]}
           >
@@ -395,16 +440,16 @@ defmodule WasomiWeb.AdminLive.CourseShow do
         >
           <div class="flex flex-wrap items-center justify-between gap-4">
             <div>
-              <h2 class="text-xl font-semibold text-dark">Course curriculum</h2>
+              <h2 class="text-xl font-semibold text-ink">Course curriculum</h2>
               <p class="mt-1 text-sm text-muted">Add and arrange modules and their lectures.</p>
             </div>
             <button
               type="button"
               phx-click="new_module"
-              class="group inline-flex items-center gap-2 rounded-full bg-dark py-1.5 pl-5 pr-1.5 text-sm font-medium text-white transition hover:bg-primary"
+              class="group inline-flex items-center gap-2 rounded-full bg-ink py-1.5 pl-5 pr-1.5 text-sm font-medium text-white transition hover:bg-primary"
             >
               Add module
-              <span class="grid h-8 w-8 place-items-center rounded-full bg-primary text-white transition group-hover:bg-dark">
+              <span class="grid h-8 w-8 place-items-center rounded-full bg-primary text-white transition group-hover:bg-ink">
                 <.icon name="hero-plus-mini" class="h-4 w-4" />
               </span>
             </button>
@@ -442,7 +487,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                 <div class="min-w-0 flex-1">
                   <div class="flex items-start justify-between gap-3">
                     <div class="min-w-0">
-                      <h3 class="font-semibold text-dark">{module.title}</h3>
+                      <h3 class="font-semibold text-ink">{module.title}</h3>
                       <p :if={module.description} class="mt-1 text-sm text-body">
                         {module.description}
                       </p>
@@ -484,7 +529,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                       draggable="false"
                       class="flex items-center justify-between gap-3 rounded-xl border border-black/5 bg-white px-4 py-2.5 transition data-[dragging=true]:opacity-60 data-[drag-over=true]:border-primary data-[drag-over=true]:bg-mint/50"
                     >
-                      <span class="flex min-w-0 items-center gap-3 text-sm text-dark">
+                      <span class="flex min-w-0 items-center gap-3 text-sm text-ink">
                         <button
                           type="button"
                           data-sortable-handle
@@ -540,7 +585,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                     :for={quiz <- List.wrap(Map.get(@quizzes_by_module, module.id))}
                     class="mt-2 flex items-center justify-between gap-3 rounded-xl border border-black/5 bg-mint/20 px-4 py-2.5"
                   >
-                    <span class="flex min-w-0 items-center gap-3 text-sm text-dark">
+                    <span class="flex min-w-0 items-center gap-3 text-sm text-ink">
                       <.icon
                         name="hero-clipboard-document-check"
                         class="h-5 w-5 shrink-0 text-primary"
@@ -577,7 +622,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                     <button
                       type="button"
                       phx-click={JS.push("new_lecture", value: %{"module-id" => module.id})}
-                      class="inline-flex items-center gap-1.5 rounded-full bg-dark px-4 py-1.5 text-sm font-medium text-white transition hover:bg-primary"
+                      class="inline-flex items-center gap-1.5 rounded-full bg-ink px-4 py-1.5 text-sm font-medium text-white transition hover:bg-primary"
                     >
                       <.icon name="hero-plus-circle" class="h-4 w-4" /> Add lecture
                     </button>
@@ -604,7 +649,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                       }
                       type="button"
                       phx-click={JS.push("generate_quiz", value: %{"module-id" => module.id})}
-                      class="inline-flex items-center gap-1.5 rounded-full bg-dark px-4 py-1.5 text-sm font-medium text-white transition hover:bg-primary"
+                      class="inline-flex items-center gap-1.5 rounded-full bg-ink px-4 py-1.5 text-sm font-medium text-white transition hover:bg-primary"
                     >
                       Add module quiz
                     </button>
@@ -630,7 +675,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
             <span class="mx-auto grid h-12 w-12 place-items-center rounded-full bg-mint text-primary">
               <.icon name="hero-rectangle-stack" class="h-6 w-6" />
             </span>
-            <p class="mt-4 font-medium text-dark">No modules yet</p>
+            <p class="mt-4 font-medium text-ink">No modules yet</p>
             <p class="mt-1 text-sm text-body">
               Add your first module to start building the curriculum.
             </p>
@@ -642,7 +687,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
           :if={@active_tab == :students}
           class="rounded-3xl border border-black/5 bg-white p-6 lg:p-8"
         >
-          <h2 class="text-xl font-semibold text-dark">Enrolled students</h2>
+          <h2 class="text-xl font-semibold text-ink">Enrolled students</h2>
 
           <div :if={@students != []} class="mt-5 overflow-x-auto">
             <table class="w-full text-left text-sm">
@@ -660,7 +705,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                   <td class="py-3 pr-4">
                     <.link
                       navigate={~p"/admin/students/#{row.enrollment.user_id}"}
-                      class="font-medium text-dark hover:text-primary"
+                      class="font-medium text-ink hover:text-primary"
                     >
                       {row.enrollment.user.name || "Learner"}
                     </.link>
@@ -691,7 +736,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                       {score.quiz_title}: {score.score_percent}%
                     </p>
                   </td>
-                  <td class="py-3 text-right font-semibold text-dark">
+                  <td class="py-3 text-right font-semibold text-ink">
                     {if row.payment, do: Payments.format_amount(row.payment), else: "—"}
                   </td>
                 </tr>
@@ -741,6 +786,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
         id="lecture-modal"
         show
         dismissable={false}
+        max_width="max-w-4xl"
         on_cancel={JS.push("close_modal")}
       >
         <.live_component
@@ -750,6 +796,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
           action={if @lecture.id, do: :edit, else: :new}
           lecture={@lecture}
           current_user={@current_user}
+          course_slug={@course.slug}
           patch={~p"/admin/courses/#{@course.slug}"}
         />
       </.modal>

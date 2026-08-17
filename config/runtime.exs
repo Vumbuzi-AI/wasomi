@@ -70,11 +70,19 @@ for {env_name, config_key} <- [
   config :wasomi, config_key, value
 end
 
+# config/dev.exs defaults to the Demo media provider so the app runs
+# without any Mux account at all. Once real credentials show up in `.env`,
+# switch back to the genuine adapter so video upload/playback can actually
+# be exercised locally — and default the upload CORS origin to this app's
+# dev port instead of Mux.ex's built-in :4000 default, which doesn't match
+# config/dev.exs's :4590.
 if config_env() == :dev do
   if System.get_env("MUX_TOKEN_ID") in [nil, ""] do
     config :wasomi, media_provider: Wasomi.Media.Demo
   else
-    config :wasomi, media_provider: Wasomi.Media.Mux
+    config :wasomi,
+      media_provider: Wasomi.Media.Mux,
+      mux_cors_origin: System.get_env("MUX_CORS_ORIGIN") || "http://localhost:4590"
   end
 end
 

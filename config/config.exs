@@ -21,6 +21,13 @@ config :wasomi,
   transcriber: Wasomi.Catalog.Transcriber.OpenAI,
   lecture_question_scorer: Wasomi.Catalog.LectureQuestionScorer.OpenAI,
   lecture_resource_reader: Wasomi.Assessments.LectureResourceReader.Storage,
+  catalog_storage: Wasomi.Catalog.Storage.R2,
+  overview_script_generator: Wasomi.Catalog.OverviewScriptGenerator.OpenAI,
+  overview_narrator: Wasomi.Catalog.OverviewNarrator.OpenAI,
+  overview_image_generator: Wasomi.Catalog.OverviewImageGenerator.OpenAI,
+  slide_renderer: Wasomi.Catalog.SlideRenderer.ChromicPdf,
+  video_assembler: Wasomi.Catalog.VideoAssembler.Ffmpeg,
+  link_text_fetcher: Wasomi.Catalog.LinkTextFetcher.HttpFetch,
   paystack_api_url: "https://api.paystack.co",
   paystack_callback_url: "http://localhost:4000/payments/paystack/callback",
   mux_api_url: "https://api.mux.com",
@@ -34,13 +41,22 @@ config :wasomi, Oban,
     mailers: 5,
     quiz_generation: 2,
     transcription: 2,
+    lecture_overview: 1,
     default: 10
   ],
   plugins: [
     {Oban.Plugins.Cron,
      crontab: [
        {"* * * * *", Wasomi.Payments.Workers.ReconcilePendingPayments}
-     ]}
+     ]},
+    # Without this, a job that's stuck `executing` (most commonly: the
+    # dev/prod node restarted mid-job, orphaning its DB row with no
+    # process actually running it) sits that way forever — no error, no
+    # retry, nothing for an admin to see or act on. Lifeline periodically
+    # rescues those back to `available` after they've run implausibly
+    # long, discarding them instead if they've already exhausted their
+    # attempts.
+    {Oban.Plugins.Lifeline, rescue_after: :timer.minutes(15)}
   ]
 
 # Configures the endpoint

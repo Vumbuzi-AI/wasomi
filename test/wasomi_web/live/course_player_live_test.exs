@@ -44,6 +44,37 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
     assert has_element?(view, "#mark-lecture-complete")
   end
 
+  test "a lecture with no video renders without a player and can be marked complete immediately",
+       %{conn: conn, user: user} do
+    course = course_fixture(status: :published)
+    module = course_module_fixture(course_id: course.id, position: 1)
+
+    lecture =
+      lecture_fixture(
+        module_id: module.id,
+        position: 1,
+        duration_seconds: nil,
+        video_asset_id: nil,
+        video_provider: nil
+      )
+
+    lecture_resource_fixture(lecture_id: lecture.id, name: "Slides")
+    {:ok, pending} = Enrollments.create_pending_enrollment(user, course)
+    {:ok, _active} = Enrollments.activate_enrollment(pending)
+
+    assert {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
+
+    refute has_element?(view, "#protected-player-#{lecture.id}")
+    assert has_element?(view, "#mark-lecture-complete:not([disabled])")
+
+    view
+    |> element("#mark-lecture-complete")
+    |> render_click()
+
+    assert %{status: :completed} = Learning.get_lecture_progress(user, lecture)
+    refute has_element?(view, "#mark-lecture-complete")
+  end
+
   test "resources and FAQ for the current lecture are rendered to enrolled learners", %{
     conn: conn,
     user: user

@@ -157,10 +157,10 @@ defmodule WasomiWeb.AdminLive.Courses do
             <.search_input value={@search} placeholder="Search course or slug" />
             <.link
               patch={~p"/admin/courses/new"}
-              class="group flex h-11 items-center gap-2 rounded-full bg-dark py-1.5 pl-6 pr-1.5 font-medium text-white transition hover:bg-primary"
+              class="group flex h-11 items-center gap-2 rounded-full bg-ink py-1.5 pl-6 pr-1.5 font-medium text-white transition hover:bg-primary"
             >
               New course
-              <span class="grid h-9 w-9 place-items-center rounded-full bg-primary text-white transition group-hover:bg-dark">
+              <span class="grid h-9 w-9 place-items-center rounded-full bg-primary text-white transition group-hover:bg-ink">
                 <.icon name="hero-plus-mini" class="h-4 w-4" />
               </span>
             </.link>
@@ -197,7 +197,7 @@ defmodule WasomiWeb.AdminLive.Courses do
         <div class="rounded-[2rem] border border-black/5 bg-white p-6 shadow-sm lg:p-8">
           <div class="flex flex-wrap items-center justify-between gap-4">
             <div>
-              <h2 class="text-xl font-semibold text-dark">Course catalogue</h2>
+              <h2 class="text-xl font-semibold text-ink">Course catalogue</h2>
               <p class="mt-1 text-sm text-body">Review content, price, learner count and revenue.</p>
             </div>
             <span class="rounded-full border border-primary/30 bg-mint px-3 py-1 text-xs font-semibold text-primary">
@@ -236,7 +236,7 @@ defmodule WasomiWeb.AdminLive.Courses do
                       alt=""
                       class="h-full w-full object-cover transition duration-500 group-hover:scale-105"
                     />
-                    <div class="absolute inset-0 bg-gradient-to-t from-dark/30 via-transparent to-transparent">
+                    <div class="absolute inset-0 bg-gradient-to-t from-ink/30 via-transparent to-transparent">
                     </div>
                     <span class="absolute left-4 top-4">
                       <.status_badge status={row.course.status} />
@@ -244,7 +244,7 @@ defmodule WasomiWeb.AdminLive.Courses do
                     <div class="absolute right-4 top-4 z-10 flex items-center gap-2">
                       <.link
                         patch={~p"/admin/courses/#{row.course.slug}/edit"}
-                        class="grid h-9 w-9 place-items-center rounded-full bg-white/95 text-dark shadow-sm backdrop-blur transition hover:bg-white hover:text-primary"
+                        class="grid h-9 w-9 place-items-center rounded-full bg-white/95 text-ink shadow-sm backdrop-blur transition hover:bg-white hover:text-primary"
                         title="Edit course"
                       >
                         <.icon name="hero-pencil-square" class="h-4 w-4" />
@@ -253,7 +253,7 @@ defmodule WasomiWeb.AdminLive.Courses do
                         :if={row.course.status == :draft}
                         type="button"
                         phx-click={JS.push("publish_course", value: %{id: row.course.id})}
-                        class="grid h-9 w-9 place-items-center rounded-full bg-white/95 text-dark shadow-sm backdrop-blur transition hover:bg-white hover:text-primary"
+                        class="grid h-9 w-9 place-items-center rounded-full bg-white/95 text-ink shadow-sm backdrop-blur transition hover:bg-white hover:text-primary"
                         title="Publish course"
                       >
                         <.icon name="hero-paper-airplane" class="h-4 w-4" />
@@ -262,7 +262,7 @@ defmodule WasomiWeb.AdminLive.Courses do
                         :if={row.course.status == :published}
                         type="button"
                         phx-click={JS.push("confirm_archive_course", value: %{id: row.course.id})}
-                        class="grid h-9 w-9 place-items-center rounded-full bg-white/95 text-dark shadow-sm backdrop-blur transition hover:bg-white hover:text-red-500"
+                        class="grid h-9 w-9 place-items-center rounded-full bg-white/95 text-ink shadow-sm backdrop-blur transition hover:bg-white hover:text-red-500"
                         title="Archive course"
                       >
                         <.icon name="hero-archive-box" class="h-4 w-4" />
@@ -273,7 +273,7 @@ defmodule WasomiWeb.AdminLive.Courses do
                   <div class="flex flex-1 flex-col p-6">
                     <.link
                       navigate={~p"/admin/courses/#{row.course.slug}"}
-                      class="text-lg font-semibold leading-snug text-dark after:absolute after:inset-0 group-hover:text-primary"
+                      class="text-lg font-semibold leading-snug text-ink after:absolute after:inset-0 group-hover:text-primary"
                     >
                       {row.course.title}
                     </.link>
@@ -299,13 +299,13 @@ defmodule WasomiWeb.AdminLive.Courses do
                 <span class="mx-auto grid h-14 w-14 place-items-center rounded-full bg-mint text-primary">
                   <.icon name="hero-academic-cap" class="h-7 w-7" />
                 </span>
-                <h3 class="mt-5 text-xl font-semibold text-dark">No courses yet</h3>
+                <h3 class="mt-5 text-xl font-semibold text-ink">No courses yet</h3>
                 <p class="mx-auto mt-2 max-w-md text-body">
                   Create your first course to start enrolling learners and earning revenue.
                 </p>
                 <.link
                   patch={~p"/admin/courses/new"}
-                  class="mt-6 inline-flex rounded-full bg-dark px-6 py-3 font-medium text-white transition hover:bg-primary"
+                  class="mt-6 inline-flex rounded-full bg-ink px-6 py-3 font-medium text-white transition hover:bg-primary"
                 >
                   New course
                 </.link>
@@ -318,13 +318,13 @@ defmodule WasomiWeb.AdminLive.Courses do
                 <span class="mx-auto grid h-14 w-14 place-items-center rounded-full bg-mint text-primary">
                   <.icon name="hero-magnifying-glass" class="h-7 w-7" />
                 </span>
-                <h3 class="mt-5 text-xl font-semibold text-dark">No matching courses</h3>
+                <h3 class="mt-5 text-xl font-semibold text-ink">No matching courses</h3>
                 <p class="mx-auto mt-2 max-w-md text-body">
                   Try a different search term or clear the status filter.
                 </p>
                 <.link
                   patch={~p"/admin/courses"}
-                  class="mt-6 inline-flex rounded-full border border-black/10 px-6 py-3 font-medium text-dark transition hover:border-primary hover:text-primary"
+                  class="mt-6 inline-flex rounded-full border border-black/10 px-6 py-3 font-medium text-ink transition hover:border-primary hover:text-primary"
                 >
                   Clear filters
                 </.link>
@@ -367,7 +367,7 @@ defmodule WasomiWeb.AdminLive.Courses do
         show
         on_cancel={JS.push("close_publish_checklist")}
       >
-        <h2 class="text-lg font-semibold text-dark">
+        <h2 class="text-lg font-semibold text-ink">
           "{@publish_checklist_course.title}" isn't ready to publish yet
         </h2>
         <p class="mt-1 text-sm text-body">Here's what's blocking it.</p>
@@ -375,14 +375,14 @@ defmodule WasomiWeb.AdminLive.Courses do
         <div class="mt-6 flex items-center gap-4">
           <.link
             patch={~p"/admin/courses/#{@publish_checklist_course.slug}/edit"}
-            class="rounded-full bg-dark px-5 py-2 text-sm font-medium text-white transition hover:bg-primary"
+            class="rounded-full bg-ink px-5 py-2 text-sm font-medium text-white transition hover:bg-primary"
           >
             Edit course
           </.link>
           <button
             type="button"
             phx-click="close_publish_checklist"
-            class="text-sm font-medium text-muted hover:text-dark"
+            class="text-sm font-medium text-muted hover:text-ink"
           >
             Close
           </button>
@@ -396,7 +396,7 @@ defmodule WasomiWeb.AdminLive.Courses do
     [
       "rounded-full px-4 py-2 text-sm font-medium transition",
       if(active?,
-        do: "bg-dark text-white",
+        do: "bg-ink text-white",
         else: "border border-black/10 bg-white text-body hover:border-primary hover:text-primary"
       )
     ]
@@ -417,7 +417,7 @@ defmodule WasomiWeb.AdminLive.Courses do
     ~H"""
     <div class="flex items-center justify-between gap-3 py-2.5">
       <dt class="text-xs font-medium uppercase tracking-wide text-body">{@label}</dt>
-      <dd class={["text-sm font-semibold", if(@accent, do: "text-primary", else: "text-dark")]}>
+      <dd class={["text-sm font-semibold", if(@accent, do: "text-primary", else: "text-ink")]}>
         {@value}
       </dd>
     </div>

@@ -466,7 +466,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
           <p class="text-sm font-semibold uppercase tracking-wider text-primary">Quiz editor</p>
 
           <div :if={!@editing_title?} class="mt-2 flex items-center gap-2">
-            <h1 id="quiz-title" class="text-3xl font-semibold text-dark">{@quiz.title}</h1>
+            <h1 id="quiz-title" class="text-3xl font-semibold text-ink">{@quiz.title}</h1>
             <button
               type="button"
               id="edit-title"
@@ -492,20 +492,20 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
                 id={@quiz_form[:title].id}
                 value={@quiz_form[:title].value}
                 autofocus
-                class="w-80 max-w-full rounded-lg border border-black/10 px-3 py-2 text-lg font-semibold text-dark focus:border-primary focus:ring-0"
+                class="w-80 max-w-full rounded-lg border border-black/10 px-3 py-2 text-lg font-semibold text-ink focus:border-primary focus:ring-0"
               />
               <.field_error field={@quiz_form[:title]} />
             </div>
             <button
               type="submit"
-              class="rounded-full bg-dark px-4 py-2 text-sm font-semibold text-white hover:bg-primary transition active:scale-[0.96]"
+              class="rounded-full bg-ink px-4 py-2 text-sm font-semibold text-white hover:bg-primary transition active:scale-[0.96]"
             >
               Save
             </button>
             <button
               type="button"
               phx-click="cancel_editing_title"
-              class="text-sm font-medium text-muted hover:text-dark transition active:scale-[0.96]"
+              class="text-sm font-medium text-muted hover:text-ink transition active:scale-[0.96]"
             >
               Cancel
             </button>
@@ -535,7 +535,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
             phx-submit="update_quiz_settings"
             class="flex flex-wrap items-center gap-4"
           >
-            <label for={@quiz_form[:passing_score_percent].id} class="text-lg font-semibold text-dark">
+            <label for={@quiz_form[:passing_score_percent].id} class="text-lg font-semibold text-ink">
               Passing score
             </label>
             <div class="flex items-center gap-2">
@@ -546,13 +546,13 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
                 value={@quiz_form[:passing_score_percent].value}
                 min="0"
                 max="100"
-                class="w-24 rounded-lg border border-black/10 px-3 py-2 text-sm text-dark focus:border-primary focus:ring-0"
+                class="w-24 rounded-lg border border-black/10 px-3 py-2 text-sm text-ink focus:border-primary focus:ring-0"
               />
               <span class="text-sm text-body">%</span>
             </div>
             <button
               type="submit"
-              class="rounded-full bg-dark px-5 py-2 text-sm font-medium text-white transition hover:bg-primary"
+              class="rounded-full bg-ink px-5 py-2 text-sm font-medium text-white transition hover:bg-primary"
             >
               Save
             </button>
@@ -566,7 +566,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
           class="group rounded-3xl border border-black/5 bg-white p-6"
         >
           <summary class="flex cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
-            <h2 class="text-lg font-semibold text-dark">AI generation &amp; settings</h2>
+            <h2 class="text-lg font-semibold text-ink">AI generation &amp; settings</h2>
             <.icon
               name="hero-chevron-down"
               class="h-4 w-4 shrink-0 text-muted transition group-open:rotate-180"
@@ -596,7 +596,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
               <div class="grid grid-cols-1 gap-6 md:grid-cols-2 min-w-0">
                 <div class="min-w-0 rounded-2xl border border-black/5 bg-neutral-50/50 p-5 space-y-3 flex flex-col justify-between overflow-hidden">
                   <div class="min-w-0">
-                    <h3 class="font-semibold text-dark flex items-center gap-2">
+                    <h3 class="font-semibold text-ink flex items-center gap-2">
                       <.icon name="hero-rectangle-stack" class="h-5 w-5 text-primary shrink-0" />
                       Module resources
                     </h3>
@@ -607,7 +607,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
                     <fieldset class="mt-3 space-y-2 min-w-0">
                       <label
                         :for={lecture <- @module_video_lectures}
-                        class="flex items-center gap-2.5 rounded-xl border border-black/5 bg-white p-3 text-sm text-dark transition hover:border-black/10 cursor-pointer min-w-0 max-w-full overflow-hidden"
+                        class="flex items-center gap-2.5 rounded-xl border border-black/5 bg-white p-3 text-sm text-ink transition hover:border-black/10 cursor-pointer min-w-0 max-w-full overflow-hidden"
                       >
                         <input
                           type="checkbox"
@@ -624,7 +624,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
 
                       <label
                         :for={resource <- @module_document_resources}
-                        class="flex items-center gap-2.5 rounded-xl border border-black/5 bg-white p-3 text-sm text-dark transition hover:border-black/10 cursor-pointer min-w-0 max-w-full overflow-hidden"
+                        class="flex items-center gap-2.5 rounded-xl border border-black/5 bg-white p-3 text-sm text-ink transition hover:border-black/10 cursor-pointer min-w-0 max-w-full overflow-hidden"
                       >
                         <input
                           type="checkbox"
@@ -651,7 +651,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
 
                 <div class="min-w-0 rounded-2xl border border-black/5 bg-neutral-50/50 p-5 space-y-3 flex flex-col justify-between overflow-hidden">
                   <div>
-                    <h3 class="font-semibold text-dark flex items-center gap-2">
+                    <h3 class="font-semibold text-ink flex items-center gap-2">
                       <.icon name="hero-document-text" class="h-5 w-5 text-primary" />
                       Custom document upload
                     </h3>
@@ -663,7 +663,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
                       <div class={[@uploads.source_pdf.entries != [] && "hidden", "flex items-center"]}>
                         <label class={[
                           "inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-semibold transition active:scale-[0.96]",
-                          @module_ready? && "cursor-pointer bg-primary text-white hover:bg-dark",
+                          @module_ready? && "cursor-pointer bg-primary text-white hover:bg-ink",
                           !@module_ready? && "cursor-not-allowed bg-neutral-200 text-muted"
                         ]}>
                           <.icon name="hero-document-arrow-up" class="h-4 w-4" /> Select file
@@ -685,7 +685,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
                           </span>
                           <div class="min-w-0 flex-1">
                             <div class="flex items-center justify-between gap-2">
-                              <p class="truncate font-medium text-dark text-xs">
+                              <p class="truncate font-medium text-ink text-xs">
                                 {entry.client_name}
                               </p>
                               <span class="shrink-0 text-xs tabular-nums text-muted">
@@ -740,7 +740,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
                         "Every lecture in this module must have a generated lecture quiz before generating the module quiz.",
                       else: "Generate module quiz"
                   }
-                  class="inline-flex items-center gap-2 rounded-full bg-dark px-6 py-3 text-sm font-semibold text-white transition hover:bg-primary active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-dark disabled:active:scale-100"
+                  class="inline-flex items-center gap-2 rounded-full bg-ink px-6 py-3 text-sm font-semibold text-white transition hover:bg-primary active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-ink disabled:active:scale-100"
                 >
                   <.icon name="hero-arrow-path" class="h-4 w-4" /> Generate module quiz
                 </button>
@@ -755,7 +755,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
                 <.icon name="hero-arrow-path" class="h-6 w-6 animate-spin" />
               </span>
               <div>
-                <p class="font-semibold text-dark">
+                <p class="font-semibold text-ink">
                   Generating questions from {active_generation(@generations).source_filename}…
                 </p>
                 <p class="mt-0.5 text-sm text-body">
@@ -769,7 +769,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
             <details :if={@generations != []} open class="group rounded-2xl border border-black/5 p-5">
               <summary class="flex cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
                 <span class="flex items-center gap-2">
-                  <h3 class="font-semibold text-dark">Generation history</h3>
+                  <h3 class="font-semibold text-ink">Generation history</h3>
                   <span class="rounded-full bg-neutral-50 px-2 py-0.5 text-xs font-semibold text-body">
                     {length(@generations)}
                   </span>
@@ -785,7 +785,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
                   class="flex items-center justify-between gap-3 rounded-xl border border-black/5 px-4 py-3 text-sm"
                 >
                   <div class="min-w-0">
-                    <p class="truncate font-medium text-dark">{generation.source_filename}</p>
+                    <p class="truncate font-medium text-ink">{generation.source_filename}</p>
                     <p class="mt-0.5 text-xs text-muted">{relative_time(generation.inserted_at)}</p>
                     <p :if={generation.status == :failed} class="mt-0.5 text-xs text-red-600">
                       {generation.error_message}
@@ -815,7 +815,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
         <section id="questions-section" class="space-y-6">
           <div class="flex flex-wrap items-center justify-between gap-4 border-b border-black/5 pb-4">
             <div>
-              <h2 class="text-xl font-semibold text-dark">Questions</h2>
+              <h2 class="text-xl font-semibold text-ink">Questions</h2>
               <p class="mt-0.5 text-xs text-body">
                 {length(@quiz.questions)} question(s) {if draft_questions(@quiz) != [],
                   do: "· #{length(draft_questions(@quiz))} draft(s)"}
@@ -845,7 +845,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
                   id="add-question"
                   type="button"
                   phx-click="new_question"
-                  class="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2 text-sm font-semibold text-white transition hover:bg-dark active:scale-[0.96]"
+                  class="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2 text-sm font-semibold text-white transition hover:bg-ink active:scale-[0.96]"
                 >
                   <.icon name="hero-plus" class="h-4 w-4" /> Add question
                 </button>
@@ -855,7 +855,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
                   phx-click="new_question"
                   phx-value-type="true_false"
                   title="Add True/False question"
-                  class="inline-flex items-center rounded-full px-3 py-2 text-xs font-medium text-white/90 transition hover:bg-dark hover:text-white active:scale-[0.96]"
+                  class="inline-flex items-center rounded-full px-3 py-2 text-xs font-medium text-white/90 transition hover:bg-ink hover:text-white active:scale-[0.96]"
                 >
                   T/F
                 </button>
@@ -883,11 +883,11 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
                     type="button"
                     data-sortable-handle
                     title="Drag to reorder"
-                    class="cursor-grab rounded-lg p-2 text-muted hover:bg-neutral-50 hover:text-dark active:cursor-grabbing"
+                    class="cursor-grab rounded-lg p-2 text-muted hover:bg-neutral-50 hover:text-ink active:cursor-grabbing"
                   >
                     <.icon name="hero-bars-3" class="h-5 w-5" />
                   </button>
-                  <h2 class="font-semibold text-dark">Question {index}</h2>
+                  <h2 class="font-semibold text-ink">Question {index}</h2>
                   <span class={[
                     "rounded-full px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wider",
                     question.status == :published && "bg-mint text-primary",
@@ -902,7 +902,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
                     type="button"
                     phx-click="publish_question"
                     phx-value-id={question.id}
-                    class="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:text-dark transition active:scale-[0.96]"
+                    class="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:text-ink transition active:scale-[0.96]"
                   >
                     <.icon name="hero-check-circle" class="h-4 w-4" /> Publish
                   </button>
@@ -930,7 +930,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
             id="empty-quiz"
             class="rounded-3xl border border-dashed border-black/10 bg-white p-10 text-center"
           >
-            <p class="font-medium text-dark">This quiz has no questions yet.</p>
+            <p class="font-medium text-ink">This quiz has no questions yet.</p>
             <p class="mt-1 text-sm text-body">
               Add your first question manually or generate from resources above.
             </p>
@@ -938,7 +938,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
               <button
                 type="button"
                 phx-click="new_question"
-                class="inline-flex items-center gap-2 rounded-full bg-primary px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-dark active:scale-[0.96]"
+                class="inline-flex items-center gap-2 rounded-full bg-primary px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-ink active:scale-[0.96]"
               >
                 <.icon name="hero-plus" class="h-4 w-4" /> Add question
               </button>
@@ -950,7 +950,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
             id="new-question"
             class="rounded-3xl border border-primary/20 bg-white p-6 shadow-sm lg:p-8"
           >
-            <h2 class="mb-5 font-semibold text-dark">New question</h2>
+            <h2 class="mb-5 font-semibold text-ink">New question</h2>
             <.question_form form={@new_question_form} question={nil} />
           </section>
         </section>

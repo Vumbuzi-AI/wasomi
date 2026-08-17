@@ -75,14 +75,14 @@ defmodule Wasomi.Catalog.PublishGuard do
         status:
           cond do
             lectures == [] -> :not_applicable
-            Enum.any?(lectures, &missing_video?/1) -> :failed
+            Enum.any?(lectures, &missing_content?/1) -> :failed
             true -> :passed
           end,
         reasons:
           []
           |> add_issue(
-            lectures != [] and Enum.any?(lectures, &missing_video?/1),
-            "Every lecture needs a video attached."
+            lectures != [] and Enum.any?(lectures, &missing_content?/1),
+            "Every lecture needs a video or at least one resource (document, link, etc.) attached."
           )
           |> Enum.reverse()
       },
@@ -140,7 +140,8 @@ defmodule Wasomi.Catalog.PublishGuard do
   defp status(true), do: :passed
   defp status(false), do: :failed
 
-  defp missing_video?(lecture), do: blank?(lecture.video_asset_id)
+  defp missing_content?(lecture),
+    do: blank?(lecture.video_asset_id) and (lecture.resources || []) == []
 
   defp unpublished_quiz?(%{quiz: %{active: false}}), do: true
   defp unpublished_quiz?(_module), do: false

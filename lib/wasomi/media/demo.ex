@@ -26,4 +26,11 @@ defmodule Wasomi.Media.Demo do
 
   @impl true
   def download_url(%Lecture{}), do: {:error, :demo_provider_does_not_support_downloads}
+
+  @impl true
+  def create_asset_from_url(%Lecture{}, _url, _opts),
+    do: {:error, :demo_provider_does_not_support_uploads}
+
+  @impl true
+  def asset_status(_asset_id), do: {:error, :demo_provider_does_not_support_uploads}
 end

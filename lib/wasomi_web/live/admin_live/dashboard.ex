@@ -76,10 +76,10 @@ defmodule WasomiWeb.AdminLive.Dashboard do
           <%!-- Top courses --%>
           <section class="rounded-3xl border border-black/5 bg-white p-6 lg:col-span-3">
             <div class="flex items-center justify-between">
-              <h2 class="text-xl font-semibold text-dark">Top courses by revenue</h2>
+              <h2 class="text-xl font-semibold text-ink">Top courses by revenue</h2>
               <.link
                 navigate={~p"/admin/courses"}
-                class="text-sm font-medium text-primary hover:text-dark"
+                class="text-sm font-medium text-primary hover:text-ink"
               >
                 View all →
               </.link>
@@ -92,10 +92,10 @@ defmodule WasomiWeb.AdminLive.Dashboard do
                 class="flex items-center justify-between gap-4 py-4 first:pt-0 last:pb-0 transition hover:opacity-80"
               >
                 <div class="min-w-0">
-                  <p class="truncate font-medium text-dark">{row.course.title}</p>
+                  <p class="truncate font-medium text-ink">{row.course.title}</p>
                   <p class="mt-0.5 text-sm text-muted">{row.students} students enrolled</p>
                 </div>
-                <p class="shrink-0 font-semibold text-dark">
+                <p class="shrink-0 font-semibold text-ink">
                   {Payments.format_minor(row.revenue_minor, row.course.currency)}
                 </p>
               </.link>
@@ -109,10 +109,10 @@ defmodule WasomiWeb.AdminLive.Dashboard do
           <%!-- Recent payments --%>
           <section class="rounded-3xl border border-black/5 bg-white p-6 lg:col-span-2">
             <div class="flex items-center justify-between">
-              <h2 class="text-xl font-semibold text-dark">Recent payments</h2>
+              <h2 class="text-xl font-semibold text-ink">Recent payments</h2>
               <.link
                 navigate={~p"/admin/payments"}
-                class="text-sm font-medium text-primary hover:text-dark"
+                class="text-sm font-medium text-primary hover:text-ink"
               >
                 All →
               </.link>
@@ -121,13 +121,13 @@ defmodule WasomiWeb.AdminLive.Dashboard do
             <div :if={@recent_payments != []} class="mt-5 space-y-4">
               <div :for={payment <- @recent_payments} class="flex items-center justify-between gap-3">
                 <div class="min-w-0">
-                  <p class="truncate text-sm font-medium text-dark">
+                  <p class="truncate text-sm font-medium text-ink">
                     {payment.user && (payment.user.name || payment.user.email)}
                   </p>
                   <p class="truncate text-xs text-muted">{payment.course && payment.course.title}</p>
                 </div>
                 <div class="shrink-0 text-right">
-                  <p class="text-sm font-semibold text-dark">{Payments.format_amount(payment)}</p>
+                  <p class="text-sm font-semibold text-ink">{Payments.format_amount(payment)}</p>
                   <.status_badge status={payment.status} />
                 </div>
               </div>

@@ -14,6 +14,21 @@ defmodule Wasomi.Media.Mux do
 
   @api_path "/video/v1"
 
+  # Mux transcribes the actual audio (Whisper-based) and attaches a real
+  # subtitle text track — asynchronously, no webhook needed for it to
+  # just work: `<mux-player>` shows a CC toggle once the track exists,
+  # whenever that happens to be. Used for every asset regardless of how
+  # the video got here (direct upload or `create_asset_from_url/3`)
+  # since neither surface has a pre-written script to build captions
+  # from the way `Wasomi.Catalog.Workers.GenerateLectureOverviewWorker`
+  # briefly did for AI-generated overviews.
+  #
+  # The two Mux endpoints below use genuinely different shapes for this
+  # (confirmed against the real API, not just docs): `/assets` takes a
+  # singular `input` array, `/uploads` nests a *plural* `inputs` array
+  # one level deeper inside `new_asset_settings`.
+  @generated_subtitles [%{language_code: "en", name: "English CC"}]
+
   @impl true
   def create_upload(%Lecture{id: lecture_id}, opts) do
     cors_origin = Keyword.get(opts, :cors_origin, configured_cors_origin())
@@ -25,7 +40,8 @@ defmodule Wasomi.Media.Mux do
           passthrough: "lecture:#{lecture_id}",
           playback_policies: ["signed"],
           video_quality: "basic",
-          mp4_support: "capped-1080p"
+          mp4_support: "capped-1080p",
+          inputs: [%{generated_subtitles: @generated_subtitles}]
         }
       }
     )
@@ -40,6 +56,31 @@ defmodule Wasomi.Media.Mux do
   def upload_status(upload_id) when is_binary(upload_id) do
     with {:ok, upload} <- request(:get, "/uploads/#{URI.encode(upload_id)}") do
       resolve_upload(upload)
+    end
+  end
+
+  @impl true
+  def create_asset_from_url(%Lecture{id: lecture_id}, url, _opts) when is_binary(url) do
+    request(:post, "/assets",
+      json: %{
+        input: [%{url: url, generated_subtitles: @generated_subtitles}],
+        passthrough: "lecture:#{lecture_id}",
+        playback_policies: ["signed"],
+        video_quality: "basic",
+        mp4_support: "capped-1080p"
+      }
+    )
+    |> case do
+      {:ok, %{"id" => id}} -> {:ok, %{asset_id: id}}
+      {:ok, body} -> {:error, {:unexpected_mux_asset_response, body}}
+      error -> error
+    end
+  end
+
+  @impl true
+  def asset_status(asset_id) when is_binary(asset_id) do
+    with {:ok, asset} <- request(:get, "/assets/#{URI.encode(asset_id)}") do
+      resolve_asset(asset)
     end
   end
 
@@ -120,30 +161,7 @@ defmodule Wasomi.Media.Mux do
 
   defp resolve_upload(%{"asset_id" => asset_id}) when is_binary(asset_id) do
     with {:ok, asset} <- request(:get, "/assets/#{URI.encode(asset_id)}") do
-      case asset do
-        %{"status" => "ready", "playback_ids" => playback_ids} when is_list(playback_ids) ->
-          case Enum.find(playback_ids, &(&1["policy"] == "signed")) do
-            %{"id" => playback_id} ->
-              duration =
-                asset
-                |> Map.get("duration", 1)
-                |> ceil_duration()
-
-              {:ok, {:ready, playback_id, duration}}
-
-            nil ->
-              {:error, :mux_asset_has_no_signed_playback_id}
-          end
-
-        %{"status" => status} when status in ["preparing", "created"] ->
-          {:ok, :processing}
-
-        %{"status" => "errored", "errors" => errors} ->
-          {:error, {:mux_asset_errored, errors}}
-
-        other ->
-          {:error, {:unexpected_mux_asset_response, other}}
-      end
+      resolve_asset(asset)
     end
   end
 
@@ -154,6 +172,30 @@ defmodule Wasomi.Media.Mux do
     do: {:error, {:mux_upload_errored, error}}
 
   defp resolve_upload(other), do: {:error, {:unexpected_mux_upload_response, other}}
+
+  defp resolve_asset(%{"status" => "ready", "playback_ids" => playback_ids} = asset)
+       when is_list(playback_ids) do
+    case Enum.find(playback_ids, &(&1["policy"] == "signed")) do
+      %{"id" => playback_id} ->
+        duration =
+          asset
+          |> Map.get("duration", 1)
+          |> ceil_duration()
+
+        {:ok, {:ready, playback_id, duration}}
+
+      nil ->
+        {:error, :mux_asset_has_no_signed_playback_id}
+    end
+  end
+
+  defp resolve_asset(%{"status" => status}) when status in ["preparing", "created"],
+    do: {:ok, :processing}
+
+  defp resolve_asset(%{"status" => "errored", "errors" => errors}),
+    do: {:error, {:mux_asset_errored, errors}}
+
+  defp resolve_asset(other), do: {:error, {:unexpected_mux_asset_response, other}}
 
   defp request(method, path, options \\ []) do
     Req.request(

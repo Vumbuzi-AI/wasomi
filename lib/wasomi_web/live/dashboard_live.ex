@@ -51,12 +51,12 @@ defmodule WasomiWeb.DashboardLive do
   def render(assigns) do
     ~H"""
     <.student_layout active={:dashboard} current_user={@current_user}>
-      <section class="bg-gradient-to-b from-mint via-white to-soft py-12 lg:py-16">
+      <section class="bg-white py-12 lg:py-16">
         <div class="mx-auto max-w-container px-5 lg:px-10">
           <span class="rounded-full bg-mint px-3 py-1 text-sm font-medium text-primary">
             Learner dashboard
           </span>
-          <h1 class="mt-5 text-4xl font-semibold leading-[1.1] text-dark sm:text-5xl">
+          <h1 class="mt-5 text-4xl font-semibold leading-[1.1] text-ink sm:text-5xl">
             Welcome back, {first_name(@current_user.name)}.
           </h1>
           <p class="mt-4 max-w-2xl text-lg text-body">
@@ -87,7 +87,7 @@ defmodule WasomiWeb.DashboardLive do
                 <p class="text-sm font-semibold uppercase tracking-wider text-primary">
                   Notifications
                 </p>
-                <h2 class="mt-2 text-2xl font-semibold text-dark">What's new</h2>
+                <h2 class="mt-2 text-2xl font-semibold text-ink">What's new</h2>
               </div>
               <span class="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-white text-primary">
                 <.icon name="hero-bell" class="h-6 w-6" />
@@ -101,14 +101,14 @@ defmodule WasomiWeb.DashboardLive do
                 class="flex flex-wrap items-start justify-between gap-4 rounded-2xl bg-white p-4"
               >
                 <div class="min-w-0">
-                  <p class="font-medium text-dark">{notification.title}</p>
+                  <p class="font-medium text-ink">{notification.title}</p>
                   <p class="mt-1 text-sm text-body">{notification.body}</p>
                 </div>
                 <button
                   type="button"
                   phx-click="dismiss_notification"
                   phx-value-id={notification.id}
-                  class="shrink-0 text-sm font-medium text-primary transition hover:text-dark"
+                  class="shrink-0 text-sm font-medium text-primary transition hover:text-ink"
                 >
                   Dismiss
                 </button>
@@ -122,12 +122,12 @@ defmodule WasomiWeb.DashboardLive do
                 <p class="text-sm font-semibold uppercase tracking-wider text-primary">
                   Continue learning
                 </p>
-                <h2 class="mt-2 text-3xl font-semibold text-dark">Pick up where you left off.</h2>
+                <h2 class="mt-2 text-3xl font-semibold text-ink">Pick up where you left off.</h2>
               </div>
               <.link
                 :if={@course_cards != []}
                 navigate={~p"/courses-taken"}
-                class="text-sm font-medium text-primary transition hover:text-dark"
+                class="text-sm font-medium text-primary transition hover:text-ink"
               >
                 View all courses →
               </.link>
@@ -136,7 +136,7 @@ defmodule WasomiWeb.DashboardLive do
             <div
               :if={@resume_cards != []}
               id="dashboard-courses"
-              class="mt-7 grid gap-7 sm:grid-cols-2"
+              class="mt-7 grid gap-7 sm:grid-cols-2 xl:grid-cols-3"
             >
               <.course_card
                 :for={card <- @resume_cards}
@@ -154,13 +154,13 @@ defmodule WasomiWeb.DashboardLive do
               <span class="mx-auto grid h-14 w-14 place-items-center rounded-full bg-mint text-primary">
                 <.icon name="hero-academic-cap" class="h-7 w-7" />
               </span>
-              <h3 class="mt-5 text-xl font-semibold text-dark">Your learning shelf is ready.</h3>
+              <h3 class="mt-5 text-xl font-semibold text-ink">Your learning shelf is ready.</h3>
               <p class="mx-auto mt-2 max-w-lg text-body">
                 Enroll in a course and it will appear here as soon as payment is confirmed.
               </p>
               <.link
                 navigate={~p"/courses"}
-                class="mt-6 inline-flex rounded-full bg-dark px-6 py-3 font-medium text-white transition hover:bg-primary"
+                class="mt-6 inline-flex rounded-full bg-ink px-6 py-3 font-medium text-white transition hover:bg-primary"
               >
                 Browse courses
               </.link>
@@ -174,7 +174,7 @@ defmodule WasomiWeb.DashboardLive do
             <div class="flex items-start justify-between gap-4">
               <div>
                 <p class="text-sm font-semibold uppercase tracking-wider text-primary">Billing</p>
-                <h2 class="mt-2 text-2xl font-semibold text-dark">Payment receipts</h2>
+                <h2 class="mt-2 text-2xl font-semibold text-ink">Payment receipts</h2>
               </div>
               <span class="grid h-11 w-11 place-items-center rounded-full bg-mint text-primary">
                 <.icon name="hero-receipt-percent" class="h-6 w-6" />
@@ -189,18 +189,18 @@ defmodule WasomiWeb.DashboardLive do
               >
                 <div class="flex items-start justify-between gap-4">
                   <div class="min-w-0">
-                    <h3 class="truncate font-medium text-dark">{receipt.course.title}</h3>
+                    <h3 class="truncate font-medium text-ink">{receipt.course.title}</h3>
                     <p class="mt-1 text-sm text-muted">
                       Paid {format_date(receipt.paid_at)} via {provider_name(receipt.provider)}
                     </p>
                   </div>
-                  <p class="shrink-0 font-semibold text-dark">
+                  <p class="shrink-0 font-semibold text-ink">
                     {Payments.format_amount(receipt)}
                   </p>
                 </div>
                 <div class="mt-3 flex items-center justify-between gap-4 rounded-2xl bg-soft px-4 py-3 text-xs">
                   <span class="text-muted">Receipt reference</span>
-                  <span class="break-all text-right font-medium text-dark">
+                  <span class="break-all text-right font-medium text-ink">
                     {receipt.provider_reference}
                   </span>
                 </div>
@@ -228,7 +228,7 @@ defmodule WasomiWeb.DashboardLive do
         <.icon name={@icon} class="h-6 w-6" />
       </span>
       <div>
-        <p class="text-2xl font-semibold text-dark">{@value}</p>
+        <p class="text-2xl font-semibold text-ink">{@value}</p>
         <p class="text-sm text-muted">{@label}</p>
       </div>
     </div>

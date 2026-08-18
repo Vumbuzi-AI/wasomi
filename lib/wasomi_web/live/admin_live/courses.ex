@@ -150,7 +150,7 @@ defmodule WasomiWeb.AdminLive.Courses do
   def render(assigns) do
     ~H"""
     <.admin_layout active={:courses} current_user={@current_user}>
-      <div class="mx-auto max-w-container space-y-8 px-5 py-10 lg:px-10">
+      <div class="w-full space-y-5 px-5 py-8 lg:px-8">
         <.page_header title="Courses">
           <:subtitle>Create, edit and track the performance of every course.</:subtitle>
           <:actions>
@@ -167,7 +167,7 @@ defmodule WasomiWeb.AdminLive.Courses do
           </:actions>
         </.page_header>
 
-        <div class="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
+        <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <.stat_card
             label="Total courses"
             value={@stats.total}
@@ -226,19 +226,12 @@ defmodule WasomiWeb.AdminLive.Courses do
             >
               <div :if={@rows != []} class="grid gap-7 sm:grid-cols-2 xl:grid-cols-3">
                 <article
-                  :for={row <- @rows}
+                  :for={{row, index} <- Enum.with_index(@rows, 1)}
                   id={"course-row-#{row.course.id}"}
                   class="group relative flex flex-col overflow-hidden rounded-3xl border border-black/5 bg-white shadow-sm transition duration-300 hover:-translate-y-1 hover:shadow-xl"
                 >
-                  <div class="relative aspect-[16/10] overflow-hidden bg-mint">
-                    <img
-                      src={row.course.thumbnail_key}
-                      alt=""
-                      class="h-full w-full object-cover transition duration-500 group-hover:scale-105"
-                    />
-                    <div class="absolute inset-0 bg-gradient-to-t from-ink/30 via-transparent to-transparent">
-                    </div>
-                    <span class="absolute left-4 top-4">
+                  <div class={["relative aspect-[16/10] overflow-hidden", card_header_class(index)]}>
+                    <span class="absolute left-4 top-4 z-10">
                       <.status_badge status={row.course.status} />
                     </span>
                     <div class="absolute right-4 top-4 z-10 flex items-center gap-2">
@@ -268,6 +261,23 @@ defmodule WasomiWeb.AdminLive.Courses do
                         <.icon name="hero-archive-box" class="h-4 w-4" />
                       </button>
                     </div>
+
+                    <span class={[
+                      "absolute bottom-5 left-5 grid h-14 w-14 place-items-center rounded-2xl border",
+                      card_icon_wrap_class(index)
+                    ]}>
+                      <.icon name="hero-academic-cap" class="h-7 w-7" />
+                    </span>
+
+                    <div class={[
+                      "absolute bottom-3 right-4 flex items-end gap-2",
+                      card_number_class(index)
+                    ]}>
+                      <.icon name="hero-chart-bar" class="h-6 w-6 opacity-70" />
+                      <span class="text-5xl font-black leading-none opacity-15">
+                        {String.pad_leading(Integer.to_string(index), 2, "0")}
+                      </span>
+                    </div>
                   </div>
 
                   <div class="flex flex-1 flex-col p-6">
@@ -278,8 +288,11 @@ defmodule WasomiWeb.AdminLive.Courses do
                       {row.course.title}
                     </.link>
                     <p class="mt-1 text-sm text-muted">/{row.course.slug}</p>
+                    <p :if={row.course.description} class="mt-2 line-clamp-2 text-sm text-body">
+                      {row.course.description}
+                    </p>
 
-                    <dl class=" mt-4 divide-y divide-black/5 rounded-2xl bg-neutral-50 px-4">
+                    <dl class="mt-4 divide-y divide-black/5 border-t border-black/5">
                       <.metric label="Price" value={Catalog.format_price(row.course)} />
                       <.metric label="Students" value={row.students} />
                       <.metric
@@ -288,6 +301,18 @@ defmodule WasomiWeb.AdminLive.Courses do
                         accent
                       />
                     </dl>
+
+                    <div class="mt-4 flex items-center justify-between border-t border-black/5 pt-4">
+                      <span class="text-xs text-muted">
+                        Updated {Calendar.strftime(row.course.updated_at, "%d %b %Y")}
+                      </span>
+                      <.link
+                        navigate={~p"/admin/courses/#{row.course.slug}"}
+                        class="relative z-10 inline-flex items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-xs font-semibold text-white transition hover:bg-primary"
+                      >
+                        Manage course <.icon name="hero-arrow-right" class="h-3.5 w-3.5" />
+                      </.link>
+                    </div>
                   </div>
                 </article>
               </div>
@@ -400,6 +425,30 @@ defmodule WasomiWeb.AdminLive.Courses do
         else: "border border-black/10 bg-white text-body hover:border-primary hover:text-primary"
       )
     ]
+  end
+
+  defp card_header_class(index) do
+    case rem(index - 1, 3) do
+      0 -> "bg-primary"
+      1 -> "bg-ink"
+      2 -> "bg-mint"
+    end
+  end
+
+  defp card_icon_wrap_class(index) do
+    case rem(index - 1, 3) do
+      0 -> "border-white/40 bg-white/10 text-white"
+      1 -> "border-white/20 bg-white/10 text-white"
+      2 -> "border-primary/30 bg-white text-primary"
+    end
+  end
+
+  defp card_number_class(index) do
+    case rem(index - 1, 3) do
+      0 -> "text-white"
+      1 -> "text-white"
+      2 -> "text-ink"
+    end
   end
 
   defp humanize_status(status) do

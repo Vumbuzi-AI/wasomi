@@ -1,12 +1,13 @@
 defmodule Wasomi.Assessments.Workers.GenerateFlashcardsWorker do
   @moduledoc """
-  Gathers a module's document/transcript text and asks the configured
-  `Wasomi.Assessments.FlashcardGenerator` to draft flashcards from it, so a
-  learner's first visit to a module's Flashcards section never blocks on
-  generation. Mirrors
-  `Wasomi.Assessments.Workers.GenerateQuizFromPDFWorker`'s resource-driven
-  path, including only flipping the set to `:failed` on the job's last
-  Oban attempt.
+  Drafts a module's (or lecture's) flashcards ahead of the learner opening
+  the Flashcards section, so that first visit never blocks on generation.
+
+  Cards are always drawn from the scope's document/transcript text.
+
+  Mirrors `Wasomi.Assessments.Workers.GenerateQuizFromPDFWorker`'s
+  resource-driven path, including only flipping the set to `:failed` on the
+  job's last Oban attempt.
   """
 
   use Oban.Worker,
@@ -57,15 +58,23 @@ defmodule Wasomi.Assessments.Workers.GenerateFlashcardsWorker do
   defp run(set) do
     Assessments.mark_flashcard_set_processing(set)
 
+    with {:ok, drafts, source} <- draft_cards(set),
+         {:ok, _count} <- Assessments.mark_flashcard_set_ready(set, drafts, source: source) do
+      :ok
+    end
+  end
+
+  defp draft_cards(set), do: draft_from_lesson_text(set)
+
+  defp draft_from_lesson_text(set) do
     with {:ok, text} <- ResourceText.gather(scope(set)),
          {min_count, max_count} = card_count_range(text),
          {:ok, drafts} <-
            flashcard_generator().generate_flashcards(text,
              min_count: min_count,
              max_count: max_count
-           ),
-         {:ok, _count} <- Assessments.mark_flashcard_set_ready(set, drafts) do
-      :ok
+           ) do
+      {:ok, drafts, :lesson_text}
     end
   end
 

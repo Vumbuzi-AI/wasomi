@@ -3,6 +3,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
 
   alias Wasomi.{Assessments, Catalog, Enrollments, Learning, Payments}
   alias Wasomi.Catalog.{CourseModule, Lecture}
+  alias Wasomi.Catalog.PublishGuard
   alias WasomiWeb.CourseLive
   alias WasomiWeb.CourseModuleLive
   alias WasomiWeb.LectureLive
@@ -14,11 +15,16 @@ defmodule WasomiWeb.AdminLive.CourseShow do
      |> assign(:modal, nil)
      |> assign(:course_module, nil)
      |> assign(:lecture, nil)
+     |> assign(:quiz_lecture_id, nil)
+     |> assign(:quiz_modal_tab, :generate)
      |> assign(:form_title, nil)
      |> assign(:active_tab, :curriculum)
      |> assign(:deleting_quiz, nil)
      |> assign(:deleting_module, nil)
      |> assign(:deleting_lecture, nil)
+     |> assign(:collapsed_modules, MapSet.new())
+     |> assign(:publish_checklist, nil)
+     |> assign(:confirming_unpublish?, false)
      |> load_course(slug)}
   end
 
@@ -35,6 +41,49 @@ defmodule WasomiWeb.AdminLive.CourseShow do
      socket
      |> assign(:modal, :course)
      |> assign(:form_title, "Edit course")}
+  end
+
+  def handle_event("publish_course", _params, socket) do
+    case Catalog.publish_course(socket.assigns.course) do
+      {:ok, course} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Course published — it's now visible in the public catalog.")
+         |> load_course(course.slug)}
+
+      {:error, issues} when is_list(issues) ->
+        checklist =
+          socket.assigns.course.id
+          |> Catalog.get_course_with_outline!()
+          |> PublishGuard.checklist()
+
+        {:noreply, assign(socket, :publish_checklist, checklist)}
+
+      {:error, %Ecto.Changeset{}} ->
+        {:noreply, put_flash(socket, :error, "Could not publish this course.")}
+    end
+  end
+
+  def handle_event("close_publish_checklist", _params, socket) do
+    {:noreply, assign(socket, :publish_checklist, nil)}
+  end
+
+  def handle_event("confirm_unpublish_course", _params, socket) do
+    {:noreply, assign(socket, :confirming_unpublish?, true)}
+  end
+
+  def handle_event("cancel_unpublish_course", _params, socket) do
+    {:noreply, assign(socket, :confirming_unpublish?, false)}
+  end
+
+  def handle_event("unpublish_course", _params, socket) do
+    {:ok, course} = Catalog.unpublish_course(socket.assigns.course)
+
+    {:noreply,
+     socket
+     |> put_flash(:info, "Course unpublished — it's no longer visible in the public catalog.")
+     |> assign(:confirming_unpublish?, false)
+     |> load_course(course.slug)}
   end
 
   def handle_event("new_module", _params, socket) do
@@ -81,7 +130,36 @@ defmodule WasomiWeb.AdminLive.CourseShow do
   end
 
   def handle_event("close_modal", _params, socket) do
+    socket =
+      if socket.assigns.modal == :quiz do
+        load_course(socket, socket.assigns.course.slug)
+      else
+        socket
+      end
+
     {:noreply, close_modal(socket)}
+  end
+
+  def handle_event("open_quiz", %{"id" => id} = params, socket) do
+    tab = if params["tab"] == "questions", do: :questions, else: :generate
+
+    {:noreply,
+     socket
+     |> assign(:modal, :quiz)
+     |> assign(:quiz_lecture_id, id)
+     |> assign(:quiz_modal_tab, tab)}
+  end
+
+  def handle_event("toggle_module", %{"id" => id}, socket) do
+    id = to_int(id)
+    collapsed = socket.assigns.collapsed_modules
+
+    collapsed =
+      if MapSet.member?(collapsed, id),
+        do: MapSet.delete(collapsed, id),
+        else: MapSet.put(collapsed, id)
+
+    {:noreply, assign(socket, :collapsed_modules, collapsed)}
   end
 
   def handle_event("switch_tab", %{"tab" => tab}, socket)
@@ -206,48 +284,6 @@ defmodule WasomiWeb.AdminLive.CourseShow do
     {:noreply, load_course(socket, socket.assigns.course.slug)}
   end
 
-  # `Catalog.subscribe_to_overview_generation/1` is called from inside the
-  # lecture form component's own `update/2`, but PubSub subscriptions are
-  # process-scoped, not component-scoped — the broadcast lands on this
-  # LiveView's mailbox, so this is the only place that can have a
-  # `handle_info/2` for it. The lecture modal's mounted component id is
-  # either the real lecture id (editing) or the fixed atom `:new_lecture`
-  # (creating, for the whole wizard session — see the id-staleness note on
-  # the live_component call below), so target both; `send_update/3` is a
-  # silent no-op for whichever one isn't actually mounted.
-  def handle_info({:lecture_overview_generation_updated, generation}, socket) do
-    send_update(LectureLive.FormComponent,
-      id: generation.lecture_id,
-      overview_generation: generation
-    )
-
-    send_update(LectureLive.FormComponent, id: :new_lecture, overview_generation: generation)
-    {:noreply, socket}
-  end
-
-  # Drives the live-ticking "running for Xs" counter on the generation
-  # form component (see `maybe_start_ticking/1` there, which kicks off
-  # the first one of these) — self-perpetuating for as long as the
-  # generation stays `:pending`/`:processing`, stopping on its own the
-  # moment it doesn't (no explicit cleanup needed either way, since a
-  # stale scheduled message here is harmless: it just re-checks the
-  # generation's current status and finds there's nothing left to do).
-  def handle_info({:tick_overview_generation, generation_id}, socket) do
-    generation = Catalog.get_overview_generation!(generation_id)
-
-    if generation.status in [:pending, :processing] do
-      send_update(LectureLive.FormComponent,
-        id: generation.lecture_id,
-        overview_generation: generation
-      )
-
-      send_update(LectureLive.FormComponent, id: :new_lecture, overview_generation: generation)
-      Process.send_after(self(), {:tick_overview_generation, generation_id}, 1000)
-    end
-
-    {:noreply, socket}
-  end
-
   def handle_info({mod, {:saved, _record}}, socket)
       when mod in [
              CourseLive.FormComponent,
@@ -258,7 +294,13 @@ defmodule WasomiWeb.AdminLive.CourseShow do
   end
 
   defp close_modal(socket) do
-    assign(socket, modal: nil, course_module: nil, lecture: nil, form_title: nil)
+    assign(socket,
+      modal: nil,
+      course_module: nil,
+      lecture: nil,
+      quiz_lecture_id: nil,
+      form_title: nil
+    )
   end
 
   defp load_course(socket, slug) do
@@ -313,7 +355,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
   def render(assigns) do
     ~H"""
     <.admin_layout active={:courses} current_user={@current_user}>
-      <div class="mx-auto max-w-container space-y-8 px-5 py-10 lg:px-10">
+      <div class="w-full space-y-5 px-5 py-8 lg:px-8">
         <.link
           navigate={~p"/admin/courses"}
           class="inline-flex items-center gap-1.5 text-sm font-medium text-muted hover:text-primary"
@@ -337,6 +379,25 @@ defmodule WasomiWeb.AdminLive.CourseShow do
               <p class="mt-4 max-w-xl text-body">{@course.description}</p>
 
               <div class="mt-6 flex flex-wrap items-center gap-3">
+                <button
+                  :if={@course.status == :draft}
+                  type="button"
+                  phx-click={JS.push("publish_course")}
+                  class="group inline-flex items-center gap-2 rounded-full bg-primary py-1.5 pl-6 pr-1.5 font-medium text-white transition hover:bg-ink"
+                >
+                  Publish course
+                  <span class="grid h-9 w-9 place-items-center rounded-full bg-white/20 text-white transition group-hover:bg-primary">
+                    <.icon name="hero-rocket-launch" class="h-4 w-4" />
+                  </span>
+                </button>
+                <button
+                  :if={@course.status == :published}
+                  type="button"
+                  phx-click={JS.push("confirm_unpublish_course")}
+                  class="inline-flex items-center gap-2 rounded-full border border-ink px-5 py-2.5 text-sm font-medium text-ink transition hover:bg-ink hover:text-white"
+                >
+                  <.icon name="hero-eye-slash" class="h-4 w-4" /> Unpublish
+                </button>
                 <button
                   type="button"
                   phx-click={JS.push("edit_course")}
@@ -401,14 +462,23 @@ defmodule WasomiWeb.AdminLive.CourseShow do
         </div>
 
         <%!-- Tabs --%>
-        <div class="flex items-center gap-2 rounded-full border border-black/5 bg-white p-1.5">
+        <div
+          id="course-detail-tabs"
+          role="tablist"
+          aria-label="Course details"
+          class="grid grid-cols-2 gap-1.5 rounded-2xl bg-neutral-100 p-1.5"
+        >
           <button
+            id="curriculum-tab"
             type="button"
+            role="tab"
+            aria-selected={to_string(@active_tab == :curriculum)}
+            aria-controls="curriculum-panel"
             phx-click={JS.push("switch_tab", value: %{tab: "curriculum"})}
             class={[
-              "flex-1 rounded-full px-5 py-2.5 text-sm font-medium transition sm:flex-none",
+              "w-full rounded-xl px-4 py-3 text-sm font-semibold transition",
               if(@active_tab == :curriculum,
-                do: "bg-ink text-white",
+                do: "bg-ink text-white shadow-sm",
                 else: "text-body hover:text-ink"
               )
             ]}
@@ -416,18 +486,25 @@ defmodule WasomiWeb.AdminLive.CourseShow do
             Curriculum
           </button>
           <button
+            id="students-tab"
             type="button"
+            role="tab"
+            aria-selected={to_string(@active_tab == :students)}
+            aria-controls="students-panel"
             phx-click={JS.push("switch_tab", value: %{tab: "students"})}
             class={[
-              "flex-1 rounded-full px-5 py-2.5 text-sm font-medium transition sm:flex-none",
+              "w-full rounded-xl px-4 py-3 text-sm font-semibold transition",
               if(@active_tab == :students,
-                do: "bg-ink text-white",
+                do: "bg-ink text-white shadow-sm",
                 else: "text-body hover:text-ink"
               )
             ]}
           >
             Enrolled students
-            <span class="ml-1.5 rounded-full bg-mint px-2 py-0.5 text-xs font-semibold text-primary">
+            <span class={[
+              "ml-1.5 font-bold",
+              if(@active_tab == :students, do: "text-white", else: "text-primary")
+            ]}>
               {@student_count}
             </span>
           </button>
@@ -436,22 +513,24 @@ defmodule WasomiWeb.AdminLive.CourseShow do
         <%!-- Curriculum (editable) --%>
         <section
           :if={@active_tab == :curriculum}
+          id="curriculum-panel"
+          role="tabpanel"
+          aria-labelledby="curriculum-tab"
           class="rounded-3xl border border-black/5 bg-white p-6 lg:p-8"
         >
           <div class="flex flex-wrap items-center justify-between gap-4">
             <div>
-              <h2 class="text-xl font-semibold text-ink">Course curriculum</h2>
-              <p class="mt-1 text-sm text-muted">Add and arrange modules and their lectures.</p>
+              <h2 class="text-2xl font-bold text-ink">Course curriculum</h2>
+              <p class="mt-1 text-sm text-muted">
+                Use the drag handles to reorder modules or move lectures between modules.
+              </p>
             </div>
             <button
               type="button"
               phx-click="new_module"
-              class="group inline-flex items-center gap-2 rounded-full bg-ink py-1.5 pl-5 pr-1.5 text-sm font-medium text-white transition hover:bg-primary"
+              class="inline-flex items-center gap-2 rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white transition hover:bg-primary"
             >
-              Add module
-              <span class="grid h-8 w-8 place-items-center rounded-full bg-primary text-white transition group-hover:bg-ink">
-                <.icon name="hero-plus-mini" class="h-4 w-4" />
-              </span>
+              <.icon name="hero-plus-mini" class="h-4 w-4" /> Add module
             </button>
           </div>
 
@@ -469,25 +548,42 @@ defmodule WasomiWeb.AdminLive.CourseShow do
               data-sortable-item
               data-id={module.id}
               draggable="false"
-              class="rounded-2xl border border-black/5 bg-neutral-50/40 p-5 transition data-[dragging=true]:opacity-60 data-[drag-over=true]:border-primary data-[drag-over=true]:bg-mint/50"
+              class="rounded-2xl border border-black/5 bg-neutral-50 p-5 transition data-[dragging=true]:opacity-60 data-[drag-over=true]:border-primary data-[drag-over=true]:bg-mint/50"
             >
               <div class="flex items-start gap-4">
                 <button
                   type="button"
                   data-sortable-handle
-                  class="mt-1 grid h-9 w-9 shrink-0 cursor-grab place-items-center rounded-full border border-black/10 bg-white text-muted transition hover:border-primary hover:text-primary active:cursor-grabbing"
+                  class="mt-0.5 grid h-9 w-9 shrink-0 cursor-grab place-items-center rounded-xl border border-black/10 bg-white text-ink transition hover:border-primary hover:text-primary active:cursor-grabbing"
                   title="Drag module"
                   aria-label="Drag module"
                 >
-                  <.icon name="hero-bars-3" class="h-4 w-4" />
+                  <.icon name="hero-ellipsis-vertical" class="h-4 w-4" />
                 </button>
-                <span class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-mint font-semibold text-primary">
+                <button
+                  type="button"
+                  phx-click={JS.push("toggle_module", value: %{id: module.id})}
+                  class="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-full border border-ink text-ink transition hover:bg-ink hover:text-white"
+                  title="Toggle module"
+                  aria-label="Toggle module"
+                >
+                  <.icon
+                    name={
+                      if(MapSet.member?(@collapsed_modules, module.id),
+                        do: "hero-chevron-right",
+                        else: "hero-chevron-down"
+                      )
+                    }
+                    class="h-4 w-4"
+                  />
+                </button>
+                <span class="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-full bg-neutral-200 font-semibold text-primary">
                   {module.position}
                 </span>
                 <div class="min-w-0 flex-1">
                   <div class="flex items-start justify-between gap-3">
                     <div class="min-w-0">
-                      <h3 class="font-semibold text-ink">{module.title}</h3>
+                      <h3 class="text-lg font-semibold text-ink">{module.title}</h3>
                       <p :if={module.description} class="mt-1 text-sm text-body">
                         {module.description}
                       </p>
@@ -496,7 +592,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                       <button
                         type="button"
                         phx-click={JS.push("edit_module", value: %{id: module.id})}
-                        class="grid h-8 w-8 place-items-center rounded-full border border-black/10 bg-white text-muted transition hover:border-primary hover:text-primary"
+                        class="grid h-9 w-9 place-items-center rounded-full border border-black/10 bg-white text-muted transition hover:border-primary hover:text-primary"
                         title="Edit module"
                       >
                         <.icon name="hero-pencil-square" class="h-4 w-4" />
@@ -504,7 +600,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                       <button
                         type="button"
                         phx-click={JS.push("confirm_delete_module", value: %{id: module.id})}
-                        class="grid h-8 w-8 place-items-center rounded-full border border-black/10 bg-white text-muted transition hover:border-red-400 hover:text-red-500"
+                        class="grid h-9 w-9 place-items-center rounded-full border border-black/10 bg-white text-muted transition hover:border-red-400 hover:text-red-500"
                         title="Delete module"
                       >
                         <.icon name="hero-trash" class="h-4 w-4" />
@@ -512,157 +608,184 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                     </div>
                   </div>
 
-                  <ul
-                    id={"module-#{module.id}-lectures"}
-                    phx-hook="SortableList"
-                    data-event="reorder_lectures"
-                    data-parent-key="module_id"
-                    data-parent-id={module.id}
-                    data-order-key="lecture_ids"
-                    class="mt-4 space-y-2"
-                  >
-                    <li
-                      :for={lecture <- module.lectures}
-                      id={"lecture-#{lecture.id}"}
-                      data-sortable-item
-                      data-id={lecture.id}
-                      draggable="false"
-                      class="flex items-center justify-between gap-3 rounded-xl border border-black/5 bg-white px-4 py-2.5 transition data-[dragging=true]:opacity-60 data-[drag-over=true]:border-primary data-[drag-over=true]:bg-mint/50"
+                  <div :if={!MapSet.member?(@collapsed_modules, module.id)}>
+                    <ul
+                      id={"module-#{module.id}-lectures"}
+                      phx-hook="SortableList"
+                      data-event="reorder_lectures"
+                      data-parent-key="module_id"
+                      data-parent-id={module.id}
+                      data-order-key="lecture_ids"
+                      class="mt-4 space-y-2.5"
+                    >
+                      <li
+                        :for={lecture <- module.lectures}
+                        id={"lecture-#{lecture.id}"}
+                        data-sortable-item
+                        data-id={lecture.id}
+                        draggable="false"
+                        class="flex items-center justify-between gap-3 rounded-xl border border-black/5 bg-white px-4 py-3 transition data-[dragging=true]:opacity-60 data-[drag-over=true]:border-primary data-[drag-over=true]:bg-mint/50"
+                      >
+                        <span class="flex min-w-0 items-center gap-3">
+                          <button
+                            type="button"
+                            data-sortable-handle
+                            class="grid h-8 w-8 shrink-0 cursor-grab place-items-center rounded-lg border border-black/10 text-muted transition hover:border-primary hover:text-primary active:cursor-grabbing"
+                            title="Drag lecture"
+                            aria-label="Drag lecture"
+                          >
+                            <.icon name="hero-ellipsis-vertical" class="h-4 w-4" />
+                          </button>
+                          <.link
+                            navigate={
+                              ~p"/admin/courses/#{@course.slug}/preview?#{%{lecture_id: lecture.id}}"
+                            }
+                            class="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-primary/40 text-primary transition hover:bg-primary hover:text-white"
+                            title={"Preview #{lecture.title}"}
+                            aria-label={"Preview #{lecture.title}"}
+                          >
+                            <.icon name="hero-play-circle" class="h-4 w-4" />
+                          </.link>
+                          <span class="min-w-0">
+                            <span class="block truncate font-semibold text-ink">{lecture.title}</span>
+                            <span class="block text-xs text-muted">
+                              {Catalog.lecture_resource_count(lecture)} resources · {Map.get(
+                                @lecture_quiz_question_counts,
+                                lecture.id,
+                                0
+                              )} quiz questions
+                            </span>
+                          </span>
+                        </span>
+                        <span class="flex shrink-0 items-center gap-2">
+                          <span class="text-sm font-medium text-muted">
+                            {minutes(lecture.duration_seconds)} min
+                          </span>
+                          <button
+                            :if={Map.get(@lecture_quiz_question_counts, lecture.id, 0) > 0}
+                            type="button"
+                            phx-click={
+                              JS.push("open_quiz", value: %{id: lecture.id, tab: "questions"})
+                            }
+                            class="inline-flex items-center gap-1.5 rounded-full border border-black/10 px-4 py-2 text-xs font-semibold text-body transition hover:border-primary hover:text-primary"
+                          >
+                            <.icon name="hero-eye-mini" class="h-3.5 w-3.5" /> View questions
+                          </button>
+                          <button
+                            type="button"
+                            phx-click={
+                              JS.push("open_quiz", value: %{id: lecture.id, tab: "generate"})
+                            }
+                            class="inline-flex items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-xs font-semibold text-white transition hover:bg-primary"
+                          >
+                            <.icon name="hero-plus-mini" class="h-3.5 w-3.5" /> Add quiz
+                          </button>
+                          <button
+                            type="button"
+                            phx-click={JS.push("edit_lecture", value: %{id: lecture.id})}
+                            class="grid h-8 w-8 place-items-center rounded-full border border-black/10 text-muted transition hover:border-primary hover:text-primary"
+                            title="Edit lecture"
+                          >
+                            <.icon name="hero-pencil-square" class="h-4 w-4" />
+                          </button>
+                          <button
+                            type="button"
+                            phx-click={JS.push("confirm_delete_lecture", value: %{id: lecture.id})}
+                            class="grid h-8 w-8 place-items-center rounded-full border border-black/10 text-muted transition hover:border-red-400 hover:text-red-500"
+                            title="Delete lecture"
+                          >
+                            <.icon name="hero-trash" class="h-4 w-4" />
+                          </button>
+                        </span>
+                      </li>
+                      <li :if={module.lectures == []} class="px-1 text-sm text-muted">
+                        No lectures yet.
+                      </li>
+                    </ul>
+
+                    <div
+                      :for={quiz <- List.wrap(Map.get(@quizzes_by_module, module.id))}
+                      class="mt-2.5 flex items-center justify-between gap-3 rounded-xl border border-black/5 bg-mint/40 px-4 py-3"
                     >
                       <span class="flex min-w-0 items-center gap-3 text-sm text-ink">
-                        <button
-                          type="button"
-                          data-sortable-handle
-                          class="grid h-7 w-7 shrink-0 cursor-grab place-items-center rounded-full text-muted transition hover:bg-mint hover:text-primary active:cursor-grabbing"
-                          title="Drag lecture"
-                          aria-label="Drag lecture"
-                        >
-                          <.icon name="hero-bars-3" class="h-4 w-4" />
-                        </button>
-                        <.icon name="hero-play-circle" class="h-5 w-5 shrink-0 text-primary" />
-                        <span class="truncate">{lecture.title}</span>
+                        <.icon
+                          name="hero-clipboard-document-check"
+                          class="h-5 w-5 shrink-0 text-primary"
+                        />
+                        <span class="truncate font-semibold">{quiz.title}</span>
                         <span class="shrink-0 text-xs text-muted">
-                          {minutes(lecture.duration_seconds)} min
-                        </span>
-                        <span class="hidden shrink-0 text-xs text-muted sm:inline">
-                          {Catalog.lecture_resource_count(lecture)} resources · {Catalog.lecture_question_count(
-                            lecture
-                          )} Q&A
+                          {Map.get(@published_question_counts, module.id, 0)} published<span :if={
+                            Map.get(@draft_question_counts, module.id, 0) > 0
+                          }>
+                            · {Map.get(@draft_question_counts, module.id)} to review
+                          </span>
                         </span>
                       </span>
                       <span class="flex shrink-0 items-center gap-1.5">
                         <.link
-                          navigate={~p"/admin/courses/#{@course.slug}/lectures/#{lecture.id}/quiz"}
-                          class="grid h-8 w-8 place-items-center rounded-full text-muted transition hover:bg-mint hover:text-primary"
-                          title="Lecture quiz"
+                          navigate={~p"/admin/courses/#{@course.slug}/quizzes/#{quiz.id}/edit"}
+                          class="grid h-8 w-8 place-items-center rounded-full text-muted transition hover:bg-white hover:text-primary"
+                          title="Manage quiz"
                         >
-                          <.icon name="hero-clipboard-document-check" class="h-4 w-4" />
+                          <.icon name="hero-pencil-square" class="h-4 w-4" />
                         </.link>
                         <button
                           type="button"
-                          phx-click={JS.push("edit_lecture", value: %{id: lecture.id})}
-                          class="grid h-8 w-8 place-items-center rounded-full text-muted transition hover:bg-mint hover:text-primary"
-                          title="Edit lecture"
-                        >
-                          <.icon name="hero-pencil-square" class="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          phx-click={JS.push("confirm_delete_lecture", value: %{id: lecture.id})}
-                          class="grid h-8 w-8 place-items-center rounded-full text-muted transition hover:bg-red-50 hover:text-red-500"
-                          title="Delete lecture"
+                          phx-click={JS.push("confirm_delete_quiz", value: %{id: quiz.id})}
+                          class="grid h-8 w-8 place-items-center rounded-full text-muted transition hover:bg-white hover:text-red-500"
+                          title="Delete quiz"
                         >
                           <.icon name="hero-trash" class="h-4 w-4" />
                         </button>
                       </span>
-                    </li>
-                    <li :if={module.lectures == []} class="px-1 text-sm text-muted">
-                      No lectures yet.
-                    </li>
-                  </ul>
+                    </div>
 
-                  <div
-                    :for={quiz <- List.wrap(Map.get(@quizzes_by_module, module.id))}
-                    class="mt-2 flex items-center justify-between gap-3 rounded-xl border border-black/5 bg-mint/20 px-4 py-2.5"
-                  >
-                    <span class="flex min-w-0 items-center gap-3 text-sm text-ink">
-                      <.icon
-                        name="hero-clipboard-document-check"
-                        class="h-5 w-5 shrink-0 text-primary"
-                      />
-                      <span class="truncate font-medium">{quiz.title}</span>
-                      <span class="shrink-0 text-xs text-muted">
-                        {Map.get(@published_question_counts, module.id, 0)} published<span :if={
-                          Map.get(@draft_question_counts, module.id, 0) > 0
-                        }>
-                          · {Map.get(@draft_question_counts, module.id)} to review
-                        </span>
-                      </span>
-                    </span>
-                    <span class="flex shrink-0 items-center gap-1.5">
-                      <.link
-                        navigate={~p"/admin/courses/#{@course.slug}/quizzes/#{quiz.id}/edit"}
-                        class="grid h-8 w-8 place-items-center rounded-full text-muted transition hover:bg-mint hover:text-primary"
-                        title="Manage quiz"
-                      >
-                        <.icon name="hero-pencil-square" class="h-4 w-4" />
-                      </.link>
+                    <div class="mt-4 flex flex-wrap items-center gap-4">
                       <button
                         type="button"
-                        phx-click={JS.push("confirm_delete_quiz", value: %{id: quiz.id})}
-                        class="grid h-8 w-8 place-items-center rounded-full text-muted transition hover:bg-red-50 hover:text-red-500"
-                        title="Delete quiz"
+                        phx-click={JS.push("new_lecture", value: %{"module-id" => module.id})}
+                        class="inline-flex items-center gap-1.5 text-sm font-semibold text-primary transition hover:text-ink"
                       >
-                        <.icon name="hero-trash" class="h-4 w-4" />
+                        <.icon name="hero-plus-circle" class="h-4 w-4" /> Add lecture
                       </button>
-                    </span>
-                  </div>
-
-                  <div class="mt-3 flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      phx-click={JS.push("new_lecture", value: %{"module-id" => module.id})}
-                      class="inline-flex items-center gap-1.5 rounded-full bg-ink px-4 py-1.5 text-sm font-medium text-white transition hover:bg-primary"
-                    >
-                      <.icon name="hero-plus-circle" class="h-4 w-4" /> Add lecture
-                    </button>
-                    <.link
-                      navigate={~p"/admin/courses/#{@course.slug}/modules/#{module.id}/practice"}
-                      class="inline-flex items-center gap-1.5 rounded-full border border-black/10 px-4 py-1.5 text-sm font-medium text-dark transition hover:bg-mint hover:text-primary"
-                    >
-                      <.icon name="hero-beaker" class="h-4 w-4" /> Practice questions
-                    </.link>
-                    <span
+                      <span
+                        :if={
+                          is_nil(Map.get(@quizzes_by_module, module.id)) and
+                            not module_ready_for_quiz_generation?(
+                              module,
+                              @lecture_quiz_question_counts
+                            )
+                        }
+                        class="inline-flex cursor-not-allowed items-center gap-1.5 text-sm font-medium text-muted"
+                        title="Every lecture in this module needs its own generated lecture quiz first"
+                      >
+                        Add module quiz
+                      </span>
+                      <button
+                        :if={
+                          is_nil(Map.get(@quizzes_by_module, module.id)) and
+                            module_ready_for_quiz_generation?(module, @lecture_quiz_question_counts)
+                        }
+                        type="button"
+                        phx-click={JS.push("generate_quiz", value: %{"module-id" => module.id})}
+                        class="inline-flex items-center gap-1.5 text-sm font-semibold text-body transition hover:text-primary"
+                      >
+                        Add module quiz
+                      </button>
+                    </div>
+                    <p
                       :if={
                         is_nil(Map.get(@quizzes_by_module, module.id)) and
-                          not module_ready_for_quiz_generation?(module, @lecture_quiz_question_counts)
+                          not module_ready_for_quiz_generation?(
+                            module,
+                            @lecture_quiz_question_counts
+                          )
                       }
-                      class="inline-flex cursor-not-allowed items-center gap-1.5 rounded-full bg-neutral-100 px-4 py-1.5 text-sm font-medium text-muted"
-                      title="Every lecture in this module needs its own generated lecture quiz first"
+                      class="mt-1.5 text-xs text-muted"
                     >
-                      Add module quiz
-                    </span>
-                    <button
-                      :if={
-                        is_nil(Map.get(@quizzes_by_module, module.id)) and
-                          module_ready_for_quiz_generation?(module, @lecture_quiz_question_counts)
-                      }
-                      type="button"
-                      phx-click={JS.push("generate_quiz", value: %{"module-id" => module.id})}
-                      class="inline-flex items-center gap-1.5 rounded-full bg-ink px-4 py-1.5 text-sm font-medium text-white transition hover:bg-primary"
-                    >
-                      Add module quiz
-                    </button>
+                      Generate a quiz for every lecture in this module before generating the module quiz.
+                    </p>
                   </div>
-                  <p
-                    :if={
-                      is_nil(Map.get(@quizzes_by_module, module.id)) and
-                        not module_ready_for_quiz_generation?(module, @lecture_quiz_question_counts)
-                    }
-                    class="mt-1.5 text-xs text-muted"
-                  >
-                    Generate a quiz for every lecture in this module before generating the module quiz.
-                  </p>
                 </div>
               </div>
             </article>
@@ -685,6 +808,9 @@ defmodule WasomiWeb.AdminLive.CourseShow do
         <%!-- Enrolled students --%>
         <section
           :if={@active_tab == :students}
+          id="students-panel"
+          role="tabpanel"
+          aria-labelledby="students-tab"
           class="rounded-3xl border border-black/5 bg-white p-6 lg:p-8"
         >
           <h2 class="text-xl font-semibold text-ink">Enrolled students</h2>
@@ -800,6 +926,68 @@ defmodule WasomiWeb.AdminLive.CourseShow do
           patch={~p"/admin/courses/#{@course.slug}"}
         />
       </.modal>
+
+      <%!-- Lecture quiz modal --%>
+      <.modal
+        :if={@modal == :quiz}
+        id="quiz-modal"
+        show
+        dismissable={false}
+        max_width="max-w-5xl"
+        on_cancel={JS.push("close_modal")}
+      >
+        {live_render(@socket, WasomiWeb.AdminLive.LectureQuizEdit,
+          id: "quiz-live-#{@quiz_lecture_id}-#{@quiz_modal_tab}",
+          session: %{
+            "course_slug" => @course.slug,
+            "lecture_id" => to_string(@quiz_lecture_id),
+            "initial_tab" => to_string(@quiz_modal_tab),
+            "embedded" => true
+          }
+        )}
+      </.modal>
+
+      <%!-- Publish readiness checklist --%>
+      <.modal
+        :if={@publish_checklist}
+        id="publish-checklist-modal"
+        show
+        on_cancel={JS.push("close_publish_checklist")}
+      >
+        <h2 class="text-lg font-semibold text-ink">
+          "{@course.title}" isn't ready to publish yet
+        </h2>
+        <p class="mt-1 text-sm text-body">Here's what's blocking it.</p>
+        <.publish_checklist stages={@publish_checklist} />
+        <div class="mt-6 flex items-center gap-4">
+          <button
+            type="button"
+            phx-click={JS.push("close_publish_checklist") |> JS.push("edit_course")}
+            class="rounded-full bg-ink px-5 py-2 text-sm font-medium text-white transition hover:bg-primary"
+          >
+            Edit course
+          </button>
+          <button
+            type="button"
+            phx-click="close_publish_checklist"
+            class="text-sm font-medium text-muted hover:text-ink"
+          >
+            Close
+          </button>
+        </div>
+      </.modal>
+
+      <%!-- Unpublish confirmation --%>
+      <.confirm_modal
+        :if={@confirming_unpublish?}
+        id="unpublish-course-modal"
+        title={"Unpublish \"#{@course.title}\"?"}
+        confirm_label="Unpublish"
+        confirm={JS.push("unpublish_course")}
+        cancel={JS.push("cancel_unpublish_course")}
+      >
+        It goes back to draft and leaves the public catalog. Enrolled learners keep their access, and you can publish it again at any time.
+      </.confirm_modal>
 
       <%!-- Delete quiz confirmation --%>
       <.confirm_modal

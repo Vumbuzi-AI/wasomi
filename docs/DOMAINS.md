@@ -98,13 +98,13 @@ Certificates use `Wasomi.Certificates.Workers.IssueCertificate`, a renderer modu
 
 Context: `Wasomi.Media`
 
-Responsibility: protected video playback URLs, admin upload creation/status, and adapter boundaries for Mux or local demo streaming.
+Responsibility: protected video playback URLs, admin upload creation/status, and adapter boundaries for Cloudflare Stream or local demo streaming.
 
 Key functions include `playback_token/4`, `playback_url/4`, `create_upload/4`, `upload_status/3`, and `configured_adapter/0`.
 
 Only admins can create uploads or check upload status. Learner playback requires active enrollment.
 
-The adapter behaviour also has a `download_url/1` callback (signed static-rendition MP4 for Mux) with no admin/enrollment gating in the `Wasomi.Media` context itself — it's called directly by the internal `Wasomi.Catalog.Workers.TranscribeLecture` background job, not from any user-facing action.
+The adapter behaviour also has a `download_url/1` callback (signed downloadable MP4 for Cloudflare Stream) with no admin/enrollment gating in the `Wasomi.Media` context itself — it's called directly by the internal `Wasomi.Catalog.Workers.TranscribeLecture` background job, not from any user-facing action.
 
 ## Notifications
 

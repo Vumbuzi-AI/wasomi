@@ -15,10 +15,4 @@ defmodule Wasomi.Media.Unconfigured do
 
   @impl true
   def download_url(_lecture), do: {:error, :media_provider_not_configured}
-
-  @impl true
-  def create_asset_from_url(_lecture, _url, _opts), do: {:error, :media_provider_not_configured}
-
-  @impl true
-  def asset_status(_asset_id), do: {:error, :media_provider_not_configured}
 end

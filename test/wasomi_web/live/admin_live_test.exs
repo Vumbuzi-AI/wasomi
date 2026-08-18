@@ -311,6 +311,43 @@ defmodule WasomiWeb.AdminLiveTest do
       assert html =~ "cover.jpg"
     end
 
+    test "lecture play icon links to that lecture in course preview", %{conn: conn} do
+      course = course_fixture()
+      module = course_module_fixture(course_id: course.id)
+      lecture = lecture_fixture(module_id: module.id, title: "Preview me")
+
+      {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
+
+      assert has_element?(
+               view,
+               "a[aria-label='Preview Preview me'][href='/admin/courses/#{course.slug}/preview?lecture_id=#{lecture.id}']"
+             )
+    end
+
+    test "shows equal course detail tabs and switches to enrolled students", %{conn: conn} do
+      course = course_fixture()
+      learner = user_fixture()
+      enrollment_fixture(user_id: learner.id, course_id: course.id, status: :active)
+
+      {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
+
+      assert has_element?(view, "#course-detail-tabs.grid.grid-cols-2")
+      assert has_element?(view, "#curriculum-tab[aria-selected='true']")
+      assert has_element?(view, "#curriculum-tab", "Curriculum")
+      assert has_element?(view, "#students-tab[aria-selected='false']")
+      assert has_element?(view, "#students-tab", "Enrolled students")
+      assert has_element?(view, "#students-tab span", "1")
+      assert has_element?(view, "#curriculum-panel")
+      refute has_element?(view, "#students-panel")
+
+      view |> element("#students-tab") |> render_click()
+
+      assert has_element?(view, "#curriculum-tab[aria-selected='false']")
+      assert has_element?(view, "#students-tab[aria-selected='true']")
+      refute has_element?(view, "#curriculum-panel")
+      assert has_element?(view, "#students-panel")
+    end
+
     test "shows each enrolled student's completion percent and latest quiz scores", %{
       conn: conn
     } do
@@ -361,6 +398,31 @@ defmodule WasomiWeb.AdminLiveTest do
                view,
                ~s(a[href="/admin/courses/#{course.slug}/lectures/#{lecture.id}/quiz"])
              )
+    end
+
+    test "shows the number of generated lecture-quiz questions", %{conn: conn} do
+      course = course_fixture()
+      module = course_module_fixture(course_id: course.id)
+      lecture = lecture_fixture(module_id: module.id, position: 1)
+      quiz = lecture_quiz_fixture(lecture: lecture)
+
+      for position <- 1..2 do
+        assert {:ok, _question} =
+                 Wasomi.Assessments.create_lecture_quiz_question(quiz, %{
+                   prompt: "Generated question #{position}",
+                   status: :published,
+                   position: position,
+                   question_options: [
+                     %{label: "Correct", correct: true, position: 1},
+                     %{label: "Incorrect", correct: false, position: 2}
+                   ]
+                 })
+      end
+
+      {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
+
+      assert has_element?(view, "#lecture-#{lecture.id}", "2 quiz questions")
+      refute has_element?(view, "#lecture-#{lecture.id}", "0 quiz questions")
     end
 
     test "shows a draft-question reminder badge only when a module has unreviewed drafts", %{
@@ -636,7 +698,7 @@ defmodule WasomiWeb.AdminLiveTest do
       [lecture] = Wasomi.Catalog.list_lectures()
       assert lecture.title == "Opening hook"
       assert lecture.position == 1
-      assert lecture.video_provider == :mux
+      assert lecture.video_provider == :cloudflare
       assert lecture.video_asset_id == "signed-playback-456"
       assert lecture.duration_seconds == 120
 
@@ -669,11 +731,11 @@ defmodule WasomiWeb.AdminLiveTest do
 
       render_click(view, "edit_lecture", %{"id" => lecture.id})
 
-      refute has_element?(view, "#lecture-form input[name='lecture[position]']")
+      refute has_element?(view, "#lecture-basics-form input[name='lecture[position]']")
 
       html =
         view
-        |> form("#lecture-form",
+        |> form("#lecture-basics-form",
           lecture: %{title: "Updated title", description: "Updated description"}
         )
         |> render_submit()

@@ -91,7 +91,7 @@ defmodule Wasomi.CatalogFixtures do
         position: 42,
         title: "some title #{System.unique_integer([:positive])}",
         video_asset_id: "some video_asset_id",
-        video_provider: :mux
+        video_provider: :cloudflare
       })
       |> Wasomi.Catalog.create_lecture()
 

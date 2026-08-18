@@ -7,10 +7,47 @@
     <.live_title default="Wasomi" suffix={assigns[:page_title_suffix] || " · Wasomi"}>
       {assigns[:page_title]}
     </.live_title>
+    <meta
+      name="description"
+      content={
+        assigns[:meta_description] ||
+          "Practical GS1 standards courses for professionals and businesses."
+      }
+    />
+    <meta name="robots" content={assigns[:meta_robots] || "noindex, nofollow"} />
+    <link :if={assigns[:canonical_url]} rel="canonical" href={assigns[:canonical_url]} />
+
+    <meta property="og:site_name" content="Wasomi" />
+    <meta property="og:type" content={assigns[:og_type] || "website"} />
+    <meta property="og:title" content={assigns[:page_title] || "Wasomi"} />
+    <meta
+      property="og:description"
+      content={
+        assigns[:meta_description] ||
+          "Practical GS1 standards courses for professionals and businesses."
+      }
+    />
+    <meta :if={assigns[:canonical_url]} property="og:url" content={assigns[:canonical_url]} />
+    <meta property="og:image" content={assigns[:meta_image] || url(~p"/images/hero-home.png")} />
+    <meta property="og:image:alt" content={assigns[:meta_image_alt] || "Learn with Wasomi"} />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={assigns[:page_title] || "Wasomi"} />
+    <meta
+      name="twitter:description"
+      content={
+        assigns[:meta_description] ||
+          "Practical GS1 standards courses for professionals and businesses."
+      }
+    />
+    <meta name="twitter:image" content={assigns[:meta_image] || url(~p"/images/hero-home.png")} />
+
+    <link rel="icon" type="image/svg+xml" href={~p"/images/logo.svg"} />
+    <link rel="icon" type="image/png" sizes="64x64" href={~p"/favicon.ico"} />
     <link phx-track-static rel="stylesheet" href={~p"/assets/app.css"} />
-    <script defer phx-track-static type="text/javascript" src={~p"/assets/app.js"}>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1" defer>
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/@mux/mux-player@3" defer>
+    <script defer phx-track-static type="text/javascript" src={~p"/assets/app.js"}>
     </script>
     <link
       rel="stylesheet"

@@ -16,15 +16,13 @@ module.exports = {
       colors: {
         primary: "#f97316",
         dark: "#012c6a",
-        // Near-black, used for admin/app surfaces (dashboard, courses,
-        // students, payments, analytics) that predate — and are visually
-        // distinct from — the navy-branded public marketing site. `dark`
-        // itself became the marketing navy accent; this keeps the admin
-        // area's original neutral black instead of inheriting that navy.
-        ink: "#0a0a0a",
+        // Navy is the structural app colour (headings, strong actions and
+        // navigation); orange remains the high-energy accent for progress,
+        // focus and calls to action.
+        ink: "#012c6a",
         body: "#404040",
         muted: "#a3a3a3",
-        secondary: "#1a1a1a",
+        secondary: "#012c6a",
         soft: "#ffffff",
         mint: "#fff7ed",
       },

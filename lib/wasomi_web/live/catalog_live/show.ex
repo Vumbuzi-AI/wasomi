@@ -13,10 +13,43 @@ defmodule WasomiWeb.CatalogLive.Show do
     {:ok,
      socket
      |> assign(:page_title, course.title)
+     |> assign(:meta_description, seo_description(course))
+     |> assign(:meta_robots, "index, follow")
+     |> assign(:canonical_url, url(~p"/courses/#{course.slug}"))
+     |> assign(:og_type, "article")
+     |> assign(:meta_image, seo_image(course.thumbnail_key))
+     |> assign(:meta_image_alt, course.title)
      |> assign(:course, course)
      |> assign(:lecture_count, Catalog.lecture_count(course))
      |> assign(:duration_label, duration_label(Catalog.duration_seconds(course)))
      |> assign(:learner_count, Enrollments.count_active_for_course(course.id))}
+  end
+
+  defp seo_description(course) do
+    description =
+      course.description
+      |> to_string()
+      |> String.replace(~r/\s+/, " ")
+      |> String.trim()
+
+    if description == "" do
+      "Learn #{course.title} with Wasomi's practical online GS1 training."
+    else
+      String.slice(description, 0, 160)
+    end
+  end
+
+  defp seo_image(nil), do: nil
+  defp seo_image(""), do: nil
+
+  defp seo_image(image) do
+    if String.starts_with?(image, ["https://", "http://"]) do
+      image
+    else
+      url(~p"/")
+      |> URI.merge(image)
+      |> URI.to_string()
+    end
   end
 
   @impl true
@@ -341,7 +374,8 @@ defmodule WasomiWeb.CatalogLive.Show do
     """
   end
 
-  defp minutes(seconds), do: max(1, div(seconds + 59, 60))
+  defp minutes(seconds) when is_integer(seconds), do: max(1, div(seconds + 59, 60))
+  defp minutes(_), do: 0
 
   defp module_duration(module) do
     module.lectures

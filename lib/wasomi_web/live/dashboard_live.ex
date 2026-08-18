@@ -52,7 +52,7 @@ defmodule WasomiWeb.DashboardLive do
     ~H"""
     <.student_layout active={:dashboard} current_user={@current_user}>
       <section class="bg-white py-12 lg:py-16">
-        <div class="mx-auto max-w-container px-5 lg:px-10">
+        <div class="w-full px-5 lg:px-8">
           <span class="rounded-full bg-mint px-3 py-1 text-sm font-medium text-primary">
             Learner dashboard
           </span>
@@ -76,7 +76,7 @@ defmodule WasomiWeb.DashboardLive do
       </section>
 
       <section class="pb-16 lg:pb-24">
-        <div class="mx-auto max-w-container space-y-12 px-5 lg:px-10">
+        <div class="w-full space-y-5 px-5 lg:px-8">
           <section
             :if={@notifications != []}
             id="dashboard-notifications"

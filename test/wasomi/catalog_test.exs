@@ -3,7 +3,7 @@ defmodule Wasomi.CatalogTest do
   use Oban.Testing, repo: Wasomi.Repo
 
   alias Wasomi.Catalog
-  alias Wasomi.Catalog.Workers.{GenerateLectureOverviewWorker, TranscribeLecture}
+  alias Wasomi.Catalog.Workers.TranscribeLecture
 
   describe "courses" do
     alias Wasomi.Catalog.Course
@@ -134,7 +134,7 @@ defmodule Wasomi.CatalogTest do
       course = course_fixture(price_minor: 15_000_00, currency: "KES")
 
       assert %Money{amount: 15_000_00, currency: :KES} = Catalog.price(course)
-      assert Catalog.format_price(course) =~ "KES"
+      assert Catalog.format_price(course) == "15,000 KES"
     end
 
     test "format_price returns Free when is_free is true" do
@@ -1179,178 +1179,6 @@ defmodule Wasomi.CatalogTest do
       assert transcript.text == "Full transcript."
 
       assert Catalog.get_lecture_transcript(lecture.id).text == "Full transcript."
-    end
-  end
-
-  describe "lecture overview generations" do
-    import Wasomi.{AccountsFixtures, CatalogFixtures}
-
-    defp admin_fixture do
-      user = user_fixture()
-      {:ok, admin} = Wasomi.Accounts.update_user_role(user, :admin)
-      admin
-    end
-
-    test "create_overview_generation/2 records a :pending request" do
-      lecture = lecture_fixture()
-      admin = admin_fixture()
-
-      assert {:ok, generation} = Catalog.create_overview_generation(lecture, admin)
-      assert generation.status == :pending
-      assert generation.lecture_id == lecture.id
-      assert generation.requested_by_id == admin.id
-    end
-
-    test "list_overview_generations_for_lecture/1 returns only that lecture's generations, newest first" do
-      lecture = lecture_fixture()
-      other_lecture = lecture_fixture()
-      admin = admin_fixture()
-
-      {:ok, first} = Catalog.create_overview_generation(lecture, admin)
-      {:ok, second} = Catalog.create_overview_generation(lecture, admin)
-      {:ok, _other} = Catalog.create_overview_generation(other_lecture, admin)
-
-      assert [^second, ^first] = Catalog.list_overview_generations_for_lecture(lecture)
-    end
-
-    test "mark_overview_generation_processing/1 flips status and broadcasts" do
-      lecture = lecture_fixture()
-      admin = admin_fixture()
-      {:ok, generation} = Catalog.create_overview_generation(lecture, admin)
-
-      Catalog.subscribe_to_overview_generation(lecture)
-      updated = Catalog.mark_overview_generation_processing(generation)
-
-      assert updated.status == :processing
-      assert_receive {:lecture_overview_generation_updated, ^updated}
-    end
-
-    test "mark_overview_generation_failed/2 records the error message and broadcasts" do
-      lecture = lecture_fixture()
-      admin = admin_fixture()
-      {:ok, generation} = Catalog.create_overview_generation(lecture, admin)
-
-      Catalog.subscribe_to_overview_generation(lecture)
-      updated = Catalog.mark_overview_generation_failed(generation, "boom")
-
-      assert updated.status == :failed
-      assert updated.error_message == "boom"
-      assert_receive {:lecture_overview_generation_updated, ^updated}
-    end
-
-    test "cancel_overview_generation/1 cancels the pending Oban job and marks the generation failed" do
-      lecture = lecture_fixture()
-      admin = admin_fixture()
-      {:ok, generation} = Catalog.create_overview_generation(lecture, admin)
-
-      {:ok, job} =
-        %{"generation_id" => generation.id}
-        |> GenerateLectureOverviewWorker.new()
-        |> Oban.insert()
-
-      Catalog.subscribe_to_overview_generation(lecture)
-      updated = Catalog.cancel_overview_generation(generation)
-
-      assert updated.status == :failed
-      assert updated.error_message == "Cancelled by admin."
-      assert_receive {:lecture_overview_generation_updated, ^updated}
-
-      assert Wasomi.Repo.get!(Oban.Job, job.id).state == "cancelled"
-    end
-
-    test "cancel_overview_generation/1 doesn't touch a different generation's job" do
-      lecture = lecture_fixture()
-      admin = admin_fixture()
-      {:ok, target} = Catalog.create_overview_generation(lecture, admin)
-      {:ok, other} = Catalog.create_overview_generation(lecture, admin)
-
-      {:ok, other_job} =
-        %{"generation_id" => other.id}
-        |> GenerateLectureOverviewWorker.new()
-        |> Oban.insert()
-
-      Catalog.cancel_overview_generation(target)
-
-      assert Wasomi.Repo.get!(Oban.Job, other_job.id).state == "available"
-    end
-
-    test "mark_overview_generation_ready/2 records scene count and storage key, then broadcasts" do
-      lecture = lecture_fixture()
-      admin = admin_fixture()
-      {:ok, generation} = Catalog.create_overview_generation(lecture, admin)
-
-      Catalog.subscribe_to_overview_generation(lecture)
-
-      assert {:ok, updated} =
-               Catalog.mark_overview_generation_ready(generation, %{
-                 scene_count: 3,
-                 video_storage_key: "lecture-overviews/#{generation.id}.mp4"
-               })
-
-      assert updated.status == :ready
-      assert updated.scene_count == 3
-      assert updated.video_storage_key == "lecture-overviews/#{generation.id}.mp4"
-      assert_receive {:lecture_overview_generation_updated, ^updated}
-    end
-
-    test "mark_overview_video_attaching/1 flips attach_status and clears any prior asset/error" do
-      lecture = lecture_fixture()
-      admin = admin_fixture()
-      {:ok, generation} = Catalog.create_overview_generation(lecture, admin)
-
-      Catalog.subscribe_to_overview_generation(lecture)
-      updated = Catalog.mark_overview_video_attaching(generation)
-
-      assert updated.attach_status == :attaching
-      assert is_nil(updated.attach_asset_id)
-      assert is_nil(updated.attach_error_message)
-      assert_receive {:lecture_overview_generation_updated, ^updated}
-    end
-
-    test "record_overview_video_attach_asset/2 stores the Mux asset id and broadcasts" do
-      lecture = lecture_fixture()
-      admin = admin_fixture()
-      {:ok, generation} = Catalog.create_overview_generation(lecture, admin)
-
-      Catalog.subscribe_to_overview_generation(lecture)
-      updated = Catalog.record_overview_video_attach_asset(generation, "asset_123")
-
-      assert updated.attach_asset_id == "asset_123"
-      assert_receive {:lecture_overview_generation_updated, ^updated}
-    end
-
-    test "mark_overview_video_attached/1 flips attach_status and broadcasts" do
-      lecture = lecture_fixture()
-      admin = admin_fixture()
-      {:ok, generation} = Catalog.create_overview_generation(lecture, admin)
-
-      Catalog.subscribe_to_overview_generation(lecture)
-      updated = Catalog.mark_overview_video_attached(generation)
-
-      assert updated.attach_status == :attached
-      assert_receive {:lecture_overview_generation_updated, ^updated}
-    end
-
-    test "mark_overview_video_attach_failed/2 records the error message and broadcasts" do
-      lecture = lecture_fixture()
-      admin = admin_fixture()
-      {:ok, generation} = Catalog.create_overview_generation(lecture, admin)
-
-      Catalog.subscribe_to_overview_generation(lecture)
-      updated = Catalog.mark_overview_video_attach_failed(generation, "boom")
-
-      assert updated.attach_status == :attach_failed
-      assert updated.attach_error_message == "boom"
-      assert_receive {:lecture_overview_generation_updated, ^updated}
-    end
-
-    test "attach_lecture_video/3 sets the lecture's video fields to the given Mux asset" do
-      lecture = lecture_fixture(video_asset_id: nil, video_provider: nil, duration_seconds: nil)
-
-      assert {:ok, updated} = Catalog.attach_lecture_video(lecture, "playback_abc", 42)
-      assert updated.video_provider == :mux
-      assert updated.video_asset_id == "playback_abc"
-      assert updated.duration_seconds == 42
     end
   end
 end

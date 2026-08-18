@@ -1,7 +1,7 @@
 defmodule WasomiWeb.StudyHubLive do
   @moduledoc """
-  Cross-course self-study destination: Flashcards, Extra practice, and
-  Timed quiz, scoped to any module (or a single lecture within it) across
+  Cross-course self-study destination: Study guide, Flashcards, Extra practice,
+  and Smart Test, scoped to any module (or a single lecture within it) across
   every course the learner is actively enrolled in.
 
   Unlike `CoursePlayerLive`, there is no preview mode here — this is a pure
@@ -18,45 +18,77 @@ defmodule WasomiWeb.StudyHubLive do
   use WasomiWeb, :live_view
 
   import WasomiWeb.StudyComponents
+  import WasomiWeb.CaptureProtection, only: [capture_guard_attrs: 1]
 
   alias Wasomi.Assessments
+  alias Wasomi.Assessments.SmartTest
+  alias Wasomi.Assessments.StudyGuide
   alias Wasomi.Assessments.Workers.GenerateFlashcardsWorker
   alias Wasomi.Assessments.Workers.GeneratePracticeSetQuestionsWorker
+  alias Wasomi.Assessments.Workers.GenerateSmartTestWorker
+  alias Wasomi.Assessments.Workers.GenerateStudyGuideWorker
+  alias Wasomi.Accounts
   alias Wasomi.Catalog.CourseModule
   alias Wasomi.Catalog.Lecture
   alias Wasomi.Enrollments
 
-  @impl true
-  def mount(_params, _session, socket) do
-    enrollments = Enrollments.list_active_for_user(socket.assigns.current_user)
+  require Logger
 
-    {:ok,
-     socket
-     |> assign(:page_title, "Study")
-     |> assign(:enrollments, enrollments)
-     |> assign(:loaded_key, nil)
-     |> assign(:flashcard_set, nil)
-     |> assign(:flashcard_cards, [])
-     |> assign(:flashcard_index, 0)
-     |> assign(:flashcard_flipped?, false)
-     |> assign(:practice_set, nil)
-     |> assign(:practice_set_questions, [])
-     |> assign(:practice_answers, %{})
-     |> assign(:practice_index, 0)
-     |> assign(:timed_quiz_target, nil)
-     |> assign(:timed_quiz_time_limit_seconds, nil)
-     |> assign(:timed_current_quiz, nil)
-     |> assign(:timed_quiz_answers, %{})
-     |> assign(:timed_current_question_index, 0)
-     |> assign(:timed_quiz_result, nil)
-     |> assign(:timed_quiz_time_expired?, false)
-     |> assign(:timed_quiz_deadline, nil)
-     |> assign(:timed_quiz_timer_ref, nil)}
+  # Smart Test durations move in 5-minute steps, and a test shorter than one
+  # step isn't a test.
+  @min_duration_minutes 5
+
+  @impl true
+  def mount(params, session, socket) do
+    current_user = socket.assigns[:current_user] || Accounts.get_user!(session["current_user_id"])
+    enrollments = Enrollments.list_active_for_user(current_user)
+    embedded? = session["embedded"] == true || params["embedded"] == "true"
+
+    socket =
+      socket
+      |> assign(:current_user, current_user)
+      |> assign(:page_title, "Study")
+      |> assign(:embedded?, embedded?)
+      |> assign(:enrollments, enrollments)
+      |> assign(:loaded_key, nil)
+      |> assign(:flashcard_set, nil)
+      |> assign(:flashcard_cards, [])
+      |> assign(:flashcard_index, 0)
+      |> assign(:flashcard_flipped?, false)
+      |> assign(:practice_set, nil)
+      |> assign(:practice_set_questions, [])
+      |> assign(:practice_answers, %{})
+      |> assign(:practice_index, 0)
+      |> assign(:smart_test, nil)
+      |> assign(:smart_test_settings, default_smart_test_settings())
+      |> assign(:smart_test_view, :settings)
+      |> assign(:saved_smart_tests, [])
+      |> assign(:smart_test_timer_ref, nil)
+      |> assign(:study_guide, nil)
+      |> assign(:study_guide_settings, default_study_guide_settings())
+      |> assign(:study_guide_view, :brief)
+      |> assign(:saved_study_guides, [])
+
+    initial_params =
+      if session["embedded"] == true,
+        do: Map.take(session, ["course", "module", "mode"]),
+        else: params
+
+    socket =
+      socket
+      |> resolve_scope_and_mode(initial_params)
+      |> maybe_load_content()
+
+    {:ok, socket}
   end
 
   @impl true
   def handle_params(params, _uri, socket) do
-    {:noreply, socket |> resolve_scope_and_mode(params) |> maybe_load_content()}
+    {:noreply,
+     socket
+     |> assign(:embedded?, params["embedded"] == "true")
+     |> resolve_scope_and_mode(params)
+     |> maybe_load_content()}
   end
 
   defp resolve_scope_and_mode(socket, params) do
@@ -106,9 +138,10 @@ defmodule WasomiWeb.StudyHubLive do
 
   defp resolve_scope_selection(_module, _params), do: nil
 
-  defp resolve_mode(%CourseModule{}, %{"mode" => "timed_quiz"}), do: :timed_quiz
+  defp resolve_mode(_scope, %{"mode" => "timed_quiz"}), do: :timed_quiz
   defp resolve_mode(_scope, %{"mode" => "flashcards"}), do: :flashcards
   defp resolve_mode(_scope, %{"mode" => "practice"}), do: :practice
+  defp resolve_mode(_scope, %{"mode" => "study_guide"}), do: :study_guide
   defp resolve_mode(_scope, _params), do: nil
 
   defp compute_step(nil, _module, _scope, _mode), do: :course
@@ -139,9 +172,12 @@ defmodule WasomiWeb.StudyHubLive do
   defp scope_key(%Lecture{id: id}), do: {:lecture, id}
   defp scope_key(nil), do: nil
 
+  # Flashcards are *not* generated on arrival: a `:pending` set renders the
+  # setup panel instead, so the learner picks the module/lesson they actually
+  # want cards for and asks for them explicitly. Generation costs an LLM call
+  # per scope, and landing on this page is not the same as wanting a deck.
   defp load_content(%{assigns: %{mode: :flashcards, scope: scope}} = socket) do
     {:ok, set} = Assessments.get_or_create_flashcard_set(scope)
-    maybe_enqueue_flashcard_generation(set)
     Assessments.subscribe_to_flashcard_set(scope)
     load_flashcard_cards(socket, set)
   end
@@ -153,19 +189,52 @@ defmodule WasomiWeb.StudyHubLive do
     load_practice_set_questions(socket, quiz)
   end
 
-  defp load_content(%{assigns: %{mode: :timed_quiz, scope: %CourseModule{} = module}} = socket) do
-    quiz = Assessments.get_quiz_for_module(module)
-    question_count = if quiz, do: length(Assessments.list_published_questions(quiz)), else: 0
+  defp load_content(%{assigns: %{mode: :timed_quiz, scope: scope}} = socket) do
+    user = socket.assigns.current_user
+    smart_test = Assessments.latest_smart_test(user, scope)
 
     socket
-    |> assign(:timed_quiz_target, %{module: module, quiz: quiz, question_count: question_count})
-    |> reset_timed_quiz_attempt()
+    |> assign(:saved_smart_tests, Assessments.list_smart_tests(user, scope))
+    |> assign(:smart_test, smart_test)
+    |> assign(:smart_test_settings, smart_test_settings_from(smart_test))
+    # Landing on the settings form rather than straight into an in-progress
+    # test is deliberate: the learner asked for "Smart Test", not "resume",
+    # and the saved-test row one screen down makes resuming one click away.
+    |> assign(:smart_test_view, :settings)
+    |> maybe_subscribe_to_smart_test(smart_test)
+    |> schedule_smart_test_expiry()
   end
 
-  defp maybe_enqueue_flashcard_generation(%{status: :pending} = set),
-    do: GenerateFlashcardsWorker.enqueue(set.id)
+  # A guide is read rather than attempted, so — unlike a Smart Test — landing
+  # here opens the last guide the learner wrote, and only falls back to the
+  # brief when there is nothing to read yet.
+  defp load_content(%{assigns: %{mode: :study_guide, scope: scope}} = socket) do
+    user = socket.assigns.current_user
+    study_guide = Assessments.latest_study_guide(user, scope)
 
-  defp maybe_enqueue_flashcard_generation(_set), do: :ok
+    socket
+    |> assign(:saved_study_guides, Assessments.list_study_guides(user, scope))
+    |> assign(:study_guide, study_guide)
+    |> assign(:study_guide_settings, study_guide_settings_from(study_guide))
+    |> assign(:study_guide_view, if(study_guide, do: :guide, else: :brief))
+    |> maybe_subscribe_to_study_guide(study_guide)
+  end
+
+  defp maybe_subscribe_to_smart_test(socket, %{status: status} = smart_test)
+       when status in [:pending, :processing] do
+    Assessments.subscribe_to_smart_test(smart_test)
+    socket
+  end
+
+  defp maybe_subscribe_to_smart_test(socket, _smart_test), do: socket
+
+  defp maybe_subscribe_to_study_guide(socket, %{status: status} = study_guide)
+       when status in [:pending, :processing] do
+    Assessments.subscribe_to_study_guide(study_guide)
+    socket
+  end
+
+  defp maybe_subscribe_to_study_guide(socket, _study_guide), do: socket
 
   defp maybe_enqueue_practice_generation(%{status: :pending} = quiz),
     do: GeneratePracticeSetQuestionsWorker.enqueue(quiz.id)
@@ -174,80 +243,130 @@ defmodule WasomiWeb.StudyHubLive do
 
   ## Picker navigation
 
+  # Reported by Hooks.CaptureGuard (throttled client-side). Advisory only: the
+  # client is not trustworthy and the attempt is trivially avoidable, so this
+  # feeds review, never enforcement. Same shape as CoursePlayerLive's clause.
+  @impl true
+  def handle_event("capture-attempt", %{"kind" => kind}, socket)
+      when kind in ~w(copy printscreen shortcut:p shortcut:s) do
+    Logger.warning(
+      "capture attempt: kind=#{kind} user_id=#{socket.assigns.current_user.id} surface=study_hub"
+    )
+
+    {:noreply, socket}
+  end
+
+  def handle_event("capture-attempt", _params, socket), do: {:noreply, socket}
+
   @impl true
   def handle_event("select-course", %{"slug" => slug}, socket) do
-    {:noreply, push_patch(socket, to: ~p"/learn/study?#{%{course: slug}}")}
+    {:noreply, navigate_study(socket, %{course: slug})}
   end
 
   @impl true
   def handle_event("select-module", %{"module_id" => module_id}, socket) do
     course = socket.assigns.selected_course
+    params = keep_mode(%{course: course.slug, module: module_id}, socket.assigns.mode)
 
-    {:noreply,
-     push_patch(socket, to: ~p"/learn/study?#{%{course: course.slug, module: module_id}}")}
+    {:noreply, navigate_study(socket, params)}
   end
 
+  # Re-scoping keeps the current mode when there is one: these buttons are
+  # reachable both from the step-by-step picker (no mode yet) and from inside
+  # a mode's own panel, where dropping back to the mode picker would be a
+  # pointless extra click.
   @impl true
   def handle_event("select-scope", %{"scope" => "module"}, socket) do
     %{selected_course: course, selected_module: module} = socket.assigns
 
-    {:noreply,
-     push_patch(socket,
-       to: ~p"/learn/study?#{%{course: course.slug, module: module.id, scope: "module"}}"
-     )}
+    params =
+      keep_mode(%{course: course.slug, module: module.id, scope: "module"}, socket.assigns.mode)
+
+    {:noreply, navigate_study(socket, params)}
   end
 
   @impl true
   def handle_event("select-scope", %{"scope" => "lecture", "lecture_id" => lecture_id}, socket) do
     %{selected_course: course, selected_module: module} = socket.assigns
 
-    {:noreply,
-     push_patch(socket,
-       to:
-         ~p"/learn/study?#{%{course: course.slug, module: module.id, scope: "lecture", lecture: lecture_id}}"
-     )}
+    params =
+      keep_mode(
+        %{course: course.slug, module: module.id, scope: "lecture", lecture: lecture_id},
+        socket.assigns.mode
+      )
+
+    {:noreply, navigate_study(socket, params)}
   end
 
   @impl true
   def handle_event("select-mode", %{"mode" => mode}, socket) do
     params = Map.put(scope_params(socket.assigns), :mode, mode)
-    {:noreply, push_patch(socket, to: ~p"/learn/study?#{params}")}
+    {:noreply, navigate_study(socket, params)}
   end
 
   @impl true
   def handle_event("change-course", _params, socket) do
-    {:noreply, push_patch(socket, to: ~p"/learn/study")}
+    {:noreply, navigate_study(socket, %{})}
   end
 
   @impl true
   def handle_event("change-module", _params, socket) do
     course = socket.assigns.selected_course
-    {:noreply, push_patch(socket, to: ~p"/learn/study?#{%{course: course.slug}}")}
+    params = keep_mode(%{course: course.slug}, socket.assigns.mode)
+    {:noreply, navigate_study(socket, params)}
   end
 
   @impl true
   def handle_event("change-scope", _params, socket) do
     %{selected_course: course, selected_module: module} = socket.assigns
+    params = keep_mode(%{course: course.slug, module: module.id}, socket.assigns.mode)
 
-    {:noreply,
-     push_patch(socket, to: ~p"/learn/study?#{%{course: course.slug, module: module.id}}")}
+    {:noreply, navigate_study(socket, params)}
   end
 
   @impl true
   def handle_event("change-mode", _params, socket) do
-    {:noreply, push_patch(socket, to: ~p"/learn/study?#{scope_params(socket.assigns)}")}
+    {:noreply, navigate_study(socket, scope_params(socket.assigns))}
   end
 
   ## Flashcards
 
+  # Generation is always learner-initiated. The set is flipped to
+  # `:processing` here rather than left `:pending` until the job picks it up,
+  # so a reload (or a second learner on the same module) sees "generating"
+  # instead of an untouched "Generate" button; the worker's own
+  # `mark_flashcard_set_processing/1` is idempotent, and Oban's uniqueness on
+  # `flashcard_set_id` means a double click can't queue two jobs.
+  @impl true
+  def handle_event("generate-flashcards", _params, socket) do
+    case socket.assigns.flashcard_set do
+      %{status: :pending} = set ->
+        GenerateFlashcardsWorker.enqueue(set.id)
+        {:noreply, load_flashcard_cards(socket, Assessments.mark_flashcard_set_processing(set))}
+
+      _set ->
+        {:noreply, socket}
+    end
+  end
+
   @impl true
   def handle_event("retry-flashcard-generation", _params, socket) do
     case socket.assigns.flashcard_set do
-      %{status: :failed} = set -> GenerateFlashcardsWorker.enqueue(set.id)
-      _set -> :ok
-    end
+      %{status: :failed} = set ->
+        GenerateFlashcardsWorker.enqueue(set.id)
+        {:noreply, load_flashcard_cards(socket, Assessments.mark_flashcard_set_processing(set))}
 
-    {:noreply, socket}
+      _set ->
+        {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_event("regenerate-flashcards", _params, socket) do
+    set = Assessments.reset_flashcard_set(socket.assigns.flashcard_set)
+    GenerateFlashcardsWorker.enqueue(set.id)
+
+    {:noreply, load_flashcard_cards(socket, Assessments.mark_flashcard_set_processing(set))}
   end
 
   @impl true
@@ -292,12 +411,12 @@ defmodule WasomiWeb.StudyHubLive do
 
   @impl true
   def handle_event("review-unknown-flashcards", _params, socket) do
-    unknown =
+    unresolved =
       Enum.filter(socket.assigns.flashcard_cards, fn %{progress: progress} ->
-        is_nil(progress) or progress.status != :known
+        is_nil(progress) or progress.status not in [:known, :mastered]
       end)
 
-    cards = if unknown == [], do: socket.assigns.flashcard_cards, else: unknown
+    cards = if unresolved == [], do: socket.assigns.flashcard_cards, else: unresolved
 
     {:noreply,
      socket
@@ -355,59 +474,250 @@ defmodule WasomiWeb.StudyHubLive do
      |> assign(:practice_index, 0)}
   end
 
-  ## Timed quiz — always the real module Quiz/QuizSubmission, deliberately
-  ## without the course page's `module_quiz_unlocked?` gate: this is pure
-  ## self-study, consistent with Flashcards/Practice being ungated
-  ## everywhere, and dropping the gate here has no progression or
-  ## certificate consequence (neither reads module-level QuizSubmissions).
+  ## Smart Test — a timed test generated to the learner's own settings, not
+  ## the module's admin-authored Quiz: this is self-study, so there is no
+  ## passing score, no submission that feeds progression, and no
+  ## `module_quiz_unlocked?` gate, consistent with Flashcards/Practice being
+  ## ungated everywhere.
 
   @impl true
-  def handle_event("start-timed-quiz", %{"seconds-per-question" => seconds_str}, socket) do
-    with {seconds_per_question, ""} <- Integer.parse(seconds_str),
-         true <- seconds_per_question > 0,
-         %{module: module, quiz: quiz} when not is_nil(quiz) <- socket.assigns.timed_quiz_target,
-         questions when questions != [] <- Assessments.list_published_questions(quiz) do
-      {:noreply, start_timed_quiz(socket, module, quiz, questions, seconds_per_question)}
-    else
-      _ -> {:noreply, socket}
+  def handle_event("change-smart-test-settings", %{"settings" => params}, socket) do
+    {:noreply,
+     assign(socket, :smart_test_settings, merge_smart_test_settings(socket.assigns, params))}
+  end
+
+  @impl true
+  def handle_event("step-smart-test-duration", %{"by" => by_str}, socket) do
+    settings = socket.assigns.smart_test_settings
+    by = String.to_integer(by_str)
+
+    duration =
+      (settings.duration_minutes + by)
+      |> max(@min_duration_minutes)
+      |> min(SmartTest.max_duration_minutes())
+
+    {:noreply, assign(socket, :smart_test_settings, %{settings | duration_minutes: duration})}
+  end
+
+  @impl true
+  def handle_event("create-smart-test", _params, socket) do
+    %{current_user: user, scope: scope, smart_test_settings: settings} = socket.assigns
+
+    case Assessments.create_smart_test(user, scope, settings) do
+      {:ok, smart_test} ->
+        GenerateSmartTestWorker.enqueue(smart_test.id)
+        drop_previous_smart_test_subscription(socket.assigns.smart_test)
+        Assessments.subscribe_to_smart_test(smart_test)
+
+        {:noreply,
+         socket
+         |> assign(:smart_test, Assessments.load_smart_test_questions(smart_test))
+         |> assign(:saved_smart_tests, Assessments.list_smart_tests(user, scope))
+         |> assign(:smart_test_view, :test)}
+
+      {:error, _changeset} ->
+        {:noreply,
+         put_flash(socket, :error, "Those test settings don't look right — try adjusting them.")}
     end
   end
 
   @impl true
+  def handle_event("retry-smart-test-generation", _params, socket) do
+    case socket.assigns.smart_test do
+      %{status: :failed} = smart_test -> GenerateSmartTestWorker.enqueue(smart_test.id)
+      _smart_test -> :ok
+    end
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("open-smart-test", _params, socket) do
+    {:noreply, assign(socket, :smart_test_view, :test)}
+  end
+
+  # Leaving an in-progress test for the settings form stops the clock, so
+  # reading the settings never costs the learner test time.
+  @impl true
+  def handle_event("open-smart-test-settings", _params, socket) do
+    {:noreply,
+     socket
+     |> pause_smart_test_attempt()
+     |> assign(:smart_test_view, :settings)}
+  end
+
+  @impl true
+  def handle_event("start-smart-test", _params, socket) do
+    smart_test = socket.assigns.smart_test
+
+    result =
+      if smart_test.started_at,
+        do: Assessments.resume_smart_test(smart_test),
+        else: Assessments.start_smart_test(smart_test)
+
+    case result do
+      {:ok, started} ->
+        {:noreply,
+         socket
+         |> put_smart_test(started)
+         |> assign(:smart_test_view, :test)
+         |> schedule_smart_test_expiry()}
+
+      {:error, _changeset} ->
+        {:noreply, put_flash(socket, :error, "Couldn't start this test — please try again.")}
+    end
+  end
+
+  @impl true
+  def handle_event("pause-smart-test", _params, socket) do
+    {:noreply, pause_smart_test_attempt(socket)}
+  end
+
+  @impl true
   def handle_event(
-        "select-timed-quiz-option",
-        %{"question-id" => q_id, "option-id" => opt_id},
+        "answer-smart-test-choice",
+        %{"question-id" => question_id, "option-id" => option_id},
         socket
       ) do
-    answers = Map.put(socket.assigns.timed_quiz_answers, to_string(q_id), to_string(opt_id))
-    {:noreply, assign(socket, :timed_quiz_answers, answers)}
+    {:noreply, record_smart_test_answer(socket, question_id, option_id)}
   end
 
   @impl true
-  def handle_event("timed-quiz-next", _params, socket) do
-    last_index = length(socket.assigns.timed_current_quiz.questions) - 1
-    next_index = min(socket.assigns.timed_current_question_index + 1, last_index)
-    {:noreply, assign(socket, :timed_current_question_index, next_index)}
+  def handle_event(
+        "answer-smart-test-text",
+        %{"question_id" => question_id, "response" => response},
+        socket
+      ) do
+    {:noreply, record_smart_test_answer(socket, question_id, response)}
   end
 
   @impl true
-  def handle_event("timed-quiz-prev", _params, socket) do
-    prev_index = max(socket.assigns.timed_current_question_index - 1, 0)
-    {:noreply, assign(socket, :timed_current_question_index, prev_index)}
+  def handle_event("finish-smart-test", _params, socket) do
+    {:noreply, finish_smart_test_attempt(socket, false)}
   end
 
   @impl true
-  def handle_event("submit-timed-quiz", _params, socket) do
-    {:noreply, socket |> cancel_timed_quiz_timer() |> score_timed_quiz(false)}
+  def handle_event("retake-smart-test", _params, socket) do
+    case Assessments.reset_smart_test(socket.assigns.smart_test) do
+      {:ok, reset} ->
+        {:noreply, socket |> put_smart_test(reset) |> assign(:smart_test_view, :test)}
+
+      {:error, _changeset} ->
+        {:noreply, socket}
+    end
+  end
+
+  ## Study guide
+
+  @impl true
+  def handle_event("change-study-guide-settings", %{"settings" => params}, socket) do
+    {:noreply,
+     assign(socket, :study_guide_settings, merge_study_guide_settings(socket.assigns, params))}
   end
 
   @impl true
-  def handle_event("retake-timed-quiz", _params, socket) do
-    %{module: module, quiz: quiz, questions: questions} = socket.assigns.timed_current_quiz
-    seconds_per_question = socket.assigns.timed_quiz_time_limit_seconds
+  def handle_event("create-study-guide", params, socket) do
+    # The submit payload is authoritative when it carries the form (a click on
+    # the button blurs the focus textarea, but a submit can still arrive without
+    # a preceding change event), so the brief is re-read from it rather than
+    # trusting whatever the last change event happened to leave in assigns.
+    settings =
+      case params do
+        %{"settings" => submitted} -> merge_study_guide_settings(socket.assigns, submitted)
+        _no_form -> socket.assigns.study_guide_settings
+      end
 
-    {:noreply, start_timed_quiz(socket, module, quiz, questions, seconds_per_question)}
+    %{current_user: user, scope: scope} = socket.assigns
+    socket = assign(socket, :study_guide_settings, settings)
+
+    case Assessments.create_study_guide(user, scope, settings) do
+      {:ok, study_guide} ->
+        GenerateStudyGuideWorker.enqueue(study_guide.id)
+        drop_previous_study_guide_subscription(socket.assigns.study_guide)
+        Assessments.subscribe_to_study_guide(study_guide)
+
+        {:noreply,
+         socket
+         |> assign(:study_guide, Assessments.load_study_guide_sections(study_guide))
+         |> assign(:saved_study_guides, Assessments.list_study_guides(user, scope))
+         |> assign(:study_guide_view, :guide)}
+
+      {:error, _changeset} ->
+        {:noreply,
+         put_flash(socket, :error, "Those guide settings don't look right — try adjusting them.")}
+    end
   end
+
+  @impl true
+  def handle_event("open-study-guide", %{"id" => id}, socket) do
+    case Assessments.get_user_study_guide(socket.assigns.current_user, id) do
+      nil ->
+        {:noreply, socket}
+
+      study_guide ->
+        drop_previous_study_guide_subscription(socket.assigns.study_guide)
+
+        {:noreply,
+         socket
+         |> assign(:study_guide, study_guide)
+         |> assign(:study_guide_settings, study_guide_settings_from(study_guide))
+         |> assign(:study_guide_view, :guide)
+         |> maybe_subscribe_to_study_guide(study_guide)}
+    end
+  end
+
+  @impl true
+  def handle_event("open-study-guide-brief", _params, socket) do
+    {:noreply, assign(socket, :study_guide_view, :brief)}
+  end
+
+  @impl true
+  def handle_event("delete-study-guide", %{"id" => id}, socket) do
+    %{current_user: user, scope: scope, study_guide: open_guide} = socket.assigns
+
+    case Assessments.delete_user_study_guide(user, id) do
+      {:ok, deleted} ->
+        drop_previous_study_guide_subscription(deleted)
+        socket = assign(socket, :saved_study_guides, Assessments.list_study_guides(user, scope))
+
+        # Deleting the guide currently loaded leaves nothing to go back to, so
+        # it's dropped rather than left behind as a stale document.
+        if open_guide && open_guide.id == deleted.id do
+          {:noreply,
+           socket
+           |> assign(:study_guide, nil)
+           |> assign(:study_guide_view, :brief)}
+        else
+          {:noreply, socket}
+        end
+
+      {:error, _reason} ->
+        {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_event("retry-study-guide-generation", _params, socket) do
+    case socket.assigns.study_guide do
+      %{status: :failed} = study_guide -> GenerateStudyGuideWorker.enqueue(study_guide.id)
+      _study_guide -> :ok
+    end
+
+    {:noreply, socket}
+  end
+
+  defp keep_mode(params, nil), do: params
+  defp keep_mode(params, mode), do: Map.put(params, :mode, to_string(mode))
+
+  defp navigate_study(%{assigns: %{embedded?: true}} = socket, params) do
+    socket
+    |> resolve_scope_and_mode(
+      Map.new(params, fn {key, value} -> {to_string(key), to_string(value)} end)
+    )
+    |> maybe_load_content()
+  end
+
+  defp navigate_study(socket, params), do: push_patch(socket, to: ~p"/learn/study?#{params}")
 
   defp scope_params(%{selected_course: course, selected_module: module, scope: %Lecture{} = l}) do
     %{course: course.slug, module: module.id, scope: "lecture", lecture: l.id}
@@ -452,6 +762,7 @@ defmodule WasomiWeb.StudyHubLive do
 
   defp safe_flashcard_rating("known"), do: :known
   defp safe_flashcard_rating("review_again"), do: :review_again
+  defp safe_flashcard_rating("mastered"), do: :mastered
   defp safe_flashcard_rating(_other), do: nil
 
   defp load_practice_set_questions(socket, quiz) do
@@ -473,57 +784,183 @@ defmodule WasomiWeb.StudyHubLive do
     update(socket, :practice_answers, &Map.put(&1, question.id, option_id_str))
   end
 
-  defp start_timed_quiz(socket, module, quiz, questions, seconds_per_question) do
-    total_seconds = length(questions) * seconds_per_question
-    deadline = DateTime.add(DateTime.utc_now(), total_seconds, :second)
-    timer_ref = Process.send_after(self(), :timed_quiz_expired, total_seconds * 1000)
+  ## Smart Test helpers
 
-    socket
-    |> assign(:timed_current_quiz, %{quiz: quiz, module: module, questions: questions})
-    |> assign(:timed_quiz_time_limit_seconds, seconds_per_question)
-    |> assign(:timed_quiz_answers, %{})
-    |> assign(:timed_current_question_index, 0)
-    |> assign(:timed_quiz_result, nil)
-    |> assign(:timed_quiz_time_expired?, false)
-    |> assign(:timed_quiz_deadline, deadline)
-    |> assign(:timed_quiz_timer_ref, timer_ref)
+  # Form params arrive as strings and can be hand-edited, so every value is
+  # parsed and clamped here rather than trusted; anything unparseable keeps
+  # its current value instead of resetting the form.
+  defp merge_smart_test_settings(assigns, params) do
+    settings = assigns.smart_test_settings
+
+    %{
+      duration_minutes:
+        clamp_setting(
+          params["duration_minutes"],
+          settings.duration_minutes,
+          @min_duration_minutes,
+          SmartTest.max_duration_minutes()
+        ),
+      enforce_time_limit: params["enforce_time_limit"] == "true",
+      multiple_choice_count:
+        clamp_setting(
+          params["multiple_choice_count"],
+          settings.multiple_choice_count,
+          0,
+          SmartTest.max_multiple_choice()
+        ),
+      short_answer_count:
+        clamp_setting(
+          params["short_answer_count"],
+          settings.short_answer_count,
+          0,
+          SmartTest.max_short_answer()
+        ),
+      difficulty: clamp_setting(params["difficulty"], settings.difficulty, 1, 5)
+    }
   end
 
-  defp reset_timed_quiz_attempt(socket) do
-    socket
-    |> assign(:timed_quiz_time_limit_seconds, nil)
-    |> assign(:timed_current_quiz, nil)
-    |> assign(:timed_quiz_answers, %{})
-    |> assign(:timed_current_question_index, 0)
-    |> assign(:timed_quiz_result, nil)
-    |> assign(:timed_quiz_time_expired?, false)
-    |> assign(:timed_quiz_deadline, nil)
-    |> assign(:timed_quiz_timer_ref, nil)
+  defp clamp_setting(value, fallback, min, max) when is_binary(value) do
+    case Integer.parse(value) do
+      {parsed, _rest} -> parsed |> max(min) |> min(max)
+      :error -> fallback
+    end
   end
 
-  defp cancel_timed_quiz_timer(socket) do
-    case socket.assigns.timed_quiz_timer_ref do
+  defp clamp_setting(_value, fallback, _min, _max), do: fallback
+
+  defp record_smart_test_answer(socket, question_id, answer) do
+    smart_test = socket.assigns.smart_test
+
+    question =
+      Enum.find(smart_test.smart_test_questions, &(to_string(&1.id) == to_string(question_id)))
+
+    # An answer after the clock ran out (or after finishing) must not land —
+    # the deadline expiring auto-submits, and a late in-flight event would
+    # otherwise edit an already-scored attempt.
+    if question && is_nil(smart_test.completed_at) do
+      case Assessments.record_smart_test_answer(question, answer) do
+        {:ok, _updated} -> put_smart_test(socket, smart_test)
+        {:error, _reason} -> socket
+      end
+    else
+      socket
+    end
+  end
+
+  defp finish_smart_test_attempt(socket, time_expired?) do
+    smart_test = socket.assigns.smart_test
+
+    if smart_test && is_nil(smart_test.completed_at) do
+      socket = cancel_smart_test_timer(socket)
+
+      case Assessments.finish_smart_test(smart_test, time_expired: time_expired?) do
+        {:ok, finished} ->
+          socket
+          |> put_smart_test(finished)
+          |> assign(:smart_test_view, :test)
+
+        {:error, _changeset} ->
+          put_flash(socket, :error, "Couldn't score this test — please try again.")
+      end
+    else
+      socket
+    end
+  end
+
+  defp pause_smart_test_attempt(socket) do
+    smart_test = socket.assigns.smart_test
+
+    if smart_test && smart_test.started_at && is_nil(smart_test.completed_at) do
+      case Assessments.pause_smart_test(smart_test) do
+        {:ok, paused} -> socket |> cancel_smart_test_timer() |> put_smart_test(paused)
+        {:error, _changeset} -> socket
+      end
+    else
+      socket
+    end
+  end
+
+  # Always re-reads the questions, since answers and scores live on them.
+  defp put_smart_test(socket, smart_test) do
+    loaded = Assessments.load_smart_test_questions(smart_test)
+
+    socket
+    |> assign(:smart_test, loaded)
+    |> assign(
+      :saved_smart_tests,
+      Assessments.list_smart_tests(socket.assigns.current_user, socket.assigns.scope)
+    )
+  end
+
+  # The server owns the deadline: the countdown in the browser is display-only
+  # (see the `QuizCountdown` hook), so expiry has to be scheduled here. Also
+  # called on load, so a learner who closed the tab mid-test and came back
+  # after the deadline gets scored instead of finding a stopped clock.
+  defp schedule_smart_test_expiry(socket) do
+    socket = cancel_smart_test_timer(socket)
+
+    case socket.assigns.smart_test do
+      %{started_at: started, paused_at: nil, completed_at: nil, expires_at: expires}
+      when not is_nil(started) and not is_nil(expires) ->
+        remaining = Assessments.smart_test_remaining_seconds(socket.assigns.smart_test)
+        ref = Process.send_after(self(), :smart_test_expired, remaining * 1000)
+        assign(socket, :smart_test_timer_ref, ref)
+
+      _not_running ->
+        socket
+    end
+  end
+
+  defp cancel_smart_test_timer(socket) do
+    case socket.assigns.smart_test_timer_ref do
       nil -> :ok
       ref -> Process.cancel_timer(ref)
     end
 
-    assign(socket, :timed_quiz_timer_ref, nil)
+    assign(socket, :smart_test_timer_ref, nil)
   end
 
-  defp score_timed_quiz(socket, time_expired?) do
-    %{quiz: quiz} = socket.assigns.timed_current_quiz
-    answers = socket.assigns.timed_quiz_answers
+  defp drop_previous_smart_test_subscription(nil), do: :ok
 
-    case Assessments.submit_quiz(socket.assigns.current_user, quiz, answers) do
-      {:ok, submission} ->
-        socket
-        |> assign(:timed_quiz_result, submission)
-        |> assign(:timed_quiz_time_expired?, time_expired?)
+  defp drop_previous_smart_test_subscription(smart_test),
+    do: Assessments.unsubscribe_from_smart_test(smart_test)
 
-      {:error, _reason} ->
-        socket
-    end
+  defp drop_previous_study_guide_subscription(nil), do: :ok
+
+  defp drop_previous_study_guide_subscription(study_guide),
+    do: Assessments.unsubscribe_from_study_guide(study_guide)
+
+  # Brief params arrive as strings and can be hand-edited, so each dial is
+  # matched against the values the schema allows rather than trusted; anything
+  # unrecognised keeps its current value instead of resetting the form.
+  defp merge_study_guide_settings(assigns, params) do
+    settings = assigns.study_guide_settings
+
+    %{
+      style: safe_study_guide_choice(params["style"], StudyGuide.styles(), settings.style),
+      depth: safe_study_guide_choice(params["depth"], StudyGuide.depths(), settings.depth),
+      reading_level:
+        safe_study_guide_choice(
+          params["reading_level"],
+          StudyGuide.reading_levels(),
+          settings.reading_level
+        ),
+      include_examples: params["include_examples"] == "true",
+      include_key_terms: params["include_key_terms"] == "true",
+      focus: params["focus"]
+    }
   end
+
+  defp safe_study_guide_choice(value, allowed, fallback) when is_binary(value) do
+    Enum.find(allowed, fallback, &(to_string(&1) == value))
+  end
+
+  defp safe_study_guide_choice(_value, _allowed, fallback), do: fallback
+
+  defp smart_test_remaining_seconds(nil), do: nil
+
+  defp smart_test_remaining_seconds(smart_test),
+    do: Assessments.smart_test_remaining_seconds(smart_test)
 
   ## Live updates
 
@@ -546,12 +983,32 @@ defmodule WasomiWeb.StudyHubLive do
   end
 
   @impl true
-  def handle_info(:timed_quiz_expired, socket) do
-    if socket.assigns.timed_current_quiz && !socket.assigns.timed_quiz_result do
+  def handle_info({:smart_test_updated, smart_test}, socket) do
+    if socket.assigns.smart_test && socket.assigns.smart_test.id == smart_test.id do
+      {:noreply, put_smart_test(socket, smart_test)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_info(:smart_test_expired, socket) do
+    {:noreply,
+     socket
+     |> assign(:smart_test_timer_ref, nil)
+     |> finish_smart_test_attempt(true)}
+  end
+
+  @impl true
+  def handle_info({:study_guide_updated, study_guide}, socket) do
+    if socket.assigns.study_guide && socket.assigns.study_guide.id == study_guide.id do
       {:noreply,
        socket
-       |> assign(:timed_quiz_timer_ref, nil)
-       |> score_timed_quiz(true)}
+       |> assign(:study_guide, Assessments.load_study_guide_sections(study_guide))
+       |> assign(
+         :saved_study_guides,
+         Assessments.list_study_guides(socket.assigns.current_user, socket.assigns.scope)
+       )}
     else
       {:noreply, socket}
     end
@@ -564,62 +1021,82 @@ defmodule WasomiWeb.StudyHubLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <.student_layout active={:study} current_user={@current_user}>
-      <div class="mx-auto max-w-container px-5 py-8 lg:px-8 lg:py-12">
-        <h1 class="text-3xl font-semibold tracking-tight text-ink sm:text-4xl">Study</h1>
-        <p class="mt-2 text-body">
-          Flashcards, extra practice, and timed quizzes — generated from your course
-          materials, across everything you're enrolled in.
-        </p>
+    <div
+      id="study-hub"
+      class={if @embedded?, do: "embedded-study-hub", else: ""}
+      {capture_guard_attrs(@current_user)}
+    >
+      <.student_layout active={:study} current_user={@current_user} embedded={@embedded?}>
+        <div class={if @embedded?, do: "w-full p-5 lg:p-8", else: "w-full px-5 py-8 lg:px-8"}>
+          <h1 :if={!@embedded?} class="text-3xl font-semibold tracking-tight text-ink sm:text-4xl">
+            Study
+          </h1>
+          <p :if={!@embedded?} class="mt-2 text-body">
+            Study guides, flashcards, extra practice, and timed Smart Tests — generated from
+            your course materials, across everything you're enrolled in.
+          </p>
 
-        <div class="mt-8 overflow-hidden rounded-3xl border border-black/5 bg-white">
-          <%= case @step do %>
-            <% :course -> %>
-              <.course_picker enrollments={@enrollments} />
-            <% :module -> %>
-              <.module_picker course={@selected_course} />
-            <% :scope -> %>
-              <.scope_picker course={@selected_course} module={@selected_module} />
-            <% :mode -> %>
-              <.mode_picker course={@selected_course} module={@selected_module} scope={@scope} />
-            <% :content -> %>
-              <.content_breadcrumb
-                course={@selected_course}
-                module={@selected_module}
-                scope={@scope}
-                mode={@mode}
-              />
-              <%= case @mode do %>
-                <% :flashcards -> %>
-                  <.flashcard_set_panel
-                    flashcard_set={@flashcard_set}
-                    flashcard_cards={@flashcard_cards}
-                    flashcard_index={@flashcard_index}
-                    flashcard_flipped?={@flashcard_flipped?}
-                  />
-                <% :practice -> %>
-                  <.practice_set_panel
-                    practice_set={@practice_set}
-                    practice_set_questions={@practice_set_questions}
-                    practice_answers={@practice_answers}
-                    practice_index={@practice_index}
-                  />
-                <% :timed_quiz -> %>
-                  <.timed_quiz_content
-                    target={@timed_quiz_target}
-                    current_quiz={@timed_current_quiz}
-                    quiz_result={@timed_quiz_result}
-                    quiz_answers={@timed_quiz_answers}
-                    current_question_index={@timed_current_question_index}
-                    time_expired?={@timed_quiz_time_expired?}
-                    time_limit_seconds={@timed_quiz_time_limit_seconds}
-                    deadline={@timed_quiz_deadline}
-                  />
-              <% end %>
-          <% end %>
+          <div class={
+            if @embedded?,
+              do: "overflow-hidden rounded-3xl border border-black/5 bg-white",
+              else: "mt-8 overflow-hidden rounded-3xl border border-black/5 bg-white"
+          }>
+            <%= case @step do %>
+              <% :course -> %>
+                <.course_picker enrollments={@enrollments} />
+              <% :module -> %>
+                <.module_picker course={@selected_course} />
+              <% :scope -> %>
+                <.scope_picker course={@selected_course} module={@selected_module} />
+              <% :mode -> %>
+                <.mode_picker course={@selected_course} module={@selected_module} scope={@scope} />
+              <% :content -> %>
+                <.content_breadcrumb
+                  course={@selected_course}
+                  module={@selected_module}
+                  scope={@scope}
+                  mode={@mode}
+                />
+                <%= case @mode do %>
+                  <% :flashcards -> %>
+                    <.flashcard_set_panel
+                      flashcard_set={@flashcard_set}
+                      flashcard_cards={@flashcard_cards}
+                      flashcard_index={@flashcard_index}
+                      flashcard_flipped?={@flashcard_flipped?}
+                      module={@selected_module}
+                      scope={@scope}
+                    />
+                  <% :practice -> %>
+                    <.practice_set_panel
+                      practice_set={@practice_set}
+                      practice_set_questions={@practice_set_questions}
+                      practice_answers={@practice_answers}
+                      practice_index={@practice_index}
+                    />
+                  <% :timed_quiz -> %>
+                    <.smart_test_panel
+                      smart_test={@smart_test}
+                      settings={@smart_test_settings}
+                      scope_label={material_label(@scope)}
+                      view={@smart_test_view}
+                      remaining_seconds={smart_test_remaining_seconds(@smart_test)}
+                      saved_tests={@saved_smart_tests}
+                    />
+                  <% :study_guide -> %>
+                    <.study_guide_panel
+                      study_guide={@study_guide}
+                      settings={@study_guide_settings}
+                      scope_label={material_label(@scope)}
+                      view={@study_guide_view}
+                      saved_guides={@saved_study_guides}
+                    />
+                <% end %>
+            <% end %>
+          </div>
         </div>
-      </div>
-    </.student_layout>
+      </.student_layout>
+    </div>
     """
   end
 
@@ -761,7 +1238,21 @@ defmodule WasomiWeb.StudyHubLive do
       <h2 class="text-2xl font-semibold tracking-tight text-ink">What do you want to do?</h2>
       <p class="mt-2 text-body">{scope_label(@scope)}</p>
 
-      <div class="mt-6 grid gap-3 sm:grid-cols-3">
+      <div class="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <button
+          type="button"
+          phx-click="select-mode"
+          phx-value-mode="study_guide"
+          class="flex flex-col items-start gap-3 rounded-2xl border border-black/10 p-5 text-left transition hover:border-primary/40 hover:bg-mint/40"
+        >
+          <span class="grid h-10 w-10 place-items-center rounded-full bg-mint text-primary">
+            <.icon name="hero-light-bulb" class="h-5 w-5" />
+          </span>
+          <span class="font-semibold text-ink">Study guide</span>
+          <span class="text-sm text-muted">
+            Short notes on this material, in the style you pick.
+          </span>
+        </button>
         <button
           type="button"
           phx-click="select-mode"
@@ -772,6 +1263,9 @@ defmodule WasomiWeb.StudyHubLive do
             <.icon name="hero-rectangle-stack" class="h-5 w-5" />
           </span>
           <span class="font-semibold text-ink">Flashcards</span>
+          <span class="text-sm text-muted">
+            Recall drills built from this module's practice questions.
+          </span>
         </button>
         <button
           type="button"
@@ -785,16 +1279,18 @@ defmodule WasomiWeb.StudyHubLive do
           <span class="font-semibold text-ink">Extra practice</span>
         </button>
         <button
-          :if={match?(%CourseModule{}, @scope)}
           type="button"
           phx-click="select-mode"
           phx-value-mode="timed_quiz"
           class="flex flex-col items-start gap-3 rounded-2xl border border-black/10 p-5 text-left transition hover:border-primary/40 hover:bg-mint/40"
         >
           <span class="grid h-10 w-10 place-items-center rounded-full bg-mint text-primary">
-            <.icon name="hero-clock" class="h-5 w-5" />
+            <.icon name="hero-clipboard-document-check" class="h-5 w-5" />
           </span>
-          <span class="font-semibold text-ink">Timed quiz</span>
+          <span class="font-semibold text-ink">Smart Test</span>
+          <span class="text-sm text-muted">
+            A timed test built to your own length, mix and difficulty.
+          </span>
         </button>
       </div>
     </div>
@@ -808,22 +1304,41 @@ defmodule WasomiWeb.StudyHubLive do
 
   defp content_breadcrumb(assigns) do
     ~H"""
-    <div class="flex flex-wrap items-center gap-2 border-b border-black/5 px-8 py-4 text-xs text-muted lg:px-10">
-      <button type="button" phx-click="change-course" class="hover:text-primary">
-        {@course.title}
+    <div class="flex flex-wrap items-center gap-x-4 gap-y-3 border-b border-black/5 px-8 py-4 lg:px-10">
+      <button
+        type="button"
+        phx-click="change-mode"
+        class="inline-flex items-center gap-1.5 rounded-full border border-black/10 px-4 py-2 text-sm font-semibold text-ink transition hover:border-primary/40 hover:bg-mint/40 hover:text-primary"
+      >
+        <.icon name="hero-arrow-left" class="h-4 w-4" /> Back to study options
       </button>
-      <.icon name="hero-chevron-right" class="h-3 w-3" />
-      <button type="button" phx-click="change-module" class="hover:text-primary">
-        Module {@module.position}
-      </button>
-      <.icon name="hero-chevron-right" class="h-3 w-3" />
-      <button type="button" phx-click="change-scope" class="hover:text-primary">
-        {scope_label(@scope)}
-      </button>
-      <.icon name="hero-chevron-right" class="h-3 w-3" />
-      <button type="button" phx-click="change-mode" class="font-medium text-ink hover:text-primary">
-        {mode_label(@mode)}
-      </button>
+      <div class="flex flex-wrap items-center gap-2 text-xs text-muted">
+        <button
+          type="button"
+          phx-click="change-course"
+          class="underline-offset-4 hover:text-primary hover:underline"
+        >
+          {@course.title}
+        </button>
+        <.icon name="hero-chevron-right" class="h-3 w-3" />
+        <button
+          type="button"
+          phx-click="change-module"
+          class="underline-offset-4 hover:text-primary hover:underline"
+        >
+          Module {@module.position}
+        </button>
+        <.icon name="hero-chevron-right" class="h-3 w-3" />
+        <button
+          type="button"
+          phx-click="change-scope"
+          class="underline-offset-4 hover:text-primary hover:underline"
+        >
+          {scope_label(@scope)}
+        </button>
+        <.icon name="hero-chevron-right" class="h-3 w-3" />
+        <span class="font-semibold text-ink">{mode_label(@mode)}</span>
+      </div>
     </div>
     """
   end
@@ -831,66 +1346,13 @@ defmodule WasomiWeb.StudyHubLive do
   defp scope_label(%CourseModule{}), do: "Whole module"
   defp scope_label(%Lecture{title: title}), do: title
 
+  # The Smart Test and Study guide headers name the material itself rather than
+  # "Whole module", since each reads as the test's (or the document's) title.
+  defp material_label(%CourseModule{title: title}), do: title
+  defp material_label(%Lecture{title: title}), do: title
+
   defp mode_label(:flashcards), do: "Flashcards"
   defp mode_label(:practice), do: "Extra practice"
-  defp mode_label(:timed_quiz), do: "Timed quiz"
-
-  attr :target, :map, default: nil
-  attr :current_quiz, :map, default: nil
-  attr :quiz_result, :any, default: nil
-  attr :quiz_answers, :map, required: true
-  attr :current_question_index, :integer, required: true
-  attr :time_expired?, :boolean, required: true
-  attr :time_limit_seconds, :integer, default: nil
-  attr :deadline, :any, default: nil
-
-  defp timed_quiz_content(assigns) do
-    ~H"""
-    <%= if @current_quiz do %>
-      <.quiz_taking_panel
-        current_quiz={@current_quiz}
-        quiz_result={@quiz_result}
-        quiz_answers={@quiz_answers}
-        current_question_index={@current_question_index}
-        select_option_event="select-timed-quiz-option"
-        submit_event="submit-timed-quiz"
-        retake_event="retake-timed-quiz"
-        next_event="timed-quiz-next"
-        prev_event="timed-quiz-prev"
-        time_expired?={@time_expired?}
-        countdown={
-          %{deadline: @deadline, total_seconds: length(@current_quiz.questions) * @time_limit_seconds}
-        }
-      />
-    <% else %>
-      <div class="p-8 lg:p-10">
-        <%= if @target && @target.quiz && @target.question_count > 0 do %>
-          <h2 class="text-2xl font-semibold tracking-tight text-ink">
-            How much time do you want?
-          </h2>
-          <p class="mt-2 text-body">{@target.question_count} questions</p>
-
-          <div class="mt-6 grid gap-3 sm:grid-cols-3">
-            <button
-              :for={{label, seconds_per_question} <- timed_quiz_presets()}
-              type="button"
-              phx-click="start-timed-quiz"
-              phx-value-seconds-per-question={seconds_per_question}
-              class="rounded-2xl border border-black/10 p-5 text-left transition hover:border-primary/40 hover:bg-mint/40"
-            >
-              <span class="block font-semibold text-ink">{label}</span>
-              <span class="mt-1 block text-sm text-muted">
-                {format_seconds(@target.question_count * seconds_per_question)} total
-              </span>
-            </button>
-          </div>
-        <% else %>
-          <div class="grid min-h-[240px] place-items-center text-center text-muted">
-            This module doesn't have a quiz yet.
-          </div>
-        <% end %>
-      </div>
-    <% end %>
-    """
-  end
+  defp mode_label(:study_guide), do: "Study guide"
+  defp mode_label(:timed_quiz), do: "Smart Test"
 end

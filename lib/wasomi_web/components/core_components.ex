@@ -619,7 +619,7 @@ defmodule WasomiWeb.CoreComponents do
 
   @doc """
   Renders the shared split-screen shell for the log in / sign up pages: a
-  fixed navy brand panel on the left, and a "Back to home" link plus a
+  fixed, image-backed brand panel on the left, and a "Back to home" link plus a
   Log in/Sign up tab toggle above the caller's form content on the right.
   """
   attr :active, :atom, required: true, values: [:login, :register]
@@ -628,14 +628,21 @@ defmodule WasomiWeb.CoreComponents do
   def auth_shell(assigns) do
     ~H"""
     <div class="grid min-h-screen lg:grid-cols-2">
-      <div class="relative hidden flex-col justify-center bg-dark px-12 py-16 lg:sticky lg:top-0 lg:flex lg:h-screen xl:px-20">
-        <a href="/" class="inline-flex items-center">
+      <div class="relative hidden flex-col justify-center overflow-hidden bg-dark px-12 py-16 lg:sticky lg:top-0 lg:flex lg:h-screen xl:px-20">
+        <img
+          src="/images/auth-learning-bg.jpg"
+          alt=""
+          class="absolute inset-0 h-full w-full object-cover object-center"
+        />
+        <div class="absolute inset-0 bg-dark/75"></div>
+
+        <a href="/" class="relative inline-flex items-center">
           <img src="/images/logo-reversed.png" alt="Wasomi" class="h-9 w-auto" />
         </a>
-        <h1 class="mt-10 text-5xl font-bold leading-[1.05] text-white">
+        <h1 class="relative mt-10 text-5xl font-bold leading-[1.05] text-white">
           Learn today. Use it at work tomorrow.
         </h1>
-        <p class="mt-6 max-w-md text-white/70">
+        <p class="relative mt-6 max-w-md text-white/80">
           Access practical GS1 learning, save your progress and continue from any device.
         </p>
       </div>
@@ -866,10 +873,10 @@ defmodule WasomiWeb.CoreComponents do
 
   def search_input(assigns) do
     ~H"""
-    <form phx-change={@event} class="relative">
+    <form phx-change={@event} class="relative w-full sm:w-auto">
       <.icon
         name="hero-magnifying-glass"
-        class="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted"
+        class="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-body"
       />
       <input
         type="search"
@@ -877,7 +884,7 @@ defmodule WasomiWeb.CoreComponents do
         value={@value}
         placeholder={@placeholder}
         phx-debounce={@debounce}
-        class="h-11 w-64 rounded-full border border-black/10 bg-white pl-10 pr-4 text-sm text-dark placeholder:text-muted focus:border-primary focus:outline-none"
+        class="h-11 w-full rounded-2xl border-2 border-primary bg-white pl-11 pr-4 text-sm text-dark placeholder:font-medium placeholder:text-muted focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/15 sm:w-[22rem]"
       />
     </form>
     """

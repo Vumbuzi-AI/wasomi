@@ -59,17 +59,19 @@ defmodule WasomiWeb.AdminLive.Students do
   def render(assigns) do
     ~H"""
     <.admin_layout active={:students} current_user={@current_user}>
-      <div class="mx-auto max-w-container space-y-8 px-5 py-10 lg:px-10">
+      <div class="w-full space-y-5 px-5 py-8 lg:px-8">
         <.page_header title="Students">
-          <:subtitle>Everyone who has registered on Wasomi and what they have enrolled in.</:subtitle>
+          <:subtitle>
+            Everyone who has registered on Wasomi and what they have enrolled in.
+          </:subtitle>
           <:actions>
-            <.search_input value={@search} placeholder="Search name, email or phone" />
+            <.search_input value={@search} placeholder="Search name, email, phone or role" />
             <.link
               href={~p"/admin/exports/enrollments"}
               class="group relative grid h-11 w-11 place-items-center rounded-full border border-black/10 bg-white text-ink transition hover:border-primary hover:text-primary"
               aria-label="Export all enrollments as CSV"
             >
-              <.icon name="hero-document-arrow-down" class="h-5 w-5" />
+              <.icon name="hero-document-text" class="h-5 w-5" />
               <.tooltip label="Export all enrollments as CSV" />
             </.link>
           </:actions>
@@ -86,23 +88,35 @@ defmodule WasomiWeb.AdminLive.Students do
             label="Learners"
             value={@learner_count}
             icon="hero-user"
-            hint="Learner accounts"
+            hint={
+              if(@learner_count == 1, do: "Active learner account", else: "Active learner accounts")
+            }
           />
           <.stat_card
             label="Admins"
             value={@admin_count}
             icon="hero-shield-check"
-            hint="Admin accounts"
+            hint={if(@admin_count == 1, do: "Admin account", else: "Admin accounts")}
           />
         </div>
 
-        <div class="rounded-[2rem] border border-black/5 bg-white p-6 shadow-sm lg:p-8">
+        <div class="rounded-3xl border border-black/5 bg-white p-6">
+          <div class="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h2 class="text-xl font-semibold text-ink">Registered users</h2>
+              <p class="mt-1 text-sm text-body">Review learner and admin account details.</p>
+            </div>
+            <span class="rounded-full border border-primary/30 bg-mint px-3 py-1 text-xs font-semibold text-primary">
+              {@page.total_count} {ngettext("record", "records", @page.total_count)}
+            </span>
+          </div>
+
           <.paginated_table
             page={@page.page}
             total_pages={@page.total_pages}
             path_fn={&students_path(@search, &1)}
           >
-            <div :if={@rows != []} class="overflow-x-auto">
+            <div :if={@rows != []} class="mt-6 overflow-x-auto">
               <table class="w-full text-left text-sm">
                 <thead class="border-b border-black/5 text-xs uppercase tracking-wide text-body">
                   <tr>
@@ -111,27 +125,36 @@ defmodule WasomiWeb.AdminLive.Students do
                     <th class="px-6 py-4 font-semibold">Role</th>
                     <th class="px-6 py-4 font-semibold">Courses</th>
                     <th class="px-6 py-4 font-semibold">Total spent</th>
-                    <th class="px-6 py-4 font-semibold">Joined</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-black/5">
                   <tr :for={row <- @rows} class="transition hover:bg-neutral-50/60">
                     <td class="px-6 py-4">
-                      <.link
-                        navigate={~p"/admin/students/#{row.user.id}"}
-                        class="font-medium text-ink hover:text-primary"
-                      >
-                        {row.user.name || "Learner"}
-                      </.link>
-                      <p class="text-xs text-muted">{row.user.email}</p>
+                      <div class="flex items-center gap-3">
+                        <span class="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-primary/40 bg-mint font-bold uppercase text-primary">
+                          {user_initial(row.user)}
+                        </span>
+                        <div>
+                          <.link
+                            navigate={~p"/admin/students/#{row.user.id}"}
+                            class="font-medium text-ink hover:text-primary"
+                          >
+                            {row.user.name || "Learner"}
+                          </.link>
+                          <p class="mt-1 text-xs text-muted">{row.user.email}</p>
+                        </div>
+                      </div>
                     </td>
                     <td class="px-6 py-4 text-body">{row.user.phone || "—"}</td>
-                    <td class="px-6 py-4"><.status_badge status={row.user.role} /></td>
+                    <td class="px-6 py-4">
+                      <span class={role_badge_classes(row.user.role)}>
+                        {role_label(row.user.role)}
+                      </span>
+                    </td>
                     <td class="px-6 py-4 text-body">{row.courses}</td>
                     <td class="px-6 py-4 font-semibold text-ink">
                       {Payments.format_minor(row.spent_minor)}
                     </td>
-                    <td class="px-6 py-4 text-body">{format_date(row.user.inserted_at)}</td>
                   </tr>
                 </tbody>
               </table>
@@ -139,14 +162,14 @@ defmodule WasomiWeb.AdminLive.Students do
 
             <div
               :if={@rows == [] and @total_users == 0}
-              class="rounded-2xl bg-neutral-50 p-12 text-center text-body"
+              class="mt-6 rounded-2xl bg-neutral-50 p-12 text-center text-body"
             >
               No students have registered yet.
             </div>
 
             <div
               :if={@rows == [] and @total_users > 0}
-              class="rounded-2xl bg-neutral-50 p-12 text-center text-body"
+              class="mt-6 rounded-2xl bg-neutral-50 p-12 text-center text-body"
             >
               No students match "{@search}".
             </div>
@@ -157,6 +180,14 @@ defmodule WasomiWeb.AdminLive.Students do
     """
   end
 
-  defp format_date(%DateTime{} = datetime), do: Calendar.strftime(datetime, "%b %-d, %Y")
-  defp format_date(_), do: "—"
+  defp user_initial(user), do: String.first(user.name || user.email || "U")
+  defp role_label(:admin), do: "Admin"
+  defp role_label(_), do: "Learner"
+
+  defp role_badge_classes(:admin),
+    do: "rounded-full bg-ink px-3 py-1 text-xs font-semibold text-white"
+
+  defp role_badge_classes(_),
+    do:
+      "rounded-full border border-primary/30 bg-mint px-3 py-1 text-xs font-semibold text-primary"
 end

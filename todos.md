@@ -104,7 +104,7 @@ concept described in [`project.md`](project.md). Visual work follows
 
 ## Phase 5 — Media (video delivery & protection) 🎬
 
-- [x] `Media` behaviour + adapter (**Mux**).
+- [x] `Media` behaviour + adapter (**Cloudflare Stream**).
 - [x] `playback_token/3`: short-lived, viewer-bound — minted **only** after
       Enrollments gate passes (403 otherwise).
 - [x] Admin direct-upload flow → store returned `video_asset_id`.
@@ -169,7 +169,7 @@ concept described in [`project.md`](project.md). Visual work follows
 
 - [ ] First course price + currency (assume KES, one-time)?
 - [ ] Paystack: sandbox first or live credentials available?
-- [x] Video provider decision: **Mux** for v1.
+- [x] Video provider decision: **Cloudflare Stream** for v1.
 - [ ] Certificate design: Tailwind template OK or fixed design to match?
 - [ ] Final brand assets (logo, exact hex) timeline.
 </content>

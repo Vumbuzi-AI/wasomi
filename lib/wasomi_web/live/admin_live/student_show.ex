@@ -83,7 +83,7 @@ defmodule WasomiWeb.AdminLive.StudentShow do
   def render(assigns) do
     ~H"""
     <.admin_layout active={:students} current_user={@current_user}>
-      <div class="mx-auto max-w-container space-y-8 px-5 py-10 lg:px-10">
+      <div class="w-full space-y-5 px-5 py-8 lg:px-8">
         <.link
           navigate={~p"/admin/students"}
           class="inline-flex items-center gap-1.5 text-sm font-medium text-muted hover:text-primary"

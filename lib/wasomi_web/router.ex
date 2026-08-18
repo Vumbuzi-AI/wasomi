@@ -27,6 +27,7 @@ defmodule WasomiWeb.Router do
 
     live "/", HomeLive
     get "/landing", PageController, :home
+    get "/sitemap.xml", SitemapController, :index
 
     live_session :public_catalog,
       on_mount: [{WasomiWeb.UserAuth, :mount_current_user}] do
@@ -119,10 +120,6 @@ defmodule WasomiWeb.Router do
       live "/courses/:course_slug/quizzes/:id/edit", AdminLive.QuizEdit, :edit
       live "/courses/:course_slug/quizzes/:quiz_id", AdminLive.QuizShow, :show
       live "/courses/:course_slug/lectures/:lecture_id/quiz", AdminLive.LectureQuizEdit, :edit
-
-      live "/courses/:course_slug/modules/:module_id/practice",
-           AdminLive.PracticeQuestionsEdit,
-           :edit
 
       live "/courses/:slug/preview", CoursePlayerLive, :preview
     end

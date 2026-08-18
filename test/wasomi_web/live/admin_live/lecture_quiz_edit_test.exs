@@ -106,6 +106,36 @@ defmodule WasomiWeb.AdminLive.LectureQuizEditTest do
     assert_enqueued(worker: GenerateLectureQuizWorker)
   end
 
+  test "shows a loader and switches to Questions when generation completes", %{conn: conn} do
+    lecture = lecture_fixture(video_asset_id: "playback-1")
+    Catalog.upsert_lecture_transcript(lecture.id, %{status: :ready, text: "Some text."})
+    {:ok, view, _html} = live(conn, edit_path(lecture))
+
+    html =
+      view
+      |> render_submit("generate", %{
+        "resources" => ["video"],
+        "difficulty" => "mixed",
+        "question_count" => "3"
+      })
+
+    assert html =~ "Generating questions…"
+    assert html =~ ~s(id="generate-section")
+
+    quiz = Assessments.get_lecture_quiz(lecture.id)
+    [generation] = Assessments.list_lecture_quiz_generations(quiz)
+
+    {:ok, 1} =
+      Assessments.create_lecture_quiz_draft_questions_and_mark_ready(generation, [
+        draft_question_attrs()
+      ])
+
+    html = render(view)
+    assert html =~ ~s(id="questions-section")
+    assert html =~ "Publish 1 draft"
+    refute html =~ ~s(id="generate-section")
+  end
+
   test "clamps an out-of-range question count into the allowed 3..25 window", %{conn: conn} do
     lecture = lecture_fixture(video_asset_id: "playback-1")
     Catalog.upsert_lecture_transcript(lecture.id, %{status: :ready, text: "Some text."})
@@ -121,6 +151,47 @@ defmodule WasomiWeb.AdminLive.LectureQuizEditTest do
     quiz = Assessments.get_lecture_quiz(lecture.id)
     [generation] = Assessments.list_lecture_quiz_generations(quiz)
     assert generation.question_count_requested == 25
+  end
+
+  test "hides failed and stale processing generation attempts", %{conn: conn} do
+    lecture = lecture_fixture(video_asset_id: "playback-1")
+    quiz = lecture_quiz_fixture(lecture: lecture)
+
+    processing =
+      lecture_quiz_generation_fixture(
+        lecture_quiz: quiz,
+        source_label: "Stale processing attempt"
+      )
+
+    Assessments.mark_lecture_quiz_generation_processing(processing)
+
+    successful =
+      lecture_quiz_generation_fixture(
+        lecture_quiz: quiz,
+        source_label: "Successful generation"
+      )
+
+    {:ok, 1} =
+      Assessments.create_lecture_quiz_draft_questions_and_mark_ready(successful, [
+        draft_question_attrs()
+      ])
+
+    failed =
+      lecture_quiz_generation_fixture(
+        lecture_quiz: quiz,
+        source_label: "Failed generation"
+      )
+
+    Assessments.mark_lecture_quiz_generation_failed(failed, "invalid API key")
+
+    {:ok, view, _html} = live(conn, edit_path(lecture))
+
+    html = view |> element("#generate-tab") |> render_click()
+
+    assert html =~ "Successful generation"
+    refute html =~ "Stale processing attempt"
+    refute html =~ "Failed generation"
+    refute html =~ "invalid API key"
   end
 
   describe "generating a transcript for the primary video" do
@@ -237,8 +308,8 @@ defmodule WasomiWeb.AdminLive.LectureQuizEditTest do
     } do
       {:ok, view, _html} = live(conn, edit_path(lecture))
 
-      view |> element("button", "Publish all drafts") |> render_click()
-      view |> element("#publish-all-modal button", "Publish all") |> render_click()
+      view |> element("button", "Publish 1 draft") |> render_click()
+      view |> element("#publish-all-modal button", "Publish questions") |> render_click()
 
       loaded = Assessments.get_lecture_quiz_with_questions!(quiz.id)
       assert Enum.all?(loaded.questions, &(&1.status == :published))
@@ -251,7 +322,7 @@ defmodule WasomiWeb.AdminLive.LectureQuizEditTest do
     } do
       {:ok, view, _html} = live(conn, edit_path(lecture))
 
-      view |> element("button", "Delete all drafts") |> render_click()
+      view |> element("button", "Delete drafts") |> render_click()
       view |> element("#delete-all-modal button", "Delete") |> render_click()
 
       loaded = Assessments.get_lecture_quiz_with_questions!(quiz.id)

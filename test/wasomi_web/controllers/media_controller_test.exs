@@ -32,7 +32,7 @@ defmodule WasomiWeb.MediaControllerTest do
     lecture =
       lecture_fixture(
         module_id: module.id,
-        video_provider: :mux,
+        video_provider: :cloudflare,
         video_asset_id: "playback-123"
       )
 
@@ -46,7 +46,10 @@ defmodule WasomiWeb.MediaControllerTest do
     conn = get(conn, ~p"/media/lectures/#{lecture.id}/playback")
 
     assert %{"url" => url, "expires_in" => 300} = json_response(conn, 200)
-    assert url == "https://stream.mux.com/playback-123.m3u8?token=signed.jwt.token"
+
+    assert url ==
+             "https://customer-test-customer-code.cloudflarestream.com/signed.jwt.token/manifest/video.m3u8"
+
     refute url =~ ".mp4"
   end
 
@@ -63,7 +66,7 @@ defmodule WasomiWeb.MediaControllerTest do
     lecture =
       lecture_fixture(
         module_id: module.id,
-        video_provider: :mux,
+        video_provider: :cloudflare,
         video_asset_id: "playback-123"
       )
 
@@ -74,7 +77,9 @@ defmodule WasomiWeb.MediaControllerTest do
     conn = get(conn, ~p"/media/lectures/#{lecture.id}/playback?preview=true")
 
     assert %{"url" => url} = json_response(conn, 200)
-    assert url == "https://stream.mux.com/playback-123.m3u8?token=signed.jwt.token"
+
+    assert url ==
+             "https://customer-test-customer-code.cloudflarestream.com/signed.jwt.token/manifest/video.m3u8"
   end
 
   test "a non-admin adding ?preview=true themselves still gets 403", %{conn: conn} do

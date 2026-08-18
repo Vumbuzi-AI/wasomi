@@ -35,6 +35,39 @@ defmodule WasomiWeb.CatalogLiveTest do
     assert html =~ "Create account"
   end
 
+  test "renders a local thumbnail as an absolute social image URL", %{conn: conn} do
+    course =
+      course_fixture(
+        status: :published,
+        thumbnail_key: "/uploads/thumbnails/course-cover.png"
+      )
+
+    {:ok, _view, html} = live(conn, ~p"/courses/#{course.slug}")
+
+    assert html =~
+             ~s(content="#{WasomiWeb.Endpoint.url()}/uploads/thumbnails/course-cover.png")
+  end
+
+  test "renders a document-only lecture without a video duration", %{conn: conn} do
+    course = course_fixture(status: :published)
+    course_module = course_module_fixture(course_id: course.id, position: 1)
+
+    lecture =
+      lecture_fixture(
+        module_id: course_module.id,
+        position: 1,
+        title: "Document-only lecture",
+        video_provider: nil,
+        video_asset_id: nil,
+        duration_seconds: nil
+      )
+
+    {:ok, _view, html} = live(conn, ~p"/courses/#{course.slug}")
+
+    assert html =~ lecture.title
+    assert html =~ "0 min"
+  end
+
   test "displays Free and Enroll for Free on catalog course show for logged in user", %{
     conn: conn
   } do

@@ -25,6 +25,7 @@ defmodule WasomiWeb.AdminLive.Dashboard do
     {:ok,
      socket
      |> assign(:page_title, "Overview")
+     |> assign(:search, "")
      |> assign(:total_revenue_minor, Payments.total_revenue_minor())
      |> assign(:student_count, Accounts.count_users(:learner))
      |> assign(:course_count, length(courses))
@@ -37,15 +38,31 @@ defmodule WasomiWeb.AdminLive.Dashboard do
   end
 
   @impl true
+  def handle_event("search", %{"q" => query}, socket) do
+    {:noreply, assign(socket, :search, query)}
+  end
+
+  @impl true
   def render(assigns) do
     ~H"""
     <.admin_layout active={:overview} current_user={@current_user}>
-      <div class="mx-auto max-w-container space-y-10 px-5 py-10 lg:px-10">
+      <div class="w-full space-y-5 px-5 py-8 lg:px-8">
         <.page_header title="Business overview">
           <:subtitle>A live snapshot of revenue, enrollment and GS1 course activity.</:subtitle>
+          <:actions>
+            <.search_input value={@search} placeholder="Search courses, learners or payments" />
+            <button
+              type="button"
+              class="group relative grid h-11 w-11 place-items-center rounded-2xl bg-ink text-white transition hover:bg-primary"
+              aria-label="View report"
+            >
+              <.icon name="hero-document-text" class="h-5 w-5" />
+              <.tooltip label="View report" />
+            </button>
+          </:actions>
         </.page_header>
 
-        <div class="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
+        <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <.stat_card
             label="Total revenue"
             value={Payments.format_minor(@total_revenue_minor)}
@@ -72,28 +89,34 @@ defmodule WasomiWeb.AdminLive.Dashboard do
           />
         </div>
 
-        <div class="grid gap-6 lg:grid-cols-5">
+        <div class="grid gap-4 lg:grid-cols-2">
           <%!-- Top courses --%>
-          <section class="rounded-3xl border border-black/5 bg-white p-6 lg:col-span-3">
+          <section class="rounded-3xl border border-black/5 bg-white p-6">
             <div class="flex items-center justify-between">
-              <h2 class="text-xl font-semibold text-ink">Top courses by revenue</h2>
+              <div>
+                <h2 class="text-2xl font-semibold text-ink">Revenue</h2>
+                <p class="mt-1 text-sm text-muted">Top GS1 courses by revenue</p>
+              </div>
               <.link
                 navigate={~p"/admin/courses"}
-                class="text-sm font-medium text-primary hover:text-ink"
+                class="flex items-center gap-1 text-sm font-semibold text-primary hover:text-ink"
               >
-                View all →
+                View all <.icon name="hero-arrow-right" class="h-4 w-4" />
               </.link>
             </div>
 
             <div :if={@top_courses != []} class="mt-5 divide-y divide-black/5">
               <.link
-                :for={row <- @top_courses}
+                :for={{row, index} <- Enum.with_index(@top_courses, 1)}
                 navigate={~p"/admin/courses/#{row.course.slug}"}
-                class="flex items-center justify-between gap-4 py-4 first:pt-0 last:pb-0 transition hover:opacity-80"
+                class="flex items-center gap-4 py-4 first:pt-0 last:pb-0 transition hover:opacity-80"
               >
-                <div class="min-w-0">
+                <span class="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-primary/40 text-sm font-semibold text-primary">
+                  {String.pad_leading("#{index}", 2, "0")}
+                </span>
+                <div class="min-w-0 flex-1">
                   <p class="truncate font-medium text-ink">{row.course.title}</p>
-                  <p class="mt-0.5 text-sm text-muted">{row.students} students enrolled</p>
+                  <p class="mt-0.5 text-sm text-muted">{row.students} learner enrolled</p>
                 </div>
                 <p class="shrink-0 font-semibold text-ink">
                   {Payments.format_minor(row.revenue_minor, row.course.currency)}
@@ -107,20 +130,41 @@ defmodule WasomiWeb.AdminLive.Dashboard do
           </section>
 
           <%!-- Recent payments --%>
-          <section class="rounded-3xl border border-black/5 bg-white p-6 lg:col-span-2">
+          <section class="rounded-3xl border border-black/5 bg-white p-6">
             <div class="flex items-center justify-between">
-              <h2 class="text-xl font-semibold text-ink">Recent payments</h2>
+              <div>
+                <h2 class="text-2xl font-semibold text-ink">Payments</h2>
+                <p class="mt-1 text-sm text-muted">Latest successful transactions</p>
+              </div>
               <.link
                 navigate={~p"/admin/payments"}
-                class="text-sm font-medium text-primary hover:text-ink"
+                class="flex items-center gap-1 text-sm font-semibold text-primary hover:text-ink"
               >
-                All →
+                View all <.icon name="hero-arrow-right" class="h-4 w-4" />
               </.link>
             </div>
 
-            <div :if={@recent_payments != []} class="mt-5 space-y-4">
-              <div :for={payment <- @recent_payments} class="flex items-center justify-between gap-3">
-                <div class="min-w-0">
+            <div class="mt-5 flex items-center justify-between gap-4 rounded-2xl bg-ink p-5">
+              <div>
+                <p class="text-sm text-white/70">Total collected</p>
+                <p class="mt-1 text-2xl font-semibold text-white">
+                  {Payments.format_minor(@total_revenue_minor)}
+                </p>
+              </div>
+              <span class="rounded-full border border-white/30 px-3 py-1.5 text-xs font-semibold text-white">
+                {@successful_payments} {ngettext("payment", "payments", @successful_payments)}
+              </span>
+            </div>
+
+            <div :if={@recent_payments != []} class="mt-5 divide-y divide-black/5">
+              <div
+                :for={payment <- @recent_payments}
+                class="flex items-center gap-3 py-4 first:pt-0 last:pb-0"
+              >
+                <span class="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-primary/40 text-primary">
+                  <.icon name="hero-document-text" class="h-5 w-5" />
+                </span>
+                <div class="min-w-0 flex-1">
                   <p class="truncate text-sm font-medium text-ink">
                     {payment.user && (payment.user.name || payment.user.email)}
                   </p>

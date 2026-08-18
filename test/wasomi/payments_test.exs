@@ -12,6 +12,11 @@ defmodule Wasomi.PaymentsTest do
 
   setup :verify_on_exit!
 
+  test "formats displayed money without cents" do
+    assert Payments.format_minor(150_050, "KES") == "1,500 KES"
+    assert Payments.format_minor(80_000, "KES") == "800 KES"
+  end
+
   defp admin_fixture do
     user = user_fixture()
     {:ok, admin} = Wasomi.Accounts.update_user_role(user, :admin)

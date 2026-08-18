@@ -3,7 +3,13 @@ defmodule Wasomi.Assessments.FlashcardProgress do
   import Ecto.Changeset
 
   schema "flashcard_progress" do
-    field :status, Ecto.Enum, values: [:unseen, :known, :review_again], default: :unseen
+    # `:review_again` ("Again") and `:known` ("Got it") predate `:mastered`
+    # ("Easy") and keep their names so existing rows stay valid; the review UI
+    # groups them as Learning/Known/Mastered, with unrated cards as Reviewing.
+    field :status, Ecto.Enum,
+      values: [:unseen, :known, :review_again, :mastered],
+      default: :unseen
+
     field :reviewed_at, :utc_datetime
 
     belongs_to :flashcard, Wasomi.Assessments.Flashcard

@@ -2,363 +2,390 @@
 #
 #     mix run priv/repo/seeds.exs
 #
-# Inside the script, you can read and write to any of your
-# repositories directly:
-#
-#     Wasomi.Repo.insert!(%Wasomi.SomeSchema{})
-#
-# We recommend using the bang functions (`insert!`, `update!`
-# and so on) as they will fail if something goes wrong.
+# Deliberately minimal: one admin, one published course whose lectures carry
+# every AI-generated artefact (transcript, open questions, lecture quiz,
+# flashcards, practice set), and one learner enrolled in it. Enough to walk
+# the whole admin *and* learner journey without waiting on any real
+# generation job.
 
 import Ecto.Query
 
 alias Ecto.Changeset
 alias Wasomi.Accounts
 alias Wasomi.Accounts.User
-alias Wasomi.Catalog.{Course, CourseModule, Lecture}
+
+alias Wasomi.Assessments.{
+  Flashcard,
+  FlashcardSet,
+  LectureQuiz,
+  LectureQuizQuestion,
+  PracticeSet,
+  PracticeSetQuestion,
+  Question,
+  Quiz
+}
+
+alias Wasomi.Catalog.{Course, CourseModule, Lecture, LectureQuestion, LectureTranscript}
 alias Wasomi.Enrollments.Enrollment
 alias Wasomi.Payments.Payment
 alias Wasomi.Repo
+
+defmodule Wasomi.Seeds.CloudflareVideo do
+  alias Wasomi.Catalog.Lecture
+  alias Wasomi.Media.Cloudflare
+
+  @poll_interval_ms 3_000
+  @max_poll_attempts 100
+
+  def build_one_minute_video! do
+    path = Path.join(System.tmp_dir!(), "wasomi-cloudflare-seed-60s.mp4")
+
+    {output, status} =
+      System.cmd(
+        "ffmpeg",
+        [
+          "-y",
+          "-f",
+          "lavfi",
+          "-i",
+          "color=c=0x12372A:s=1280x720:d=60",
+          "-f",
+          "lavfi",
+          "-i",
+          "sine=frequency=440:duration=60",
+          "-shortest",
+          "-c:v",
+          "libx264",
+          "-preset",
+          "veryfast",
+          "-pix_fmt",
+          "yuv420p",
+          "-c:a",
+          "aac",
+          "-movflags",
+          "+faststart",
+          path
+        ],
+        stderr_to_stdout: true
+      )
+
+    if status != 0 do
+      raise "Could not create the one-minute seed video with ffmpeg:\n#{output}"
+    end
+
+    path
+  rescue
+    error in ErlangError ->
+      raise "Seeds require ffmpeg to create the one-minute Cloudflare video: #{Exception.message(error)}"
+  end
+
+  def ensure_uploaded!(
+        %Lecture{video_provider: :cloudflare, video_asset_id: asset_id} = lecture,
+        path
+      )
+      when is_binary(asset_id) and asset_id != "" do
+    if String.starts_with?(asset_id, ["http://", "https://"]) do
+      upload!(lecture, path)
+    else
+      {asset_id, lecture.duration_seconds || 60}
+    end
+  end
+
+  def ensure_uploaded!(%Lecture{} = lecture, path), do: upload!(lecture, path)
+
+  defp upload!(lecture, path) do
+    IO.puts("Uploading seed video #{lecture.position}/5 to Cloudflare Stream…")
+    %{id: uid, url: upload_url} = create_upload!(lecture)
+    video = File.read!(path)
+
+    case Req.post(upload_url,
+           form_multipart: [
+             file: {video, filename: Path.basename(path), content_type: "video/mp4"}
+           ],
+           receive_timeout: 120_000
+         ) do
+      {:ok, %{status: status}} when status in 200..299 ->
+        wait_until_ready!(uid, 1)
+
+      {:ok, %{status: status, body: body}} ->
+        raise "Cloudflare upload failed (#{status}): #{inspect(body)}"
+
+      {:error, reason} ->
+        raise "Cloudflare upload failed: #{inspect(reason)}"
+    end
+  end
+
+  defp create_upload!(lecture) do
+    case Cloudflare.create_upload(lecture, []) do
+      {:ok, upload} ->
+        upload
+
+      {:error, {:cloudflare, status, body}} ->
+        raise "Cloudflare rejected the direct-upload request (HTTP #{status}): #{inspect(body)}"
+
+      {:error, reason} ->
+        raise "Could not create a Cloudflare direct upload: #{inspect(reason)}"
+    end
+  end
+
+  defp wait_until_ready!(uid, attempt) when attempt <= @max_poll_attempts do
+    case Cloudflare.upload_status(uid) do
+      {:ok, {:ready, ^uid, duration}} ->
+        {uid, duration}
+
+      {:ok, status} when status in [:waiting, :processing] ->
+        Process.sleep(@poll_interval_ms)
+        wait_until_ready!(uid, attempt + 1)
+
+      {:error, reason} ->
+        raise "Cloudflare could not process seed video #{uid}: #{inspect(reason)}"
+    end
+  end
+
+  defp wait_until_ready!(uid, _attempt) do
+    raise "Timed out waiting for Cloudflare to process seed video #{uid}"
+  end
+end
 
 admin_attrs = %{
   name: "Wasomi Admin",
   email: "admin@example.com",
   phone: "254700000001",
-  password: "password12345"
+  password: "123456"
 }
 
 student_attrs = %{
   name: "One Student",
   email: "student@example.com",
   phone: "254700000002",
-  password: "student12345"
+  password: "123456"
 }
 
-courses = [
-  %{
-    attrs: %{
-      slug: "the-human-stack",
-      title: "The Human Stack by Alvas",
-      description:
-        "Turn complex technical thinking into clear messages, persuasive presentations, and productive workplace conversations.",
-      thumbnail_key: "/images/human-stack-course.svg",
-      price_minor: 1_500_000,
-      currency: "KES",
-      status: :published,
-      position: 1
-    },
-    modules: [
-      {"Communication as a Technical Superpower",
-       "Build the foundations for clear, intentional communication in technical environments.",
-       [
-         {"Why the human stack matters", 540},
-         {"Diagnosing communication breakdowns", 660},
-         {"Clarity, context, and intent", 720}
-       ]},
-      {"Know Your Audience and Message",
-       "Shape a message around what your audience needs to understand, decide, or do.",
-       [
-         {"Reading the room", 600},
-         {"From information to outcome", 780},
-         {"The one-sentence message", 660}
-       ]},
-      {"Technical Storytelling",
-       "Organise complex ideas into memorable narratives without losing accuracy.",
-       [
-         {"Story structure for technical ideas", 840},
-         {"Explaining complexity with analogy", 720},
-         {"Making evidence persuasive", 780}
-       ]},
-      {"Designing Clear Presentations",
-       "Create slides and demonstrations that support your message instead of competing with it.",
-       [
-         {"One idea per slide", 720},
-         {"Visual hierarchy and data", 840},
-         {"Designing a coherent deck", 900}
-       ]},
-      {"Delivery and Executive Presence",
-       "Develop a grounded delivery style for rooms, calls, demos, and recorded updates.",
-       [
-         {"Voice, pace, and pause", 660},
-         {"Body language and virtual presence", 720},
-         {"Handling tough questions", 900}
-       ]},
-      {"High-Stakes Workplace Communication",
-       "Apply the human stack to feedback, difficult conversations, executive updates, and Q&A.",
-       [
-         {"Giving and receiving feedback", 840},
-         {"Handling difficult conversations", 900},
-         {"Executive updates and tough questions", 900}
-       ]}
-    ]
-  },
-  %{
-    attrs: %{
-      slug: "practical-data-analytics",
-      title: "Practical Data Analytics",
-      description:
-        "Learn the everyday analytics workflow: clean data, ask sharper questions, query datasets, and present reliable insights.",
-      thumbnail_key:
-        "https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=900&q=80",
-      price_minor: 1_850_000,
-      currency: "KES",
-      status: :published,
-      position: 2
-    },
-    modules: [
-      {"Analytics Foundations", "Frame business questions and prepare trustworthy datasets.",
-       [
-         {"From question to metric", 720},
-         {"Cleaning messy data", 840},
-         {"Choosing useful visualisations", 780}
-       ]},
-      {"SQL for Analysis", "Query relational data and combine tables confidently.",
-       [
-         {"Filtering and grouping", 900},
-         {"Joins without confusion", 960},
-         {"Building repeatable reports", 840}
-       ]},
-      {"Dashboards and Decisions", "Package insights for teams and stakeholders.",
-       [
-         {"Designing decision dashboards", 780},
-         {"Telling the story in the numbers", 720},
-         {"Presenting recommendations", 660}
-       ]}
-    ]
-  },
-  %{
-    attrs: %{
-      slug: "ux-product-design-lab",
-      title: "UX Product Design Lab",
-      description:
-        "Move from user insight to polished product flows with practical research, wireframing, prototyping, and usability testing.",
-      thumbnail_key:
-        "https://images.unsplash.com/photo-1561070791-2526d30994b5?auto=format&fit=crop&w=900&q=80",
-      price_minor: 1_600_000,
-      currency: "KES",
-      status: :published,
-      position: 3
-    },
-    modules: [
-      {"Research That Guides Design", "Understand users before committing to screens.",
-       [
-         {"Planning useful interviews", 720},
-         {"Mapping jobs and pain points", 780},
-         {"Turning notes into insights", 840}
-       ]},
-      {"Interaction and Interface Design",
-       "Create clear flows, wireframes, and responsive interfaces.",
-       [
-         {"Flow mapping", 660},
-         {"Wireframes that communicate", 780},
-         {"Visual hierarchy basics", 720}
-       ]},
-      {"Testing and Iteration", "Validate your work and improve it with evidence.",
-       [
-         {"Usability test scripts", 720},
-         {"Reading behaviour, not opinions", 780},
-         {"Prioritising design fixes", 660}
-       ]}
-    ]
-  },
-  %{
-    attrs: %{
-      slug: "digital-marketing-growth",
-      title: "Digital Marketing Growth",
-      description:
-        "Create a practical growth engine with positioning, content planning, conversion funnels, email campaigns, and performance reporting.",
-      thumbnail_key:
-        "https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&w=900&q=80",
-      price_minor: 1_350_000,
-      currency: "KES",
-      status: :published,
-      position: 4
-    },
-    modules: [
-      {"Positioning and Content", "Clarify the audience, message, and channels for a campaign.",
-       [
-         {"Audience and offer fit", 660},
-         {"Content pillars", 720},
-         {"Campaign calendars", 780}
-       ]},
-      {"Funnels and Email", "Turn attention into leads and customers.",
-       [
-         {"Landing page anatomy", 780},
-         {"Email sequences", 840},
-         {"Conversion checkpoints", 720}
-       ]},
-      {"Performance Marketing", "Measure, optimise, and report campaign results.",
-       [
-         {"Channel metrics", 720},
-         {"Simple paid campaign setup", 840},
-         {"Reporting what matters", 660}
-       ]}
-    ]
-  },
-  %{
-    attrs: %{
-      slug: "project-management-for-digital-teams",
-      title: "Project Management for Digital Teams",
-      description:
-        "Learn lightweight project management methods for software, design, marketing, and operations teams.",
-      thumbnail_key:
-        "https://images.unsplash.com/photo-1552664730-d307ca884978?auto=format&fit=crop&w=900&q=80",
-      price_minor: 1_400_000,
-      currency: "KES",
-      status: :published,
-      position: 5
-    },
-    modules: [
-      {"Planning the Work", "Define scope, outcomes, risks, and delivery rhythm.",
-       [
-         {"From brief to backlog", 720},
-         {"Estimating with uncertainty", 780},
-         {"Planning useful milestones", 660}
-       ]},
-      {"Running the Team", "Keep people aligned through rituals and clear communication.",
-       [
-         {"Standups and async updates", 660},
-         {"Decision logs", 720},
-         {"Stakeholder check-ins", 780}
-       ]},
-      {"Shipping and Learning", "Close projects cleanly and improve the next one.",
-       [
-         {"Launch readiness", 720},
-         {"Post-launch retrospectives", 660},
-         {"Turning lessons into process", 780}
-       ]}
-    ]
-  },
-  %{
-    attrs: %{
-      slug: "financial-skills-for-entrepreneurs",
-      title: "Financial Skills for Entrepreneurs",
-      description:
-        "Build the financial confidence to price offers, track cash, read reports, and make disciplined business decisions.",
-      thumbnail_key:
-        "https://images.unsplash.com/photo-1554224155-6726b3ff858f?auto=format&fit=crop&w=900&q=80",
-      price_minor: 1_250_000,
-      currency: "KES",
-      status: :published,
-      position: 6
-    },
-    modules: [
-      {"Money Fundamentals", "Understand the numbers every founder should watch.",
-       [
-         {"Revenue, cost, and margin", 720},
-         {"Cash flow basics", 780},
-         {"Reading simple reports", 840}
-       ]},
-      {"Pricing and Planning", "Make pricing and budget choices with more confidence.",
-       [
-         {"Pricing models", 720},
-         {"Budgeting for growth", 780},
-         {"Scenario planning", 660}
-       ]},
-      {"Financial Discipline", "Build habits for sustainable business operations.",
-       [
-         {"Monthly review rhythms", 660},
-         {"Managing receivables", 720},
-         {"Decision rules for spending", 780}
-       ]}
-    ]
-  }
+seed_video_path = Wasomi.Seeds.CloudflareVideo.build_one_minute_video!()
+
+course_attrs = %{
+  slug: "the-human-stack",
+  title: "The Human Stack by Alvas",
+  description:
+    "Turn complex technical thinking into clear messages, persuasive presentations, and productive workplace conversations.",
+  thumbnail_key: "/images/human-stack-course.svg",
+  price_minor: 1_500_000,
+  currency: "KES",
+  status: :published,
+  position: 1
+}
+
+certificate_attrs = %{
+  certificate_enabled: true,
+  certificate_issuer_name: "Wasomi Academy",
+  certificate_signatory_name: "Alvas Mwangi",
+  certificate_signatory_title: "Lead Instructor"
+}
+
+# {module title, module description, [{lecture title, lecture summary}]}
+modules = [
+  {"Communication as a Technical Superpower",
+   "Build clear, intentional communication skills across five concise lessons.",
+   [
+     {"Why the human stack matters", "How communication compounds the value of technical work."},
+     {"Diagnosing communication breakdowns", "Spot where a message loses its audience."},
+     {"Reading the room", "Understand what an audience knows and cares about."},
+     {"The one-sentence message", "Compress a complex update into one decisive sentence."},
+     {"Turning clarity into action", "Give an audience a clear decision or next step."}
+   ]}
 ]
 
-# Ready-made public HLS streams so seeded lectures actually play in development.
-# The Wasomi.Media.Demo adapter (config/dev.exs) streams these URLs directly.
-demo_streams = [
-  "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
-  "https://test-streams.mux.dev/tos_ismc/main.m3u8",
-  "https://stream.mux.com/VZtzUzGRv02OhRnZCxcNg49OilvolTqdnFLEqBsTwLx7g.m3u8"
+# Open-ended questions (Catalog.LectureQuestion) — the free-text prompts the
+# learner answers under the player, scored by the AI grader in production.
+lecture_questions = [
+  {"In your own words, what problem does this lesson solve for a technical team?",
+   "It closes the gap between doing good technical work and having that work understood, trusted, and acted on by other people."},
+  {"Describe a time a technically correct message still failed to land. What was missing?",
+   "Usually the audience's context or the decision they needed to make — the message was accurate but not aimed at anyone in particular."}
 ]
 
-Repo.transaction(fn ->
-  confirmed_at = DateTime.utc_now() |> DateTime.truncate(:second)
+# Multiple-choice questions reused for the lecture quiz, the module quiz, and
+# the study-hub practice set — three different surfaces, same shape of data.
+# {prompt, [{label, correct?}], explanation}
+multiple_choice = [
+  {"What is the clearest sign that a technical message has failed?",
+   [
+     {"The audience cannot say what to do next", true},
+     {"The slides were not branded", false},
+     {"The talk ran under time", false},
+     {"Nobody asked a question", false}
+   ], "A message succeeds when the audience leaves knowing the decision or action it implies."},
+  {"Before writing an update, what should you decide first?",
+   [
+     {"The outcome you want from the reader", true},
+     {"The font and colour scheme", false},
+     {"How many charts to include", false},
+     {"Which tool to draft it in", false}
+   ], "Every other choice — length, detail, format — follows from the outcome you're after."},
+  {"An analogy is most useful when it:",
+   [
+     {"Maps the unfamiliar onto something the audience already knows", true},
+     {"Shows how much you know about the topic", false},
+     {"Replaces the need for any evidence", false},
+     {"Makes the explanation longer", false}
+   ], "Analogy borrows existing understanding; it doesn't replace evidence."}
+]
 
-  case Repo.get_by(User, email: admin_attrs.email) do
-    nil ->
-      {:ok, admin} = Accounts.register_user(admin_attrs)
+flashcards = [
+  {"The human stack", "The communication skills that make technical work legible and trusted."},
+  {"One-sentence message", "The single sentence an audience should repeat after you finish."},
+  {"Audience-first framing",
+   "Start from the decision the audience must make, not from your work."},
+  {"Signal vs detail", "Detail supports a claim; it never substitutes for making one."}
+]
 
-      admin
-      |> User.role_changeset(%{role: :admin})
-      |> Changeset.put_change(:phone, admin_attrs.phone)
-      |> Changeset.put_change(:confirmed_at, confirmed_at)
+transcript_text = """
+Welcome to the human stack. Most technical people are trained to make things
+correct, and almost never trained to make them land. Those are two different
+skills, and the second one is what this course is about.
+
+Start with the outcome. Before you open a document or a deck, decide what you
+want the audience to understand, decide, or do. Everything else — how long you
+speak, how much detail you include, which chart you show — falls out of that
+one choice.
+
+Then read the room. The same result, presented to an engineer, a manager, and
+a customer, needs three different framings. Not three different truths, three
+different entry points into the same truth.
+
+Finally, compress. If you cannot state your message in one sentence, the
+audience will not be able to repeat it. And a message nobody can repeat is a
+message that stops with you.
+"""
+
+# Small upsert helper: every entity here is keyed so re-running the seeds
+# updates in place rather than duplicating or crashing on a unique index.
+upsert = fn changeset ->
+  if changeset.data.id, do: Repo.update!(changeset), else: Repo.insert!(changeset)
+end
+
+Repo.transaction(
+  fn ->
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    admin =
+      case Repo.get_by(User, email: admin_attrs.email) do
+        nil ->
+          {:ok, admin} = Accounts.register_user(admin_attrs)
+
+          admin
+          |> User.role_changeset(%{role: :admin})
+          |> Changeset.put_change(:phone, admin_attrs.phone)
+          |> Changeset.put_change(:confirmed_at, now)
+          |> Repo.update!()
+
+        admin ->
+          admin
+          |> User.password_changeset(%{password: admin_attrs.password})
+          |> Changeset.put_change(:name, admin_attrs.name)
+          |> Changeset.put_change(:phone, admin_attrs.phone)
+          |> Changeset.put_change(:role, :admin)
+          |> Changeset.put_change(:confirmed_at, admin.confirmed_at || now)
+          |> Repo.update!()
+      end
+
+    student =
+      case Repo.get_by(User, email: student_attrs.email) do
+        nil ->
+          {:ok, student} = Accounts.register_user(student_attrs)
+
+          student
+          |> User.role_changeset(%{role: :learner})
+          |> Changeset.put_change(:phone, student_attrs.phone)
+          |> Changeset.put_change(:confirmed_at, now)
+          |> Repo.update!()
+
+        student ->
+          student
+          |> User.password_changeset(%{password: student_attrs.password})
+          |> Changeset.put_change(:name, student_attrs.name)
+          |> Changeset.put_change(:phone, student_attrs.phone)
+          |> Changeset.put_change(:role, :learner)
+          |> Changeset.put_change(:confirmed_at, student.confirmed_at || now)
+          |> Repo.update!()
+      end
+
+    course =
+      case Repo.get_by(Course, slug: course_attrs.slug) do
+        nil -> %Course{}
+        existing -> existing
+      end
+      |> Course.changeset(course_attrs)
+      |> upsert.()
+      |> Course.certificate_changeset(certificate_attrs)
       |> Repo.update!()
 
-    admin ->
-      admin
-      |> User.password_changeset(%{password: admin_attrs.password})
-      |> Changeset.put_change(:name, admin_attrs.name)
-      |> Changeset.put_change(:phone, admin_attrs.phone)
-      |> Changeset.put_change(:role, :admin)
-      |> Changeset.put_change(:confirmed_at, admin.confirmed_at || confirmed_at)
-      |> Repo.update!()
-  end
+    # Keep this seed course deterministic when upgrading from an older seed
+    # shape that had multiple modules.
+    Repo.delete_all(from(m in CourseModule, where: m.course_id == ^course.id and m.position > 1))
 
-  student =
-    case Repo.get_by(User, email: student_attrs.email) do
-      nil ->
-        {:ok, student} = Accounts.register_user(student_attrs)
-
-        student
-        |> User.role_changeset(%{role: :learner})
-        |> Changeset.put_change(:phone, student_attrs.phone)
-        |> Changeset.put_change(:confirmed_at, confirmed_at)
-        |> Repo.update!()
-
-      student ->
-        student
-        |> User.password_changeset(%{password: student_attrs.password})
-        |> Changeset.put_change(:name, student_attrs.name)
-        |> Changeset.put_change(:phone, student_attrs.phone)
-        |> Changeset.put_change(:role, :learner)
-        |> Changeset.put_change(:confirmed_at, student.confirmed_at || confirmed_at)
-        |> Repo.update!()
-    end
-
-  seeded_courses =
-    courses
-    |> Enum.with_index()
-    |> Enum.map(fn {%{attrs: course_attrs, modules: modules}, course_index} ->
-      course =
-        case Repo.get_by(Course, slug: course_attrs.slug) do
-          nil ->
-            %Course{}
-            |> Course.changeset(course_attrs)
-            |> Repo.insert!()
-
-          course ->
-            course
-            |> Course.changeset(course_attrs)
-            |> Repo.update!()
+    modules
+    |> Enum.with_index(1)
+    |> Enum.each(fn {{module_title, module_description, lectures}, module_position} ->
+      course_module =
+        case Repo.get_by(CourseModule, course_id: course.id, position: module_position) do
+          nil -> %CourseModule{}
+          existing -> existing
         end
+        |> CourseModule.changeset(%{
+          course_id: course.id,
+          title: module_title,
+          description: module_description,
+          position: module_position
+        })
+        |> upsert.()
 
-      Enum.with_index(modules, 1)
-      |> Enum.each(fn {{title, description, lectures}, module_position} ->
-        course_module =
-          case Repo.get_by(CourseModule, course_id: course.id, position: module_position) do
-            nil -> %CourseModule{}
-            existing -> existing
-          end
-          |> CourseModule.changeset(%{
-            course_id: course.id,
-            title: title,
-            description: description,
-            position: module_position
-          })
-          |> then(fn changeset ->
-            if changeset.data.id, do: Repo.update!(changeset), else: Repo.insert!(changeset)
-          end)
+      Repo.delete_all(
+        from(l in Lecture, where: l.module_id == ^course_module.id and l.position > 5)
+      )
 
-        Enum.with_index(lectures, 1)
-        |> Enum.each(fn {{lecture_title, duration_seconds}, lecture_position} ->
-          stream_index =
-            rem(
-              course_index * 9 + (module_position - 1) * 3 + (lecture_position - 1),
-              length(demo_streams)
-            )
+      # Module-level quiz, published so the course itself is publishable and
+      # the study hub's timed-quiz mode has questions to serve.
+      quiz =
+        case Repo.get_by(Quiz, module_id: course_module.id) do
+          nil -> %Quiz{}
+          existing -> existing
+        end
+        |> Quiz.changeset(%{
+          module_id: course_module.id,
+          title: "#{module_title} check",
+          description: "Confirm the key ideas from this module.",
+          passing_score_percent: 70,
+          active: true,
+          published_at: now
+        })
+        |> upsert.()
 
+      multiple_choice
+      |> Enum.with_index(1)
+      |> Enum.each(fn {{prompt, options, explanation}, position} ->
+        case Repo.get_by(Question, quiz_id: quiz.id, position: position) do
+          nil -> %Question{}
+          existing -> Repo.preload(existing, :question_options)
+        end
+        |> Question.changeset(%{
+          quiz_id: quiz.id,
+          prompt: prompt,
+          explanation: explanation,
+          status: :published,
+          position: position,
+          question_options:
+            Enum.with_index(options, 1)
+            |> Enum.map(fn {{label, correct}, option_position} ->
+              %{label: label, correct: correct, position: option_position}
+            end)
+        })
+        |> upsert.()
+      end)
+
+      Enum.with_index(lectures, 1)
+      |> Enum.each(fn {{lecture_title, lecture_description}, lecture_position} ->
+        lecture =
           case Repo.get_by(Lecture, module_id: course_module.id, position: lecture_position) do
             nil -> %Lecture{}
             existing -> existing
@@ -366,44 +393,165 @@ Repo.transaction(fn ->
           |> Lecture.changeset(%{
             module_id: course_module.id,
             title: lecture_title,
-            description: "A focused lesson with practical examples and an application exercise.",
-            video_provider: :mux,
-            video_asset_id: Enum.at(demo_streams, stream_index),
-            duration_seconds: duration_seconds,
+            description: lecture_description,
             position: lecture_position
           })
-          |> then(fn changeset ->
-            if changeset.data.id, do: Repo.update!(changeset), else: Repo.insert!(changeset)
-          end)
+          |> upsert.()
+
+        {video_asset_id, duration_seconds} =
+          Wasomi.Seeds.CloudflareVideo.ensure_uploaded!(lecture, seed_video_path)
+
+        lecture =
+          lecture
+          |> Lecture.changeset(%{
+            video_provider: :cloudflare,
+            video_asset_id: video_asset_id,
+            duration_seconds: duration_seconds
+          })
+          |> Repo.update!()
+
+        # Transcript — the source every AI generator reads from, pre-seeded as
+        # `:ready` so admin generation screens have something to work with.
+        case Repo.get_by(LectureTranscript, lecture_id: lecture.id) do
+          nil -> %LectureTranscript{}
+          existing -> existing
+        end
+        |> LectureTranscript.changeset(%{
+          lecture_id: lecture.id,
+          status: :ready,
+          text: transcript_text
+        })
+        |> upsert.()
+
+        lecture_questions
+        |> Enum.with_index(1)
+        |> Enum.each(fn {{question, answer}, position} ->
+          case Repo.get_by(LectureQuestion, lecture_id: lecture.id, position: position) do
+            nil -> %LectureQuestion{}
+            existing -> existing
+          end
+          |> LectureQuestion.changeset(%{
+            lecture_id: lecture.id,
+            question: question,
+            answer: answer,
+            position: position
+          })
+          |> upsert.()
+        end)
+
+        # Lecture quiz with published questions — this is what gates the next
+        # lecture (see `Wasomi.Learning.lecture_unlocked?/3`).
+        lecture_quiz =
+          case Repo.get_by(LectureQuiz, lecture_id: lecture.id) do
+            nil -> %LectureQuiz{}
+            existing -> existing
+          end
+          |> LectureQuiz.changeset(%{
+            lecture_id: lecture.id,
+            title: "#{lecture_title} check",
+            passing_score_percent: 70,
+            active: true,
+            published_at: now
+          })
+          |> upsert.()
+
+        multiple_choice
+        |> Enum.take(2)
+        |> Enum.with_index(1)
+        |> Enum.each(fn {{prompt, options, _explanation}, position} ->
+          case Repo.get_by(LectureQuizQuestion,
+                 lecture_quiz_id: lecture_quiz.id,
+                 position: position
+               ) do
+            nil -> %LectureQuizQuestion{}
+            existing -> Repo.preload(existing, :question_options)
+          end
+          |> LectureQuizQuestion.changeset(%{
+            lecture_quiz_id: lecture_quiz.id,
+            prompt: prompt,
+            status: :published,
+            position: position,
+            question_options:
+              Enum.with_index(options, 1)
+              |> Enum.map(fn {{label, correct}, option_position} ->
+                %{label: label, correct: correct, position: option_position}
+              end)
+          })
+          |> upsert.()
+        end)
+
+        # Study-hub artefacts, lecture-scoped.
+        flashcard_set =
+          case Repo.get_by(FlashcardSet, lecture_id: lecture.id) do
+            nil -> %FlashcardSet{}
+            existing -> existing
+          end
+          |> FlashcardSet.changeset(%{
+            lecture_id: lecture.id,
+            status: :ready,
+            cards_generated_count: length(flashcards),
+            generated_at: now
+          })
+          |> upsert.()
+
+        flashcards
+        |> Enum.with_index(1)
+        |> Enum.each(fn {{front, back}, position} ->
+          case Repo.get_by(Flashcard, flashcard_set_id: flashcard_set.id, position: position) do
+            nil -> %Flashcard{}
+            existing -> existing
+          end
+          |> Flashcard.changeset(%{
+            flashcard_set_id: flashcard_set.id,
+            front: front,
+            back: back,
+            position: position
+          })
+          |> upsert.()
+        end)
+
+        practice_set =
+          case Repo.get_by(PracticeSet, lecture_id: lecture.id) do
+            nil -> %PracticeSet{}
+            existing -> existing
+          end
+          |> PracticeSet.changeset(%{
+            lecture_id: lecture.id,
+            status: :ready,
+            questions_generated_count: length(multiple_choice),
+            generated_at: now
+          })
+          |> upsert.()
+
+        multiple_choice
+        |> Enum.with_index(1)
+        |> Enum.each(fn {{prompt, options, explanation}, position} ->
+          case Repo.get_by(PracticeSetQuestion,
+                 practice_set_id: practice_set.id,
+                 position: position
+               ) do
+            nil -> %PracticeSetQuestion{}
+            existing -> Repo.preload(existing, :practice_set_question_options)
+          end
+          |> PracticeSetQuestion.changeset(%{
+            practice_set_id: practice_set.id,
+            prompt: prompt,
+            explanation: explanation,
+            position: position,
+            practice_set_question_options:
+              Enum.with_index(options, 1)
+              |> Enum.map(fn {{label, correct}, option_position} ->
+                %{label: label, correct: correct, position: option_position}
+              end)
+          })
+          |> upsert.()
         end)
       end)
-
-      course
     end)
 
-  # Steps back N *calendar* months from `date`, clamping the day so e.g.
-  # Mar 31 minus one month lands on Feb 28/29 instead of crashing.
-  months_ago = fn date, n ->
-    total = date.year * 12 + (date.month - 1) - n
-    year = div(total, 12)
-    month = rem(total, 12) + 1
-    last_day = Date.new!(year, month, 1) |> Date.end_of_month() |> Map.fetch!(:day)
-    Date.new!(year, month, min(date.day, last_day))
-  end
-
-  today = DateTime.to_date(confirmed_at)
-
-  # One paid enrollment per seeded course, staggered across the last six
-  # months, so the admin revenue chart has an actual trend to show instead
-  # of a single bar.
-  seeded_courses
-  |> Enum.take(6)
-  |> Enum.with_index()
-  |> Enum.each(fn {course, index} ->
-    paid_at =
-      today
-      |> months_ago.(index)
-      |> DateTime.new!(~T[10:00:00], "Etc/UTC")
+    # The learner: an active, paid enrollment so the course opens straight into
+    # the player rather than the checkout page.
+    paid_at = DateTime.add(now, -30, :day)
 
     enrollment =
       case Repo.get_by(Enrollment, user_id: student.id, course_id: course.id) do
@@ -417,43 +565,46 @@ Repo.transaction(fn ->
         enrolled_at: paid_at,
         activated_at: paid_at
       })
-      |> then(fn changeset ->
-        if changeset.data.id, do: Repo.update!(changeset), else: Repo.insert!(changeset)
-      end)
+      |> upsert.()
 
     provider_reference = "KBI-SEED-PAID-STUDENT-#{String.upcase(course.slug)}"
-
-    payment_attrs = %{
-      user_id: student.id,
-      course_id: course.id,
-      enrollment_id: enrollment.id,
-      provider: :paystack,
-      provider_reference: provider_reference,
-      amount_minor: course.price_minor,
-      currency: course.currency,
-      status: :successful,
-      paid_at: paid_at,
-      raw_payload: %{
-        "seeded" => true,
-        "status" => "success",
-        "reference" => provider_reference
-      }
-    }
 
     payment =
       case Repo.get_by(Payment, provider_reference: provider_reference) do
         nil -> %Payment{}
         existing -> existing
       end
-      |> Payment.changeset(payment_attrs)
-      |> then(fn changeset ->
-        if changeset.data.id, do: Repo.update!(changeset), else: Repo.insert!(changeset)
-      end)
+      |> Payment.changeset(%{
+        user_id: student.id,
+        course_id: course.id,
+        enrollment_id: enrollment.id,
+        provider: :paystack,
+        provider_reference: provider_reference,
+        amount_minor: course.price_minor,
+        currency: course.currency,
+        status: :successful,
+        paid_at: paid_at,
+        raw_payload: %{
+          "seeded" => true,
+          "status" => "success",
+          "reference" => provider_reference
+        }
+      })
+      |> upsert.()
 
     Repo.update_all(from(p in Payment, where: p.id == ^payment.id), set: [inserted_at: paid_at])
-  end)
-end)
 
-IO.puts("Seeded admin account: #{admin_attrs.email} / #{admin_attrs.password}")
-IO.puts("Seeded paid student account: #{student_attrs.email} / #{student_attrs.password}")
-IO.puts("Seeded #{length(courses)} published courses with modules and playable demo lectures.")
+    admin
+  end,
+  timeout: :infinity
+)
+
+File.rm(seed_video_path)
+
+IO.puts("Seeded admin:   #{admin_attrs.email} / #{admin_attrs.password}")
+IO.puts("Seeded learner: #{student_attrs.email} / #{student_attrs.password}")
+
+IO.puts(
+  "Seeded 1 published course (#{course_attrs.slug}) with 5 one-minute Cloudflare Stream videos, " <>
+    "captions requested, transcripts, lecture quizzes, and a final module quiz."
+)

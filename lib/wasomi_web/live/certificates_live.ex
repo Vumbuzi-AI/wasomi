@@ -26,7 +26,7 @@ defmodule WasomiWeb.CertificatesLive do
   def render(assigns) do
     ~H"""
     <.student_layout active={:certificates} current_user={@current_user}>
-      <div class="mx-auto max-w-container px-5 py-10 lg:px-10 lg:py-12">
+      <div class="w-full px-5 py-8 lg:px-8">
         <div class="flex flex-wrap items-end justify-between gap-4">
           <div>
             <p class="text-sm font-semibold uppercase tracking-wider text-primary">Achievements</p>

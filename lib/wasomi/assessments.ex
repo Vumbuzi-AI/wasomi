@@ -26,8 +26,6 @@ defmodule Wasomi.Assessments do
     LectureQuizGeneration,
     LectureQuizQuestion,
     LectureQuizSubmission,
-    PracticeQuestion,
-    PracticeQuestionOption,
     PracticeSet,
     PracticeSetQuestion,
     PracticeSetQuestionOption,
@@ -35,7 +33,12 @@ defmodule Wasomi.Assessments do
     Question,
     Quiz,
     QuizGeneration,
-    QuizSubmission
+    QuizSubmission,
+    SmartTest,
+    SmartTestQuestion,
+    SmartTestQuestionOption,
+    StudyGuide,
+    StudyGuideSection
   }
 
   alias Wasomi.Assessments.Workers.GenerateLectureQuizWorker
@@ -732,6 +735,60 @@ defmodule Wasomi.Assessments do
   end
 
   @doc """
+  Every lecture quiz in a course that is ready for learners (see
+  `lecture_quiz_ready_for_learners?/1`), keyed by `lecture_id`.
+
+  Two queries for a whole course, so the course player can answer "does this
+  lesson gate on a quiz, and which quiz" for every lecture in the outline
+  without an N+1. Lectures with no quiz, or whose quiz has no `:published`
+  questions yet, are absent — a caller using `Map.get/2` gets `nil` and
+  should treat that as "nothing to gate on".
+  """
+  def learner_ready_lecture_quizzes_by_lecture(course_id) do
+    quizzes =
+      LectureQuiz
+      |> join(:inner, [quiz], lecture in Lecture, on: lecture.id == quiz.lecture_id)
+      |> join(:inner, [_quiz, lecture], module in CourseModule,
+        on: module.id == lecture.module_id
+      )
+      |> where([_quiz, _lecture, module], module.course_id == ^course_id)
+      |> select([quiz], quiz)
+      |> Repo.all()
+
+    ready_ids =
+      LectureQuizQuestion
+      |> where([q], q.lecture_quiz_id in ^Enum.map(quizzes, & &1.id) and q.status == :published)
+      |> select([q], q.lecture_quiz_id)
+      |> Repo.all()
+      |> MapSet.new()
+
+    quizzes
+    |> Enum.filter(&MapSet.member?(ready_ids, &1.id))
+    |> Map.new(&{&1.lecture_id, &1})
+  end
+
+  @doc """
+  Returns a `MapSet` of `lecture_quiz_id`s the user has passed anywhere in a
+  course — the course-wide counterpart of `passed_lecture_quiz?/2`, for
+  deciding lesson unlocks across a whole outline in one query.
+  """
+  def passed_lecture_quiz_ids_for_user(user_id, course_id) do
+    LectureQuizSubmission
+    |> join(:inner, [s], quiz in LectureQuiz, on: quiz.id == s.lecture_quiz_id)
+    |> join(:inner, [_s, quiz], lecture in Lecture, on: lecture.id == quiz.lecture_id)
+    |> join(:inner, [_s, _quiz, lecture], module in CourseModule,
+      on: module.id == lecture.module_id
+    )
+    |> where(
+      [s, _quiz, _lecture, module],
+      s.user_id == ^user_id and module.course_id == ^course_id and s.passed == true
+    )
+    |> select([s], s.lecture_quiz_id)
+    |> Repo.all()
+    |> MapSet.new()
+  end
+
+  @doc """
   Scores and records a learner's lecture-quiz attempt. Mirrors `submit_quiz/3`.
   """
   def submit_lecture_quiz(%User{} = user, %LectureQuiz{} = quiz, answers) when is_map(answers) do
@@ -1043,258 +1100,6 @@ defmodule Wasomi.Assessments do
   defp lecture_quiz_generation_topic(lecture_quiz_id),
     do: "lecture_quiz_generation:lecture_quiz:#{lecture_quiz_id}"
 
-  ## Practice questions
-
-  @doc """
-  Lists all practice questions for a module (any status), ordered by position.
-  Used by the admin authoring view.
-  """
-  def list_all_practice_questions(%CourseModule{id: module_id}) do
-    options_query =
-      from(o in PracticeQuestionOption, order_by: [asc: o.position])
-
-    PracticeQuestion
-    |> where([q], q.module_id == ^module_id)
-    |> order_by([q], asc: q.position)
-    |> preload([q], practice_question_options: ^options_query)
-    |> Repo.all()
-  end
-
-  @doc """
-  Lists only `:published` practice questions for a module with options preloaded.
-  Used by the learner course player.
-  """
-  def list_published_practice_questions(%CourseModule{id: module_id}) do
-    options_query =
-      from(o in PracticeQuestionOption, order_by: [asc: o.position])
-
-    PracticeQuestion
-    |> where([q], q.module_id == ^module_id and q.status == :published)
-    |> order_by([q], asc: q.position)
-    |> preload([q], practice_question_options: ^options_query)
-    |> Repo.all()
-  end
-
-  @doc """
-  Returns a map of `module_id => [published PracticeQuestion]` for every
-  module in a course that has at least one published practice question.
-  Used by the course player to build the sidenav and avoid N+1 queries.
-  """
-  def published_practice_questions_by_module(course_id) do
-    options_query =
-      from(o in PracticeQuestionOption, order_by: [asc: o.position])
-
-    PracticeQuestion
-    |> join(:inner, [q], m in CourseModule, on: m.id == q.module_id)
-    |> where([q, m], m.course_id == ^course_id and q.status == :published)
-    |> order_by([q, _m], asc: q.position)
-    |> preload([q, _m], practice_question_options: ^options_query)
-    |> Repo.all()
-    |> Enum.group_by(& &1.module_id)
-  end
-
-  def get_practice_question!(id) do
-    options_query = from(o in PracticeQuestionOption, order_by: [asc: o.position])
-    Repo.get!(PracticeQuestion, id) |> Repo.preload(practice_question_options: options_query)
-  end
-
-  def create_practice_question(%CourseModule{} = module, attrs) do
-    position = next_practice_question_position(module.id)
-
-    %PracticeQuestion{module_id: module.id, position: position}
-    |> PracticeQuestion.changeset(attrs)
-    |> Repo.insert()
-  end
-
-  def update_practice_question(%PracticeQuestion{} = question, attrs) do
-    question
-    |> PracticeQuestion.changeset(attrs)
-    |> Repo.update()
-  end
-
-  def delete_practice_question(%PracticeQuestion{} = question), do: Repo.delete(question)
-
-  def change_practice_question(%PracticeQuestion{} = question, attrs \\ %{}),
-    do: PracticeQuestion.changeset(question, attrs)
-
-  @doc """
-  Marks a practice question as `:published`, making it visible to learners.
-  """
-  def publish_practice_question(%PracticeQuestion{} = question) do
-    question
-    |> Ecto.Changeset.change(status: :published)
-    |> Repo.update()
-  end
-
-  defp next_practice_question_position(module_id) do
-    max_pos =
-      PracticeQuestion
-      |> where([q], q.module_id == ^module_id)
-      |> select([q], max(q.position))
-      |> Repo.one()
-
-    (max_pos || 0) + 1
-  end
-
-  @doc """
-  Generates AI practice questions on-demand for a module using its lecture content, resources, and transcripts.
-  Deduplicates generated questions against any existing module quiz questions, lecture quiz questions, or prior practice questions.
-  All generated questions are inserted as `:published` practice questions.
-  """
-  def generate_practice_questions_for_module(%CourseModule{} = module, opts \\ []) do
-    text = gather_module_text(module)
-    count = Keyword.get(opts, :count, 5)
-    existing_prompts = list_existing_question_prompts_for_module(module.id)
-
-    generator =
-      Application.get_env(
-        :wasomi,
-        :question_generator,
-        Wasomi.Assessments.QuestionGenerator.OpenAI
-      )
-
-    generator_opts = [
-      min_count: count,
-      max_count: count,
-      avoid_duplicating: existing_prompts
-    ]
-
-    case generator.generate_questions(text, generator_opts) do
-      {:ok, draft_questions} ->
-        questions =
-          Enum.map(draft_questions, fn draft ->
-            options_attrs =
-              draft.options
-              |> Enum.with_index(1)
-              |> Map.new(fn {opt, idx} ->
-                {to_string(idx),
-                 %{
-                   "label" => opt.label,
-                   "correct" => opt.correct,
-                   "position" => idx
-                 }}
-              end)
-
-            attrs = %{
-              "prompt" => draft.prompt,
-              "explanation" =>
-                Map.get(draft, :explanation, "Generated from module study material."),
-              "status" => "published",
-              "practice_question_options" => options_attrs
-            }
-
-            {:ok, question} = create_practice_question(module, attrs)
-            get_practice_question!(question.id)
-          end)
-
-        {:ok, questions}
-
-      error ->
-        error
-    end
-  end
-
-  @doc """
-  Returns a list of all existing question prompts in the module (from the module quiz,
-  all lecture quizzes, and existing practice questions) to prevent duplicate questions.
-  """
-  def list_existing_question_prompts_for_module(module_id) do
-    module_quiz_prompts =
-      from(q in Question,
-        join: z in Quiz,
-        on: z.id == q.quiz_id,
-        where: z.module_id == ^module_id,
-        select: q.prompt
-      )
-      |> Repo.all()
-
-    lecture_quiz_prompts =
-      from(lq in LectureQuizQuestion,
-        join: lz in LectureQuiz,
-        on: lz.id == lq.lecture_quiz_id,
-        join: l in Lecture,
-        on: l.id == lz.lecture_id,
-        where: l.module_id == ^module_id,
-        select: lq.prompt
-      )
-      |> Repo.all()
-
-    practice_prompts =
-      from(pq in PracticeQuestion,
-        where: pq.module_id == ^module_id,
-        select: pq.prompt
-      )
-      |> Repo.all()
-
-    (module_quiz_prompts ++ lecture_quiz_prompts ++ practice_prompts)
-    |> Enum.reject(&is_nil/1)
-    |> Enum.map(&String.trim/1)
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.uniq()
-  end
-
-  defp gather_module_text(%CourseModule{id: module_id} = module) do
-    lectures =
-      Lecture
-      |> where([l], l.module_id == ^module_id)
-      |> order_by([l], asc: l.position)
-      |> Repo.all()
-
-    resource_reader =
-      Application.get_env(
-        :wasomi,
-        :lecture_resource_reader,
-        Wasomi.Assessments.LectureResourceReader.Storage
-      )
-
-    lecture_texts =
-      Enum.map(lectures, fn lecture ->
-        transcript_text =
-          case Wasomi.Catalog.get_lecture_transcript(lecture.id) do
-            %{status: :ready, text: t} when is_binary(t) -> t
-            _ -> ""
-          end
-
-        resources =
-          from(r in Wasomi.Catalog.LectureResource,
-            where: r.lecture_id == ^lecture.id,
-            order_by: [asc: r.position]
-          )
-          |> Repo.all()
-
-        resource_texts =
-          Enum.map(resources, fn res ->
-            case resource_reader.extract_text(res) do
-              {:ok, text} when is_binary(text) -> text
-              _ -> ""
-            end
-          end)
-          |> Enum.reject(&(&1 == ""))
-          |> Enum.join("\n\n")
-
-        parts = [
-          lecture.description,
-          transcript_text,
-          resource_texts
-        ]
-
-        parts
-        |> Enum.reject(&(&1 in [nil, ""]))
-        |> Enum.join("\n\n")
-      end)
-      |> Enum.reject(&(&1 == ""))
-      |> Enum.join("\n\n---\n\n")
-
-    module_title = module.title || "Module"
-    module_desc = Map.get(module, :description) || ""
-
-    if String.trim(lecture_texts) == "" do
-      "Subject Matter Domain: #{module_title}\n\nOverview:\n#{module_desc}"
-    else
-      "Subject Matter Domain: #{module_title}\n\nOverview:\n#{module_desc}\n\nStudy Material:\n#{lecture_texts}"
-    end
-  end
-
   ## Flashcards
   #
   # Self-study content: there's no admin authoring step, so (unlike
@@ -1363,8 +1168,11 @@ defmodule Wasomi.Assessments do
   Inserts one flashcard per generated item and marks the set `:ready` —
   same "skip malformed items, only fail the batch if none landed" behavior
   as `create_draft_questions_and_mark_ready/2`.
+
+  Pass `:source` to record which material the cards were drawn from (see
+  `Wasomi.Assessments.FlashcardSet`).
   """
-  def mark_flashcard_set_ready(%FlashcardSet{} = set, cards) when is_list(cards) do
+  def mark_flashcard_set_ready(%FlashcardSet{} = set, cards, opts \\ []) when is_list(cards) do
     {created, _next_position} =
       Enum.reduce(cards, {[], 1}, fn card, {acc, position} ->
         case create_flashcard(set, Map.put(card, :position, position)) do
@@ -1382,12 +1190,42 @@ defmodule Wasomi.Assessments do
         update_flashcard_set(set, %{
           status: :ready,
           cards_generated_count: length(created),
+          source: Keyword.get(opts, :source),
           generated_at: DateTime.utc_now() |> DateTime.truncate(:second)
         })
 
       broadcast_flashcard_set(updated)
       {:ok, length(created)}
     end
+  end
+
+  @doc """
+  Throws away a set's cards and puts it back to `:pending` so
+  `Wasomi.Assessments.Workers.GenerateFlashcardsWorker` can draft a fresh
+  deck — the learner-facing "regenerate" action.
+
+  Deleting the cards cascades to every learner's `FlashcardProgress` for
+  them, which is the honest outcome: the new cards are different cards, so
+  ratings recorded against the old ones no longer mean anything. Positions
+  also restart at 1 on the next generation, so the old rows genuinely have
+  to go rather than be kept alongside.
+  """
+  def reset_flashcard_set(%FlashcardSet{id: id} = set) do
+    Flashcard
+    |> where([f], f.flashcard_set_id == ^id)
+    |> Repo.delete_all()
+
+    {:ok, updated} =
+      update_flashcard_set(set, %{
+        status: :pending,
+        error_message: nil,
+        cards_generated_count: nil,
+        source: nil,
+        generated_at: nil
+      })
+
+    broadcast_flashcard_set(updated)
+    updated
   end
 
   defp create_flashcard(%FlashcardSet{id: flashcard_set_id}, attrs) do
@@ -1422,10 +1260,11 @@ defmodule Wasomi.Assessments do
   end
 
   @doc """
-  Records (or updates) a learner's known/review-again call on a flashcard.
+  Records (or updates) a learner's recall rating on a flashcard —
+  `:review_again` ("Again"), `:known` ("Got it"), or `:mastered` ("Easy").
   """
   def record_flashcard_progress(%User{id: user_id}, %Flashcard{id: flashcard_id}, status)
-      when status in [:known, :review_again] do
+      when status in [:known, :review_again, :mastered] do
     %FlashcardProgress{}
     |> FlashcardProgress.changeset(%{
       flashcard_id: flashcard_id,
@@ -1463,7 +1302,7 @@ defmodule Wasomi.Assessments do
   defp flashcard_set_topic(%FlashcardSet{lecture_id: id}) when not is_nil(id),
     do: "flashcard_set:lecture:#{id}"
 
-  ## Practice questions
+  ## Practice sets
   #
   # "Extra practice" — self-study, per-module, same set-level-status/no-draft
   # shape as Flashcards above, but reuses the existing
@@ -1658,4 +1497,601 @@ defmodule Wasomi.Assessments do
 
   defp practice_set_topic(%PracticeSet{lecture_id: id}) when not is_nil(id),
     do: "practice_set:lecture:#{id}"
+
+  ## Smart Tests
+  #
+  # "Smart Test" — a timed, learner-configured test over a module or a single
+  # lecture. Same no-admin-authoring/status-on-the-row shape as Flashcards
+  # and Extra practice above, with two differences that follow from the
+  # learner picking the settings:
+  #
+  #   * a test belongs to a user, so it is created (not "get or created")
+  #     per attempt, and PubSub is keyed on the test id rather than the scope;
+  #   * questions come in two kinds, so short-answer responses are scored
+  #     0.0–1.0 by `Wasomi.Catalog.LectureQuestionScorer` (the same scorer
+  #     that grades lecture reflection questions) rather than being simply
+  #     right or wrong.
+
+  @doc """
+  Creates a `:pending` Smart Test for `user` over `scope` (a `CourseModule`
+  or a `Lecture`) with the learner's chosen settings. Generation itself is
+  the caller's job — enqueue
+  `Wasomi.Assessments.Workers.GenerateSmartTestWorker` with the returned id.
+  """
+  def create_smart_test(%User{id: user_id}, scope, attrs) do
+    %SmartTest{}
+    |> SmartTest.changeset(
+      attrs
+      |> Map.new()
+      |> Map.merge(%{user_id: user_id, status: :pending})
+      |> Map.merge(smart_test_scope_attrs(scope))
+    )
+    |> Repo.insert()
+  end
+
+  defp smart_test_scope_attrs(%CourseModule{id: id}), do: %{module_id: id, lecture_id: nil}
+  defp smart_test_scope_attrs(%Lecture{id: id}), do: %{lecture_id: id, module_id: nil}
+
+  @doc """
+  Every Smart Test `user` has built for `scope`, most recent first — the
+  "Saved test" list.
+  """
+  def list_smart_tests(%User{id: user_id}, scope) do
+    SmartTest
+    |> where([t], t.user_id == ^user_id)
+    |> where(^smart_test_scope_filter(scope))
+    |> order_by([t], desc: t.inserted_at, desc: t.id)
+    |> Repo.all()
+  end
+
+  @doc """
+  The Smart Test `user` most recently built for `scope`, with its questions
+  and options loaded, or `nil` if they have never built one.
+  """
+  def latest_smart_test(%User{} = user, scope) do
+    case list_smart_tests(user, scope) do
+      [] -> nil
+      [latest | _older] -> load_smart_test_questions(latest)
+    end
+  end
+
+  defp smart_test_scope_filter(%CourseModule{id: id}), do: dynamic([t], t.module_id == ^id)
+  defp smart_test_scope_filter(%Lecture{id: id}), do: dynamic([t], t.lecture_id == ^id)
+
+  def get_smart_test!(id), do: Repo.get!(SmartTest, id)
+
+  @doc """
+  Loads a Smart Test's questions (with multiple-choice options, in position
+  order) onto the struct.
+  """
+  def load_smart_test_questions(%SmartTest{} = smart_test) do
+    options_query = from(option in SmartTestQuestionOption, order_by: [asc: option.position])
+
+    Repo.preload(
+      smart_test,
+      [
+        smart_test_questions:
+          {smart_test_questions_query(), [smart_test_question_options: options_query]}
+      ],
+      force: true
+    )
+  end
+
+  defp smart_test_questions_query,
+    do: from(question in SmartTestQuestion, order_by: [asc: question.position])
+
+  @doc """
+  Subscribes the caller to generation updates for one Smart Test. Keyed on
+  the test rather than the scope (as Flashcards/Extra practice are) because
+  each learner's test is their own — a broadcast has exactly one interested
+  LiveView.
+  """
+  def subscribe_to_smart_test(%SmartTest{id: id}),
+    do: Phoenix.PubSub.subscribe(Wasomi.PubSub, smart_test_topic(id))
+
+  @doc """
+  Drops a subscription taken out by `subscribe_to_smart_test/1`. Needed here
+  (and not for the scope-keyed Flashcards/Extra practice topics) because a
+  learner can build test after test in one session, and each one would
+  otherwise leave a live subscription behind.
+  """
+  def unsubscribe_from_smart_test(%SmartTest{id: id}),
+    do: Phoenix.PubSub.unsubscribe(Wasomi.PubSub, smart_test_topic(id))
+
+  def mark_smart_test_processing(%SmartTest{} = smart_test) do
+    {:ok, updated} = update_smart_test(smart_test, %{status: :processing})
+    broadcast_smart_test(updated)
+    updated
+  end
+
+  def mark_smart_test_failed(%SmartTest{} = smart_test, error_message) do
+    {:ok, updated} =
+      update_smart_test(smart_test, %{status: :failed, error_message: error_message})
+
+    broadcast_smart_test(updated)
+    updated
+  end
+
+  @doc """
+  Inserts one question (with options, for multiple choice) per generated item
+  and marks the test `:ready` — same "skip malformed items, only fail the
+  batch if none landed" behavior as `mark_practice_set_ready/2`.
+
+  Multiple-choice questions are kept ahead of short-answer ones regardless of
+  the order the generator returned them in, so the learner always works
+  through recall before writing.
+  """
+  def mark_smart_test_ready(%SmartTest{} = smart_test, drafts) when is_list(drafts) do
+    {created, _next_position} =
+      drafts
+      |> Enum.sort_by(&if(&1[:kind] == :short_answer, do: 1, else: 0))
+      |> Enum.reduce({[], 1}, fn draft, {acc, position} ->
+        case create_smart_test_question(smart_test, smart_test_question_attrs(draft, position)) do
+          {:ok, question} -> {[question | acc], position + 1}
+          {:error, _changeset} -> {acc, position}
+        end
+      end)
+
+    created = Enum.reverse(created)
+
+    if created == [] do
+      {:error, :no_valid_questions_generated}
+    else
+      {:ok, updated} =
+        update_smart_test(smart_test, %{
+          status: :ready,
+          questions_generated_count: length(created),
+          generated_at: DateTime.utc_now() |> DateTime.truncate(:second)
+        })
+
+      broadcast_smart_test(updated)
+      {:ok, length(created)}
+    end
+  end
+
+  defp create_smart_test_question(%SmartTest{id: smart_test_id}, attrs) do
+    %SmartTestQuestion{}
+    |> SmartTestQuestion.changeset(Map.put(attrs, :smart_test_id, smart_test_id))
+    |> Repo.insert()
+  end
+
+  defp smart_test_question_attrs(draft, position) do
+    %{
+      kind: Map.get(draft, :kind),
+      prompt: Map.get(draft, :prompt),
+      expected_answer: Map.get(draft, :expected_answer),
+      explanation: Map.get(draft, :explanation),
+      position: position,
+      smart_test_question_options:
+        draft
+        |> Map.get(:options, [])
+        |> Enum.with_index(1)
+        |> Enum.map(fn {option, idx} ->
+          %{label: option.label, correct: option.correct, position: idx}
+        end)
+    }
+  end
+
+  def list_smart_test_questions(%SmartTest{id: smart_test_id}) do
+    options_query = from(option in SmartTestQuestionOption, order_by: [asc: option.position])
+
+    SmartTestQuestion
+    |> where([q], q.smart_test_id == ^smart_test_id)
+    |> order_by([q], asc: q.position)
+    |> preload(smart_test_question_options: ^options_query)
+    |> Repo.all()
+  end
+
+  @doc """
+  Starts (or restarts) the attempt clock. The deadline is persisted rather
+  than kept in the LiveView so a reconnect mid-test resumes the same
+  countdown instead of handing out fresh time; a test with the time limit
+  switched off gets no deadline at all.
+  """
+  def start_smart_test(%SmartTest{} = smart_test) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    expires_at =
+      if smart_test.enforce_time_limit,
+        do: DateTime.add(now, smart_test.duration_minutes * 60, :second)
+
+    update_smart_test(smart_test, %{
+      started_at: now,
+      expires_at: expires_at,
+      paused_at: nil,
+      completed_at: nil,
+      score_percent: nil,
+      time_expired: false
+    })
+  end
+
+  @doc """
+  Freezes the countdown. Recorded as "paused at this instant" rather than as
+  a remaining-seconds snapshot so `resume_smart_test/1` can simply push the
+  deadline out by however long the pause actually lasted.
+  """
+  def pause_smart_test(%SmartTest{expires_at: nil} = smart_test), do: {:ok, smart_test}
+
+  def pause_smart_test(%SmartTest{paused_at: paused} = smart_test) when not is_nil(paused),
+    do: {:ok, smart_test}
+
+  def pause_smart_test(%SmartTest{} = smart_test) do
+    update_smart_test(smart_test, %{
+      paused_at: DateTime.utc_now() |> DateTime.truncate(:second)
+    })
+  end
+
+  def resume_smart_test(%SmartTest{paused_at: nil} = smart_test), do: {:ok, smart_test}
+
+  def resume_smart_test(%SmartTest{} = smart_test) do
+    paused_seconds = DateTime.diff(DateTime.utc_now(), smart_test.paused_at, :second)
+
+    update_smart_test(smart_test, %{
+      expires_at: DateTime.add(smart_test.expires_at, max(paused_seconds, 0), :second),
+      paused_at: nil
+    })
+  end
+
+  @doc """
+  Seconds left on the clock, or `nil` when the test has no time limit. While
+  paused, the remaining time is measured from the pause instant, so a paused
+  test never runs down.
+  """
+  def smart_test_remaining_seconds(%SmartTest{expires_at: nil}), do: nil
+
+  def smart_test_remaining_seconds(%SmartTest{expires_at: expires_at, paused_at: paused_at}) do
+    from = paused_at || DateTime.utc_now()
+    max(DateTime.diff(expires_at, from, :second), 0)
+  end
+
+  @doc """
+  Records a learner's answer to one question: an option id for multiple
+  choice, free text for short answer. Answers are persisted as they are given
+  (rather than gathered up at submit time) so a reload mid-test doesn't lose
+  work. Scoring is deliberately not done here — see `finish_smart_test/2`.
+  """
+  def record_smart_test_answer(%SmartTestQuestion{kind: :multiple_choice} = question, option_id) do
+    if Enum.any?(
+         question.smart_test_question_options,
+         &(to_string(&1.id) == to_string(option_id))
+       ) do
+      update_smart_test_response(question, %{
+        response_option_id: option_id,
+        answered_at: DateTime.utc_now() |> DateTime.truncate(:second)
+      })
+    else
+      {:error, :unknown_option}
+    end
+  end
+
+  def record_smart_test_answer(%SmartTestQuestion{kind: :short_answer} = question, text)
+      when is_binary(text) do
+    update_smart_test_response(question, %{
+      response_text: text,
+      answered_at: DateTime.utc_now() |> DateTime.truncate(:second)
+    })
+  end
+
+  defp update_smart_test_response(%SmartTestQuestion{} = question, attrs) do
+    question
+    |> SmartTestQuestion.response_changeset(attrs)
+    |> Repo.update()
+  end
+
+  @doc """
+  Grades every answered question and completes the test.
+
+  Multiple choice is scored locally (1.0/0.0); short answers go to the
+  configured `Wasomi.Catalog.LectureQuestionScorer` for a 0.0–1.0 semantic
+  match against the generated model answer. A scorer failure leaves that one
+  question's score `nil` and excludes it from the percentage rather than
+  failing the whole submission or silently marking it wrong — the learner
+  still gets the rest of their result, and the UI shows the ungraded question
+  as such.
+
+  Pass `time_expired: true` when the deadline, rather than the learner, ended
+  the attempt.
+  """
+  def finish_smart_test(%SmartTest{} = smart_test, opts \\ []) do
+    questions = list_smart_test_questions(smart_test)
+    graded = Enum.map(questions, &grade_smart_test_question/1)
+
+    scores = graded |> Enum.map(& &1.score) |> Enum.reject(&is_nil/1)
+
+    score_percent =
+      case scores do
+        [] -> 0
+        scores -> round(Enum.sum(scores) / length(scores) * 100)
+      end
+
+    update_smart_test(smart_test, %{
+      completed_at: DateTime.utc_now() |> DateTime.truncate(:second),
+      score_percent: score_percent,
+      time_expired: Keyword.get(opts, :time_expired, false),
+      paused_at: nil
+    })
+  end
+
+  defp grade_smart_test_question(%SmartTestQuestion{kind: :multiple_choice} = question) do
+    score =
+      if Enum.any?(
+           question.smart_test_question_options,
+           &(&1.correct and &1.id == question.response_option_id)
+         ),
+         do: 1.0,
+         else: 0.0
+
+    persist_smart_test_score(question, score)
+  end
+
+  defp grade_smart_test_question(%SmartTestQuestion{kind: :short_answer} = question) do
+    case String.trim(question.response_text || "") do
+      "" ->
+        persist_smart_test_score(question, 0.0)
+
+      answer ->
+        case lecture_question_scorer().score(
+               question.prompt,
+               question.expected_answer || "",
+               answer
+             ) do
+          {:ok, score} -> persist_smart_test_score(question, score / 1)
+          {:error, _reason} -> question
+        end
+    end
+  end
+
+  defp persist_smart_test_score(question, score) do
+    case update_smart_test_response(question, %{score: score}) do
+      {:ok, updated} -> updated
+      {:error, _changeset} -> question
+    end
+  end
+
+  @doc """
+  Clears every answer and score so the same questions can be attempted again
+  ("Retake this test"). Kept as a reset rather than a fresh test on purpose:
+  a retake is meant to be the *same* test, and generating a new one would
+  cost another model call and change the questions under the learner.
+  """
+  def reset_smart_test(%SmartTest{} = smart_test) do
+    Repo.update_all(
+      from(q in SmartTestQuestion, where: q.smart_test_id == ^smart_test.id),
+      set: [
+        response_option_id: nil,
+        response_text: nil,
+        score: nil,
+        answered_at: nil,
+        updated_at: DateTime.utc_now() |> DateTime.truncate(:second)
+      ]
+    )
+
+    update_smart_test(smart_test, %{
+      started_at: nil,
+      expires_at: nil,
+      paused_at: nil,
+      completed_at: nil,
+      score_percent: nil,
+      time_expired: false
+    })
+  end
+
+  @doc """
+  Whether a multiple-choice question was answered correctly, for the
+  post-submission review UI.
+  """
+  def smart_test_question_correct?(%SmartTestQuestion{kind: :multiple_choice} = question) do
+    Enum.any?(
+      question.smart_test_question_options,
+      &(&1.correct and &1.id == question.response_option_id)
+    )
+  end
+
+  def smart_test_question_correct?(%SmartTestQuestion{score: score}) when is_float(score),
+    do: score >= 0.5
+
+  def smart_test_question_correct?(%SmartTestQuestion{}), do: false
+
+  defp update_smart_test(%SmartTest{} = smart_test, attrs) do
+    smart_test
+    |> SmartTest.changeset(attrs)
+    |> Repo.update()
+  end
+
+  defp broadcast_smart_test(%SmartTest{id: id} = smart_test) do
+    Phoenix.PubSub.broadcast(
+      Wasomi.PubSub,
+      smart_test_topic(id),
+      {:smart_test_updated, smart_test}
+    )
+  end
+
+  defp smart_test_topic(id), do: "smart_test:#{id}"
+
+  defp lecture_question_scorer do
+    Application.get_env(
+      :wasomi,
+      :lecture_question_scorer,
+      Wasomi.Catalog.LectureQuestionScorer.OpenAI
+    )
+  end
+
+  ## Study guides
+  #
+  # "Study guide" — a written set of notes over a module or a single lecture,
+  # generated to the learner's own brief. Same per-user, created-not-
+  # get-or-created, PubSub-keyed-on-the-row shape as Smart Test above, because
+  # the same material asked for as a story and as a cheat sheet are two
+  # different documents, both worth keeping.
+  #
+  # Nothing here is scored: a guide is read, so the only state it carries is
+  # generation status.
+
+  @doc """
+  Creates a `:pending` study guide for `user` over `scope` (a `CourseModule` or
+  a `Lecture`) with the style/depth/reading-level/focus they chose. Generation
+  itself is the caller's job — enqueue
+  `Wasomi.Assessments.Workers.GenerateStudyGuideWorker` with the returned id.
+  """
+  def create_study_guide(%User{id: user_id}, scope, attrs) do
+    %StudyGuide{}
+    |> StudyGuide.changeset(
+      attrs
+      |> Map.new()
+      |> Map.merge(%{user_id: user_id, status: :pending})
+      |> Map.merge(study_guide_scope_attrs(scope))
+    )
+    |> Repo.insert()
+  end
+
+  defp study_guide_scope_attrs(%CourseModule{id: id}), do: %{module_id: id, lecture_id: nil}
+  defp study_guide_scope_attrs(%Lecture{id: id}), do: %{lecture_id: id, module_id: nil}
+
+  @doc """
+  Every study guide `user` has generated for `scope`, most recent first — the
+  "Your guides" list, so a learner can flip between the styles they've asked
+  for instead of paying for a regeneration.
+  """
+  def list_study_guides(%User{id: user_id}, scope) do
+    StudyGuide
+    |> where([g], g.user_id == ^user_id)
+    |> where(^study_guide_scope_filter(scope))
+    |> order_by([g], desc: g.inserted_at, desc: g.id)
+    |> Repo.all()
+  end
+
+  @doc """
+  The study guide `user` most recently generated for `scope`, with its sections
+  loaded, or `nil` if they have never generated one.
+  """
+  def latest_study_guide(%User{} = user, scope) do
+    case list_study_guides(user, scope) do
+      [] -> nil
+      [latest | _older] -> load_study_guide_sections(latest)
+    end
+  end
+
+  defp study_guide_scope_filter(%CourseModule{id: id}), do: dynamic([g], g.module_id == ^id)
+  defp study_guide_scope_filter(%Lecture{id: id}), do: dynamic([g], g.lecture_id == ^id)
+
+  def get_study_guide!(id), do: Repo.get!(StudyGuide, id)
+
+  @doc """
+  Fetches one of `user`'s own study guides by id, or `nil` — the scoped lookup
+  behind "open this saved guide", so an id from the client can only ever reach
+  a guide that belongs to the learner asking for it.
+  """
+  def get_user_study_guide(%User{id: user_id}, id) do
+    case Repo.get_by(StudyGuide, id: id, user_id: user_id) do
+      nil -> nil
+      guide -> load_study_guide_sections(guide)
+    end
+  end
+
+  @doc "Loads a guide's sections, in position order, onto the struct."
+  def load_study_guide_sections(%StudyGuide{} = study_guide) do
+    sections_query = from(section in StudyGuideSection, order_by: [asc: section.position])
+
+    Repo.preload(study_guide, [study_guide_sections: sections_query], force: true)
+  end
+
+  @doc """
+  Subscribes the caller to generation updates for one study guide. Keyed on the
+  guide rather than the scope (as Flashcards/Extra practice are) because each
+  learner's guide is their own — a broadcast has exactly one interested
+  LiveView.
+  """
+  def subscribe_to_study_guide(%StudyGuide{id: id}),
+    do: Phoenix.PubSub.subscribe(Wasomi.PubSub, study_guide_topic(id))
+
+  @doc """
+  Drops a subscription taken out by `subscribe_to_study_guide/1` — a learner
+  can generate guide after guide in one session, and each would otherwise
+  leave a live subscription behind.
+  """
+  def unsubscribe_from_study_guide(%StudyGuide{id: id}),
+    do: Phoenix.PubSub.unsubscribe(Wasomi.PubSub, study_guide_topic(id))
+
+  def mark_study_guide_processing(%StudyGuide{} = study_guide) do
+    {:ok, updated} = update_study_guide(study_guide, %{status: :processing})
+    broadcast_study_guide(updated)
+    updated
+  end
+
+  def mark_study_guide_failed(%StudyGuide{} = study_guide, error_message) do
+    {:ok, updated} =
+      update_study_guide(study_guide, %{status: :failed, error_message: error_message})
+
+    broadcast_study_guide(updated)
+    updated
+  end
+
+  @doc """
+  Writes the generated document: the guide-level title/summary/takeaways/terms
+  in one update, then one row per section. A guide with no usable section is a
+  failed generation rather than an empty document — same "skip malformed items,
+  only fail the batch if none landed" behavior as `mark_smart_test_ready/2`.
+  """
+  def mark_study_guide_ready(%StudyGuide{} = study_guide, draft) when is_map(draft) do
+    {created, _next_position} =
+      draft
+      |> Map.get(:sections, [])
+      |> Enum.reduce({[], 1}, fn section, {acc, position} ->
+        case create_study_guide_section(study_guide, Map.put(section, :position, position)) do
+          {:ok, created} -> {[created | acc], position + 1}
+          {:error, _changeset} -> {acc, position}
+        end
+      end)
+
+    if created == [] do
+      {:error, :no_valid_sections_generated}
+    else
+      {:ok, updated} =
+        update_study_guide(study_guide, %{
+          title: Map.get(draft, :title),
+          summary: Map.get(draft, :summary),
+          key_takeaways: Map.get(draft, :key_takeaways) || [],
+          key_terms: Map.get(draft, :key_terms) || [],
+          status: :ready,
+          sections_generated_count: length(created),
+          generated_at: DateTime.utc_now() |> DateTime.truncate(:second)
+        })
+
+      broadcast_study_guide(updated)
+      {:ok, length(created)}
+    end
+  end
+
+  defp create_study_guide_section(%StudyGuide{id: study_guide_id}, attrs) do
+    %StudyGuideSection{}
+    |> StudyGuideSection.changeset(Map.put(attrs, :study_guide_id, study_guide_id))
+    |> Repo.insert()
+  end
+
+  @doc """
+  Deletes one of `user`'s own study guides — the "Your guides" list is
+  learner-managed, and an unwanted style shouldn't have to stay there.
+  """
+  def delete_user_study_guide(%User{id: user_id}, id) do
+    case Repo.get_by(StudyGuide, id: id, user_id: user_id) do
+      nil -> {:error, :not_found}
+      guide -> Repo.delete(guide)
+    end
+  end
+
+  defp update_study_guide(%StudyGuide{} = study_guide, attrs) do
+    study_guide
+    |> StudyGuide.changeset(attrs)
+    |> Repo.update()
+  end
+
+  defp broadcast_study_guide(%StudyGuide{id: id} = study_guide) do
+    Phoenix.PubSub.broadcast(
+      Wasomi.PubSub,
+      study_guide_topic(id),
+      {:study_guide_updated, study_guide}
+    )
+  end
+
+  defp study_guide_topic(id), do: "study_guide:#{id}"
 end

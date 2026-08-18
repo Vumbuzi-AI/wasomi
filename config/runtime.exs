@@ -58,12 +58,13 @@ if paystack_callback_url = System.get_env("PAYSTACK_CALLBACK_URL") do
 end
 
 for {env_name, config_key} <- [
-      {"MUX_TOKEN_ID", :mux_token_id},
-      {"MUX_TOKEN_SECRET", :mux_token_secret},
-      {"MUX_SIGNING_KEY_ID", :mux_signing_key_id},
-      {"MUX_SIGNING_PRIVATE_KEY", :mux_signing_private_key},
-      {"MUX_API_URL", :mux_api_url},
-      {"MUX_CORS_ORIGIN", :mux_cors_origin}
+      {"CLOUDFLARE_ACCOUNT_ID", :cloudflare_account_id},
+      {"CLOUDFLARE_STREAM_API_TOKEN", :cloudflare_stream_api_token},
+      {"CLOUDFLARE_STREAM_CUSTOMER_CODE", :cloudflare_stream_customer_code},
+      {"CLOUDFLARE_STREAM_SIGNING_KEY_ID", :cloudflare_stream_signing_key_id},
+      {"CLOUDFLARE_STREAM_SIGNING_PRIVATE_KEY", :cloudflare_stream_signing_private_key},
+      {"CLOUDFLARE_API_URL", :cloudflare_api_url},
+      {"CLOUDFLARE_STREAM_ORIGIN", :cloudflare_stream_origin}
     ],
     value = System.get_env(env_name),
     value not in [nil, ""] do
@@ -71,18 +72,19 @@ for {env_name, config_key} <- [
 end
 
 # config/dev.exs defaults to the Demo media provider so the app runs
-# without any Mux account at all. Once real credentials show up in `.env`,
+# without any Cloudflare account. Once real credentials show up in `.env`,
 # switch back to the genuine adapter so video upload/playback can actually
 # be exercised locally — and default the upload CORS origin to this app's
-# dev port instead of Mux.ex's built-in :4000 default, which doesn't match
+# dev port instead of the adapter's :4000 default, which doesn't match
 # config/dev.exs's :4590.
 if config_env() == :dev do
-  if System.get_env("MUX_TOKEN_ID") in [nil, ""] do
+  if System.get_env("CLOUDFLARE_STREAM_API_TOKEN") in [nil, ""] do
     config :wasomi, media_provider: Wasomi.Media.Demo
   else
     config :wasomi,
-      media_provider: Wasomi.Media.Mux,
-      mux_cors_origin: System.get_env("MUX_CORS_ORIGIN") || "http://localhost:4590"
+      media_provider: Wasomi.Media.Cloudflare,
+      cloudflare_stream_origin:
+        System.get_env("CLOUDFLARE_STREAM_ORIGIN") || "http://localhost:4590"
   end
 end
 
@@ -175,19 +177,22 @@ if config_env() == :prod do
     paystack_callback_url:
       System.get_env("PAYSTACK_CALLBACK_URL") ||
         "https://#{host}/payments/paystack/callback",
-    mux_token_id:
-      System.get_env("MUX_TOKEN_ID") ||
-        raise("environment variable MUX_TOKEN_ID is missing"),
-    mux_token_secret:
-      System.get_env("MUX_TOKEN_SECRET") ||
-        raise("environment variable MUX_TOKEN_SECRET is missing"),
-    mux_signing_key_id:
-      System.get_env("MUX_SIGNING_KEY_ID") ||
-        raise("environment variable MUX_SIGNING_KEY_ID is missing"),
-    mux_signing_private_key:
-      System.get_env("MUX_SIGNING_PRIVATE_KEY") ||
-        raise("environment variable MUX_SIGNING_PRIVATE_KEY is missing"),
-    mux_cors_origin: System.get_env("MUX_CORS_ORIGIN") || "https://#{host}",
+    cloudflare_account_id:
+      System.get_env("CLOUDFLARE_ACCOUNT_ID") ||
+        raise("environment variable CLOUDFLARE_ACCOUNT_ID is missing"),
+    cloudflare_stream_api_token:
+      System.get_env("CLOUDFLARE_STREAM_API_TOKEN") ||
+        raise("environment variable CLOUDFLARE_STREAM_API_TOKEN is missing"),
+    cloudflare_stream_customer_code:
+      System.get_env("CLOUDFLARE_STREAM_CUSTOMER_CODE") ||
+        raise("environment variable CLOUDFLARE_STREAM_CUSTOMER_CODE is missing"),
+    cloudflare_stream_signing_key_id:
+      System.get_env("CLOUDFLARE_STREAM_SIGNING_KEY_ID") ||
+        raise("environment variable CLOUDFLARE_STREAM_SIGNING_KEY_ID is missing"),
+    cloudflare_stream_signing_private_key:
+      System.get_env("CLOUDFLARE_STREAM_SIGNING_PRIVATE_KEY") ||
+        raise("environment variable CLOUDFLARE_STREAM_SIGNING_PRIVATE_KEY is missing"),
+    cloudflare_stream_origin: System.get_env("CLOUDFLARE_STREAM_ORIGIN") || "https://#{host}",
     r2_bucket:
       System.get_env("R2_BUCKET") ||
         raise("environment variable R2_BUCKET is missing"),

@@ -7,9 +7,18 @@ defmodule Wasomi.Application do
 
   require Logger
 
-  @chrome_candidates ~w(chromium-browser chromium google-chrome chrome
-                        /usr/bin/chromium-browser /usr/bin/chromium /usr/bin/google-chrome
-                        /opt/google/chrome/chrome)
+  @chrome_candidates [
+    "chromium-browser",
+    "chromium",
+    "google-chrome",
+    "chrome",
+    "/usr/bin/chromium-browser",
+    "/usr/bin/chromium",
+    "/usr/bin/google-chrome",
+    "/opt/google/chrome/chrome",
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium"
+  ]
 
   @impl true
   def start(_type, _args) do
@@ -48,14 +57,19 @@ defmodule Wasomi.Application do
         nil ->
           Logger.warning(
             "No Chrome/Chromium executable found; skipping ChromicPDF startup. " <>
-              "Certificate PDF rendering will be unavailable until CHROME_EXECUTABLE is set " <>
+              "Certificate PDF and lecture-video slide rendering will be unavailable until " <>
+              "CHROME_EXECUTABLE is set " <>
               "or a browser is installed at one of the standard paths."
           )
 
           nil
 
         executable ->
-          {ChromicPDF, chrome_executable: executable, no_sandbox: no_sandbox?()}
+          options =
+            Application.get_env(:wasomi, :chromic_pdf_options, [])
+            |> Keyword.merge(chrome_executable: executable, no_sandbox: no_sandbox?())
+
+          {ChromicPDF, options}
       end
     end
   end
@@ -63,7 +77,15 @@ defmodule Wasomi.Application do
   defp chrome_executable do
     case System.get_env("CHROME_EXECUTABLE") do
       path when is_binary(path) and path != "" -> path
-      _ -> Enum.find_value(@chrome_candidates, &System.find_executable/1)
+      _ -> Enum.find_value(@chrome_candidates, &resolve_executable/1)
+    end
+  end
+
+  defp resolve_executable(candidate) do
+    if Path.type(candidate) == :absolute do
+      if File.exists?(candidate), do: candidate
+    else
+      System.find_executable(candidate)
     end
   end
 

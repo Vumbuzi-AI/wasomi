@@ -66,7 +66,7 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
       |> Enum.flat_map(& &1.lectures)
       |> Enum.find(&(&1.title == "Intro to Elixir"))
 
-    assert lecture.video_provider == :mux
+    assert lecture.video_provider == :cloudflare
     assert lecture.video_asset_id == "signed-playback-456"
     assert lecture.duration_seconds == 612
   end
@@ -125,7 +125,7 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
         "size" => "not-a-number"
       })
 
-    assert html =~ "Uploading directly to Mux"
+    assert html =~ "Uploading directly to Cloudflare Stream"
     refute html =~ String.duplicate("a", 5000)
   end
 
@@ -145,7 +145,7 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
     render_hook(upload, "create-upload", %{})
     html = render_hook(upload, "upload-failed", %{"status" => 500})
 
-    assert html =~ "The upload to Mux failed (HTTP 500)"
+    assert html =~ "The upload to Cloudflare Stream failed (HTTP 500)"
   end
 
   test "logs and surfaces a friendly message when the Mux adapter call raises", %{conn: conn} do
@@ -233,6 +233,11 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
 
     html = render_click(view, "edit_lecture", %{"id" => to_string(lecture.id)})
 
+    # Editing opens on Basics with every step already unlocked, so the
+    # existing video is one click away rather than a walk through the wizard.
+    assert html =~ "Update the title and description"
+    html = view |> element("button[phx-value-step='video']", "Video") |> render_click()
+
     assert html =~ "https://image.mux.test/existing-playback-id/thumbnail.jpg?token=abc"
     assert html =~ "Current video"
     refute html =~ ~s(name="lecture[video_asset_id]")
@@ -280,11 +285,7 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
 
     html = view |> element("#lecture-resources-form") |> render_submit()
 
-    # Lands on the video-overview offer next (no video was added) — and
-    # since the resource was just persisted by the Resources step's own
-    # save, the generator can already see it (not stuck behind "save this
-    # lecture with a resource first").
-    assert html =~ "Generate video overview"
+    assert html =~ "Common learner questions"
 
     lecture =
       Catalog.get_course_with_outline!(course.id).modules
@@ -366,11 +367,6 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
     render_upload(resource, "Slides.pdf")
     view |> element("#lecture-resources-form") |> render_submit()
 
-    assert render(view) =~ "Generate video overview"
-
-    # Continue past the video-overview offer without generating anything.
-    view |> element("button", "Continue") |> render_click()
-
     assert has_element?(view, "#lecture-questions-form")
 
     html = view |> element("button", "Skip for now") |> render_click()
@@ -414,7 +410,6 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
 
     render_upload(resource, "Slides.pdf")
     view |> element("#lecture-resources-form") |> render_submit()
-    view |> element("button", "Continue") |> render_click()
 
     assert has_element?(view, "#lecture-questions-form")
 
@@ -491,170 +486,6 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
     assert lecture.video_asset_id == "signed-playback-456"
   end
 
-  test "triggering a video overview generation shows a pending state and hides the button", %{
-    conn: conn,
-    admin: admin
-  } do
-    lecture = lecture_fixture()
-    lecture_resource_fixture(lecture_id: lecture.id, kind: :document)
-
-    expect(Wasomi.MediaProviderMock, :thumbnail_url, fn %Catalog.Lecture{}, _user ->
-      {:ok, "https://image.mux.test/thumbnail.jpg?token=abc"}
-    end)
-
-    course_module = Catalog.get_course_module!(lecture.module_id)
-    course = Catalog.get_course_with_outline!(course_module.course_id)
-
-    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
-    html = render_click(view, "edit_lecture", %{"id" => to_string(lecture.id)})
-
-    assert html =~ "Generate video overview"
-
-    html =
-      view
-      |> element("#lecture-overview-generation button", "Generate video overview")
-      |> render_click()
-
-    assert html =~ "Generating"
-    refute html =~ "Generate video overview"
-
-    [generation] = Catalog.list_overview_generations_for_lecture(lecture)
-    assert generation.status == :pending
-    assert generation.requested_by_id == admin.id
-  end
-
-  test "cancelling a stuck generation marks it failed and restores the generate button", %{
-    conn: conn
-  } do
-    lecture = lecture_fixture()
-    lecture_resource_fixture(lecture_id: lecture.id, kind: :document)
-
-    expect(Wasomi.MediaProviderMock, :thumbnail_url, fn %Catalog.Lecture{}, _user ->
-      {:ok, "https://image.mux.test/thumbnail.jpg?token=abc"}
-    end)
-
-    course_module = Catalog.get_course_module!(lecture.module_id)
-    course = Catalog.get_course_with_outline!(course_module.course_id)
-
-    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
-    render_click(view, "edit_lecture", %{"id" => to_string(lecture.id)})
-
-    view
-    |> element("#lecture-overview-generation button", "Generate video overview")
-    |> render_click()
-
-    html =
-      view
-      |> element("#lecture-overview-generation button", "Cancel")
-      |> render_click()
-
-    assert html =~ "Generation failed: Cancelled by admin."
-    assert html =~ "Generate again"
-
-    [generation] = Catalog.list_overview_generations_for_lecture(lecture)
-    assert generation.status == :failed
-  end
-
-  test "a lecture with no document/link resources shows a hint instead of the generate button",
-       %{conn: conn} do
-    lecture = lecture_fixture()
-
-    expect(Wasomi.MediaProviderMock, :thumbnail_url, fn %Catalog.Lecture{}, _user ->
-      {:ok, "https://image.mux.test/thumbnail.jpg?token=abc"}
-    end)
-
-    course_module = Catalog.get_course_module!(lecture.module_id)
-    course = Catalog.get_course_with_outline!(course_module.course_id)
-
-    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
-    html = render_click(view, "edit_lecture", %{"id" => to_string(lecture.id)})
-
-    assert html =~ "Save this lecture with at least one document or link resource first."
-    refute html =~ "Generate video overview"
-  end
-
-  test "the video-overview status updates live once the background job finishes", %{
-    conn: conn,
-    admin: admin
-  } do
-    lecture = lecture_fixture()
-    lecture_resource_fixture(lecture_id: lecture.id, kind: :document)
-    {:ok, generation} = Catalog.create_overview_generation(lecture, admin)
-
-    expect(Wasomi.MediaProviderMock, :thumbnail_url, fn %Catalog.Lecture{}, _user ->
-      {:ok, "https://image.mux.test/thumbnail.jpg?token=abc"}
-    end)
-
-    stub(Wasomi.CatalogStorageMock, :download_url, fn key ->
-      {:ok, "https://cdn.example.com/#{key}"}
-    end)
-
-    course_module = Catalog.get_course_module!(lecture.module_id)
-    course = Catalog.get_course_with_outline!(course_module.course_id)
-
-    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
-    render_click(view, "edit_lecture", %{"id" => to_string(lecture.id)})
-
-    {:ok, _updated} =
-      Catalog.mark_overview_generation_ready(generation, %{
-        scene_count: 2,
-        video_storage_key: "lecture-overviews/#{generation.id}.mp4"
-      })
-
-    # No manual "Refresh status" click — the PubSub broadcast from
-    # mark_overview_generation_ready/2 should push this in automatically.
-    html = render(view)
-
-    assert html =~ "https://cdn.example.com/lecture-overviews/#{generation.id}.mp4"
-    assert html =~ "Generate again"
-  end
-
-  test "using a ready video overview as the lecture video shows attaching, then attached, live",
-       %{conn: conn, admin: admin} do
-    lecture = lecture_fixture()
-    lecture_resource_fixture(lecture_id: lecture.id, kind: :document)
-    {:ok, generation} = Catalog.create_overview_generation(lecture, admin)
-
-    {:ok, generation} =
-      Catalog.mark_overview_generation_ready(generation, %{
-        scene_count: 2,
-        video_storage_key: "lecture-overviews/#{generation.id}.mp4"
-      })
-
-    expect(Wasomi.MediaProviderMock, :thumbnail_url, fn %Catalog.Lecture{}, _user ->
-      {:ok, "https://image.mux.test/thumbnail.jpg?token=abc"}
-    end)
-
-    stub(Wasomi.CatalogStorageMock, :download_url, fn key ->
-      {:ok, "https://cdn.example.com/#{key}"}
-    end)
-
-    course_module = Catalog.get_course_module!(lecture.module_id)
-    course = Catalog.get_course_with_outline!(course_module.course_id)
-
-    {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
-    html = render_click(view, "edit_lecture", %{"id" => to_string(lecture.id)})
-    assert html =~ "Use this as the lecture video"
-
-    html =
-      view
-      |> element("#lecture-overview-generation button", "Use this as the lecture video")
-      |> render_click()
-
-    assert html =~ "Attaching to the lecture"
-    refute html =~ "Use this as the lecture video"
-    assert Catalog.get_overview_generation!(generation.id).attach_status == :attaching
-
-    # No manual "Refresh status" click — mirrors how generation status
-    # pushes live (see the test above); the attach worker broadcasts the
-    # same way once it finishes.
-    Catalog.mark_overview_video_attached(Catalog.get_overview_generation!(generation.id))
-    html = render(view)
-
-    assert html =~ "This video is now the lecture"
-    refute html =~ "Attaching to the lecture"
-  end
-
   test "surfaces an error and leaves the lecture unsaved when Mux cannot start the upload", %{
     conn: conn
   } do
@@ -678,6 +509,7 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
     {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
 
     render_click(view, "edit_lecture", %{"id" => to_string(lecture.id)})
+    view |> element("button[phx-value-step='video']", "Video") |> render_click()
 
     # Editing an existing video shows its thumbnail directly, with no raw
     # Mux ID ever exposed — the dropzone is always available to replace it.

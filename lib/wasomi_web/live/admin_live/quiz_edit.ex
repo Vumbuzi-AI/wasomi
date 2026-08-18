@@ -21,6 +21,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
      |> assign(:course_slug, course_slug)
      |> assign(:publish_errors, [])
      |> assign(:new_question_form, nil)
+     |> assign(:new_question_type, nil)
      |> assign(:editing_title?, false)
      |> assign(:quiz_form, to_form(Assessments.change_quiz(quiz)))
      |> assign(:generations, Assessments.list_generations_for_quiz(quiz))
@@ -207,11 +208,17 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
         question_options: blank_options(type)
       })
 
-    {:noreply, assign(socket, :new_question_form, to_form(changeset))}
+    {:noreply,
+     socket
+     |> assign(:new_question_form, to_form(changeset))
+     |> assign(:new_question_type, type)}
   end
 
   def handle_event("cancel_new_question", _params, socket) do
-    {:noreply, assign(socket, :new_question_form, nil)}
+    {:noreply,
+     socket
+     |> assign(:new_question_form, nil)
+     |> assign(:new_question_type, nil)}
   end
 
   def handle_event("save_new_question", %{"question" => params} = full, socket) do
@@ -227,6 +234,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
          socket
          |> put_flash(:info, "Question added.")
          |> assign(:new_question_form, nil)
+         |> assign(:new_question_type, nil)
          |> assign(:publish_errors, [])
          |> reload_quiz()}
 
@@ -822,7 +830,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
               </p>
             </div>
 
-            <div :if={is_nil(@new_question_form)} class="flex flex-wrap items-center gap-3">
+            <div class="flex flex-wrap items-center gap-3">
               <button
                 :if={draft_questions(@quiz) != []}
                 type="button"
@@ -840,26 +848,23 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
                 Delete all drafts
               </button>
 
-              <div class="inline-flex rounded-full bg-primary p-0.5 shadow-sm">
-                <button
-                  id="add-question"
-                  type="button"
-                  phx-click="new_question"
-                  class="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2 text-sm font-semibold text-white transition hover:bg-ink active:scale-[0.96]"
-                >
-                  <.icon name="hero-plus" class="h-4 w-4" /> Add question
-                </button>
-                <button
-                  id="add-true-false-question"
-                  type="button"
-                  phx-click="new_question"
-                  phx-value-type="true_false"
-                  title="Add True/False question"
-                  class="inline-flex items-center rounded-full px-3 py-2 text-xs font-medium text-white/90 transition hover:bg-ink hover:text-white active:scale-[0.96]"
-                >
-                  T/F
-                </button>
-              </div>
+              <button
+                id="add-true-false-question"
+                type="button"
+                phx-click="new_question"
+                phx-value-type="true_false"
+                class="inline-flex items-center gap-2 rounded-full border border-black/10 px-4 py-2 text-sm font-medium text-ink transition hover:border-primary hover:text-primary active:scale-[0.96]"
+              >
+                <.icon name="hero-plus" class="h-4 w-4" /> Add True/False question
+              </button>
+              <button
+                id="add-question"
+                type="button"
+                phx-click="new_question"
+                class="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-ink active:scale-[0.96]"
+              >
+                <.icon name="hero-plus" class="h-4 w-4" /> Add multiple-choice question
+              </button>
             </div>
           </div>
 
@@ -926,7 +931,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
           </div>
 
           <section
-            :if={@quiz.questions == [] && is_nil(@new_question_form)}
+            :if={@quiz.questions == []}
             id="empty-quiz"
             class="rounded-3xl border border-dashed border-black/10 bg-white p-10 text-center"
           >
@@ -944,17 +949,24 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
               </button>
             </div>
           </section>
-
-          <section
-            :if={@new_question_form}
-            id="new-question"
-            class="rounded-3xl border border-primary/20 bg-white p-6 shadow-sm lg:p-8"
-          >
-            <h2 class="mb-5 font-semibold text-ink">New question</h2>
-            <.question_form form={@new_question_form} question={nil} />
-          </section>
         </section>
       </div>
+
+      <.modal
+        :if={@new_question_form}
+        id="new-question-modal"
+        show
+        dismissable={false}
+        max_width="max-w-3xl"
+        on_cancel={JS.push("cancel_new_question")}
+      >
+        <h2 id="new-question-modal-title" class="mb-5 text-lg font-semibold text-ink">
+          {if @new_question_type == "true_false",
+            do: "New True/False question",
+            else: "New multiple-choice question"}
+        </h2>
+        <.question_form form={@new_question_form} question={nil} />
+      </.modal>
 
       <.confirm_modal
         :if={@deleting_question_id}

@@ -122,11 +122,7 @@ defmodule WasomiWeb.AdminLive.CourseCertificate do
   def render(assigns) do
     ~H"""
     <.admin_layout active={:courses} current_user={@current_user}>
-      <div
-        class="mx-auto max-w-container space-y-8 px-5 py-10 lg:px-10"
-        id="course-certificate"
-        phx-hook="PdfDownload"
-      >
+      <div class="w-full space-y-5 px-5 py-8 lg:px-8" id="course-certificate" phx-hook="PdfDownload">
         <.link
           navigate={~p"/admin/courses/#{@course.slug}"}
           class="inline-flex items-center gap-1.5 text-sm font-medium text-muted hover:text-primary"

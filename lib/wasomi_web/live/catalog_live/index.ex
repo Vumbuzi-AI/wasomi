@@ -8,7 +8,15 @@ defmodule WasomiWeb.CatalogLive.Index do
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, assign(socket, :page_title, "Courses")}
+    {:ok,
+     socket
+     |> assign(:page_title, "GS1 Courses")
+     |> assign(
+       :meta_description,
+       "Explore Wasomi's practical GS1 courses, compare learning outcomes and choose the right course for your goals."
+     )
+     |> assign(:meta_robots, "index, follow")
+     |> assign(:canonical_url, url(~p"/courses"))}
   end
 
   @impl true

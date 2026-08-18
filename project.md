@@ -66,7 +66,7 @@ option and note what to revisit later — as the brief requests in §6.
 | Email                             | **Swoosh** + transactional provider (Resend / Amazon SES)                 | Swoosh ships with Phoenix; SES is cheap & deliverable from Africa.                                                         |
 | Payments — mobile money           | **M-Pesa Daraja API** (STK Push)                                          | Primary payment rail for the Kenyan audience.                                                                              |
 | Payments — card/regional          | **Paystack**                                                              | Cards + regional methods; we never touch raw card data (PCI offload).                                                      |
-| Video hosting/streaming           | **Mux** or **Cloudflare Stream** (primary), **Bunny Stream** (budget alt) | HLS adaptive streaming + signed/expiring playback tokens. See §8. `FUTURE`: evaluate DRM tiers.                            |
+| Video hosting/streaming           | **Cloudflare Stream**                                                     | HLS adaptive streaming + signed/expiring playback tokens. See §8. `FUTURE`: evaluate DRM tiers.                            |
 | Object storage                    | **Cloudflare R2** (S3-compatible)                                         | Stores generated certificate PDFs & thumbnails. Zero egress fees.                                                          |
 | PDF certificates                  | **ChromicPDF** (Heex → PDF)                                               | Render branded HTML/Tailwind templates to PDF. `FUTURE`/alt: Typst if we want to avoid the Chrome dependency in the image. |
 | Money math                        | **`money` / `ex_money`**                                                  | Integer minor units, currency-aware formatting.                                                                            |
@@ -107,7 +107,7 @@ flowchart TB
 
     Daraja["M-Pesa Daraja"]
     Paystack["Paystack"]
-    Video["Mux / Cloudflare Stream"]
+    Video["Cloudflare Stream"]
     Email["SES / Resend"]
 
     LV <-->|"WebSocket"| Web
@@ -162,7 +162,7 @@ another context's schemas.
 @callback handle_callback(conn_params | signature) :: {:ok, normalized_event} | {:error, term}
 ```
 
-`FUTURE`: adding a new gateway or moving off Mux is implementing one adapter.
+`FUTURE`: adding a new video gateway is implementing one adapter.
 
 ---
 
@@ -326,7 +326,7 @@ The brief requires lectures that are **not downloadable, not shareable, and
 viewable only while logged in**, with "reasonable safeguards appropriate to a
 first-version platform." Our layered approach:
 
-1. **No raw file URLs.** Video is served as **HLS** from Mux/Cloudflare Stream,
+1. **No raw file URLs.** Video is served as **HLS** from Cloudflare Stream,
    never as a downloadable MP4.
 2. **Signed, short-lived, viewer-bound playback tokens**, minted server-side
    only after the enrollment check (§7.4). Tokens expire quickly and can't be
@@ -374,7 +374,7 @@ Idempotency uses Oban `unique` options + DB unique constraints as the backstop.
 
 - CRUD courses, modules, lectures; reorder via drag-and-drop.
 - Video upload via **provider direct-upload** (admin uploads straight to
-  Mux/Cloudflare; we store the returned `asset_id`).
+  Cloudflare Stream; we store the returned `asset_id`).
 - Learner & enrollment management; view payments/receipts; manual
   "verify/reconcile payment".
 - `FUTURE`/accelerator: **Backpex** can scaffold internal CRUD quickly if we
@@ -477,8 +477,8 @@ payment/video providers** (behaviours), and clean domain events. Likely v2:
 **Assumptions made (please confirm):**
 
 1. Primary currency is **KES**; pricing is per-course, one-time.
-2. **Mux or Cloudflare Stream** is acceptable for video (Bunny as budget
-   option); a hosting decision is needed before Phase 3.
+2. **Cloudflare Stream** is the video provider; Bunny remains a possible future
+   budget alternative.
 3. Hosting on **Fly.io** is acceptable.
 4. Certificates are issued **per module and per full course** (both), as the
    brief states.

@@ -2,7 +2,7 @@ defmodule Wasomi.Media.Demo do
   @moduledoc """
   Development media adapter that streams ready-made public HLS samples.
 
-  Lets the course player work end-to-end locally without Mux credentials.
+  Lets the course player work end-to-end locally without Cloudflare credentials.
   `Lecture.video_asset_id` is expected to hold a full HLS (`.m3u8`) URL, which
   `Wasomi.Media` streams directly without a signed token. Not for production.
   """
@@ -26,11 +26,4 @@ defmodule Wasomi.Media.Demo do
 
   @impl true
   def download_url(%Lecture{}), do: {:error, :demo_provider_does_not_support_downloads}
-
-  @impl true
-  def create_asset_from_url(%Lecture{}, _url, _opts),
-    do: {:error, :demo_provider_does_not_support_uploads}
-
-  @impl true
-  def asset_status(_asset_id), do: {:error, :demo_provider_does_not_support_uploads}
 end

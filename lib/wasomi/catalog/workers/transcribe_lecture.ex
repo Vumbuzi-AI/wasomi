@@ -1,6 +1,6 @@
 defmodule Wasomi.Catalog.Workers.TranscribeLecture do
   @moduledoc """
-  Transcribes a lecture's primary video once its Mux asset is ready, so a
+  Transcribes a lecture's primary video once its Stream asset is ready, so a
   slow speech-to-text call never blocks the admin's save request.
 
   The transcript only flips to `:failed` on the job's last Oban attempt —

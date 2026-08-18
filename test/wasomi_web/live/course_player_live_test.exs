@@ -37,7 +37,7 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
 
     assert has_element?(
              view,
-             "#protected-player-#{lecture.id}[phx-hook='ProtectedVideo'][data-playback-url]"
+             "#protected-player-#{lecture.id}[phx-hook='ProtectedVideo'][data-playback-url][data-preview='false']"
            )
 
     assert has_element?(view, "#course-progress-percent", "0%")
@@ -115,6 +115,37 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
 
     assert html =~ question.question
     assert has_element?(view, "#lecture-faq form[phx-submit='submit-lecture-question']")
+  end
+
+  test "PDF resources are displayed inline for enrolled learners", %{conn: conn, user: user} do
+    course = course_fixture(status: :published)
+    module = course_module_fixture(course_id: course.id)
+    lecture = lecture_fixture(module_id: module.id)
+
+    resource =
+      lecture_resource_fixture(
+        lecture_id: lecture.id,
+        kind: :document,
+        name: "Firewall assignment.pdf",
+        content_type: "application/pdf"
+      )
+
+    {:ok, pending} = Enrollments.create_pending_enrollment(user, course)
+    {:ok, _active} = Enrollments.activate_enrollment(pending)
+
+    {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
+    resource_path = ~p"/learn/resources/#{resource.id}/download"
+
+    assert has_element?(
+             view,
+             "#lesson-pdfs #pdf-resource-#{resource.id} iframe[src='#{resource_path}']"
+           )
+
+    assert has_element?(
+             view,
+             "#pdf-resource-#{resource.id} a[href='#{resource_path}']",
+             "Open PDF"
+           )
   end
 
   test "a lecture with no resources or FAQ shows neither panel", %{conn: conn, user: user} do
@@ -412,6 +443,74 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
     refute html =~ "Admin Preview Result"
   end
 
+  describe "capture protection" do
+    setup %{user: user} do
+      course = course_fixture(status: :published)
+      module = course_module_fixture(course_id: course.id)
+      lecture = lecture_fixture(module_id: module.id)
+      {:ok, pending} = Enrollments.create_pending_enrollment(user, course)
+      {:ok, _active} = Enrollments.activate_enrollment(pending)
+
+      %{course: course, lecture: lecture}
+    end
+
+    test "the workspace is watermarked with the viewer's identity and guarded client-side", %{
+      conn: conn,
+      user: user,
+      course: course,
+      lecture: lecture
+    } do
+      {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
+      stamp = "User ##{user.id}"
+
+      # The page-wide guard (shortcut blocking + tiled watermark overlay) and
+      # the in-frame video stamp both need the identity, so both carry it: a
+      # capture cropped to just the video is still attributable.
+      assert has_element?(
+               view,
+               "#course-player[phx-hook='CaptureGuard'][data-watermark='#{stamp}']"
+             )
+
+      assert has_element?(
+               view,
+               "#protected-player-#{lecture.id}[data-watermark='#{stamp}']"
+             )
+
+      assert has_element?(view, "[data-role='watermark']", stamp)
+      refute has_element?(view, "[data-watermark*='#{user.email}']")
+    end
+
+    test "a reported capture attempt is logged and never breaks playback", %{
+      conn: conn,
+      user: user,
+      course: course
+    } do
+      {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert render_hook(view, "capture-attempt", %{"kind" => "printscreen"})
+        end)
+
+      assert log =~ "capture attempt: kind=printscreen user_id=#{user.id}"
+      assert log =~ "course=#{course.slug}"
+    end
+
+    test "an unrecognised capture kind is ignored rather than logged", %{
+      conn: conn,
+      course: course
+    } do
+      {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert render_hook(view, "capture-attempt", %{"kind" => "not-a-real-kind"})
+        end)
+
+      refute log =~ "capture attempt"
+    end
+  end
+
   describe "section nav and the Module quiz panel" do
     test "the nav renders Lessons and Module quiz tabs, active by default on Lessons", %{
       conn: conn,
@@ -432,7 +531,7 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
       assert has_element?(view, "nav button.bg-white.text-primary", "Lessons")
     end
 
-    test "the nav links Flashcards/Extra practice/Timed quiz to the study hub, pre-scoped to the current module",
+    test "the study tools stay in the course workspace and Flashcards opens at the scope picker",
          %{conn: conn, user: user} do
       course = course_fixture(status: :published)
       module = course_module_fixture(course_id: course.id, position: 1)
@@ -443,18 +542,33 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
       {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
       view |> element("button[data-lecture-id='#{lecture.id}']") |> render_click()
 
-      for {label, mode} <- [
-            {"Flashcards", "flashcards"},
-            {"Extra practice", "practice"},
-            {"Timed quiz", "timed_quiz"}
-          ] do
-        assert has_element?(
-                 view,
-                 "nav a[href*='course=#{course.slug}'][href*='module=#{module.id}']" <>
-                   "[href*='scope=module'][href*='mode=#{mode}']",
-                 label
-               )
-      end
+      view |> element("button[phx-value-tool='flashcards']") |> render_click()
+
+      assert has_element?(view, "#embedded-study-tool-flashcards")
+    end
+
+    test "Smart Test stays in the course workspace and opens at the scope picker", %{
+      conn: conn,
+      user: user
+    } do
+      course = course_fixture(status: :published)
+      module = course_module_fixture(course_id: course.id, position: 1)
+      lecture = lecture_fixture(module_id: module.id, position: 1)
+      {:ok, pending} = Enrollments.create_pending_enrollment(user, course)
+      {:ok, _active} = Enrollments.activate_enrollment(pending)
+
+      {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
+      view |> element("button[data-lecture-id='#{lecture.id}']") |> render_click()
+      view |> element("button[phx-value-tool='timed_quiz']") |> render_click()
+
+      assert has_element?(view, "#embedded-study-tool-timed_quiz")
+      refute has_element?(view, "iframe")
+
+      smart_test = find_live_child(view, "embedded-study-tool-timed_quiz")
+      assert has_element?(smart_test, "h2", "Study the whole module, or one lesson?")
+
+      smart_test |> element("button[phx-value-scope='module']") |> render_click()
+      assert has_element?(smart_test, "button", "Create test")
     end
 
     test "the nav falls back to the study hub's own picker when no lecture is selected", %{
@@ -468,11 +582,9 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
 
       {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
 
-      assert has_element?(
-               view,
-               "nav a[href='/learn/study?course=#{course.slug}']",
-               "Flashcards"
-             )
+      view |> element("button[phx-value-tool='flashcards']") |> render_click()
+
+      assert has_element?(view, "#embedded-study-tool-flashcards")
     end
 
     test "an unknown section value is ignored rather than crashing the view", %{
@@ -605,6 +717,122 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
     end
   end
 
+  describe "lesson quiz" do
+    setup %{user: user} do
+      course = course_fixture(status: :published)
+      module = course_module_fixture(course_id: course.id, position: 1)
+
+      first =
+        lecture_fixture(
+          module_id: module.id,
+          position: 1,
+          duration_seconds: nil,
+          video_asset_id: nil,
+          video_provider: nil
+        )
+
+      second = lecture_fixture(module_id: module.id, position: 2)
+      {:ok, pending} = Enrollments.create_pending_enrollment(user, course)
+      {:ok, _active} = Enrollments.activate_enrollment(pending)
+
+      %{course: course, first: first, second: second}
+    end
+
+    test "a lecture with no quiz renders no lesson-quiz panel", %{conn: conn, course: course} do
+      {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
+
+      refute has_element?(view, "#lesson-quiz")
+    end
+
+    test "a quiz with only draft questions is not shown to the learner", %{
+      conn: conn,
+      course: course,
+      first: first
+    } do
+      lecture_quiz_with_question(first, :draft)
+
+      {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
+
+      refute has_element?(view, "#lesson-quiz")
+    end
+
+    test "published questions render inline, and passing unlocks the next lesson", %{
+      conn: conn,
+      user: user,
+      course: course,
+      first: first,
+      second: second
+    } do
+      {quiz, question} = lecture_quiz_with_question(first, :published)
+      correct = Enum.find(question.question_options, & &1.correct)
+
+      {:ok, view, html} = live(conn, ~p"/learn/courses/#{course.slug}")
+
+      assert has_element?(view, "#lesson-quiz")
+      assert html =~ question.prompt
+      assert html =~ correct.label
+
+      # The outline flags the lesson as owing a quiz.
+      assert has_element?(view, "button[data-lecture-id='#{first.id}']", "Quiz to pass")
+
+      view |> element("#mark-lecture-complete") |> render_click()
+
+      # Completing the lecture is no longer enough on its own.
+      assert has_element?(view, "button[data-lecture-id='#{second.id}'][data-locked='true']")
+
+      view
+      |> element("#lesson-quiz input[value='#{correct.id}']")
+      |> render_click()
+
+      view |> element("#lesson-quiz form") |> render_submit()
+
+      assert Wasomi.Assessments.passed_lecture_quiz?(user, quiz)
+      assert render(view) =~ "You scored 100%"
+      assert has_element?(view, "button[data-lecture-id='#{second.id}'][data-locked='false']")
+      assert has_element?(view, "button[data-lecture-id='#{first.id}']", "Quiz passed")
+    end
+
+    test "failing the quiz keeps the next lesson locked and offers a retake", %{
+      conn: conn,
+      course: course,
+      first: first,
+      second: second
+    } do
+      {_quiz, question} = lecture_quiz_with_question(first, :published)
+      wrong = Enum.find(question.question_options, &(not &1.correct))
+
+      {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
+
+      view |> element("#mark-lecture-complete") |> render_click()
+      view |> element("#lesson-quiz input[value='#{wrong.id}']") |> render_click()
+      view |> element("#lesson-quiz form") |> render_submit()
+
+      assert render(view) =~ "You scored 0%"
+      assert has_element?(view, "button[data-lecture-id='#{second.id}'][data-locked='true']")
+
+      view |> element("#lesson-quiz button", "Retake quiz") |> render_click()
+
+      assert has_element?(view, "#lesson-quiz form")
+    end
+
+    defp lecture_quiz_with_question(lecture, status) do
+      quiz = Wasomi.AssessmentsFixtures.lecture_quiz_fixture(lecture: lecture)
+
+      {:ok, question} =
+        Wasomi.Assessments.create_lecture_quiz_question(quiz, %{
+          prompt: "What does this lesson cover?",
+          status: status,
+          position: 1,
+          question_options: [
+            %{label: "The right answer", correct: true, position: 1},
+            %{label: "The wrong answer", correct: false, position: 2}
+          ]
+        })
+
+      {quiz, Wasomi.Repo.preload(question, :question_options)}
+    end
+  end
+
   describe "admin preview mode" do
     defp admin_fixture(attrs \\ %{}) do
       user = Wasomi.AccountsFixtures.user_fixture(attrs)
@@ -632,6 +860,21 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
       assert html =~ "Draft lecture"
       assert html =~ "Admin Preview Mode"
       assert has_element?(view, "#admin-preview-banner")
+      assert has_element?(view, "[phx-hook='ProtectedVideo'][data-preview='true']")
+    end
+
+    test "an admin can open preview on a requested lecture" do
+      conn = build_conn() |> log_in_user(admin_fixture())
+      course = course_fixture(status: :draft)
+      module = course_module_fixture(course_id: course.id, position: 1)
+      first = lecture_fixture(module_id: module.id, position: 1, title: "First lecture")
+      second = lecture_fixture(module_id: module.id, position: 2, title: "Selected lecture")
+
+      {:ok, view, _html} =
+        live(conn, ~p"/admin/courses/#{course.slug}/preview?#{%{lecture_id: second.id}}")
+
+      assert has_element?(view, "#protected-player-#{second.id}")
+      refute has_element?(view, "#protected-player-#{first.id}")
     end
 
     test "marking a lecture complete in preview mode does not persist progress" do

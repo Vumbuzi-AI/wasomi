@@ -7,7 +7,102 @@
 /* This file is for your main application CSS */
 
 body {
-	font-family: "Outfit", "Avenir Next", "Segoe UI", sans-serif;
+  font-family: "Outfit", "Avenir Next", "Segoe UI", sans-serif;
+}
+
+/* Course content protection. The JS side (Hooks.CaptureGuard in app.js) handles
+   shortcuts and watermarking, and marks its own root .capture-guarded on mount;
+   these rules cover the paths CSS owns.
+
+   Print is the one capture route the platform hands us a real hook for: the
+   browser tells us before it rasterises, so the page is replaced with a notice
+   instead of a printable — and PDF "printers" get the same notice. Scoped to
+   pages that actually host guarded content, so printing an admin report (see
+   .analytics-page below) is untouched. */
+@media print {
+  body:has(.capture-guarded) > * {
+    display: none !important;
+  }
+
+  body:has(.capture-guarded)::after {
+    content: "Course content cannot be printed or saved as PDF.";
+    display: block;
+    padding: 48px;
+    font-family: "Outfit", sans-serif;
+    font-size: 16px;
+  }
+}
+
+/* Selection is blocked with the pointer too, not only via the copy handler, so
+   dragging across the transcript gives no highlight to right-click on. Form
+   fields stay selectable — learners type answers into the practice questions. */
+.capture-guarded {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.capture-guarded input,
+.capture-guarded textarea,
+.capture-guarded [contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Safari/iOS ignore user-select for the long-press "Save Image" sheet. */
+.capture-guarded img,
+.capture-guarded video {
+  -webkit-touch-callout: none;
+}
+
+/* Analytics is intentionally roomier than the other admin tools: it is a
+   report surface designed to remain legible when projected or exported. */
+.analytics-page {
+  --analytics-shadow: 0 12px 30px rgb(1 44 106 / 0.07);
+}
+
+.analytics-card,
+.analytics-summary > div {
+  border: 0;
+  border-radius: 1.5rem;
+  background: #fff;
+  box-shadow: var(--analytics-shadow);
+}
+
+.analytics-summary > div {
+  min-height: 9.5rem;
+  padding: 1.75rem 1.5rem;
+}
+
+.analytics-summary > div > div > p {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #404040;
+}
+
+.analytics-summary > div > div > span {
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 9999px;
+  border-color: #f97316;
+  background: #fff;
+}
+
+.analytics-summary > div > p:nth-of-type(1) {
+  margin-top: 1rem;
+  font-size: 2.25rem;
+  line-height: 1;
+}
+
+.analytics-summary > div > p:nth-of-type(2) {
+  margin-top: 0.75rem;
+  font-size: 0.95rem;
+  color: #404040;
+}
+
+@media (min-width: 1280px) {
+  .analytics-summary > div:nth-child(3) > p:nth-of-type(1) {
+    font-size: 2rem;
+  }
 }
 
 /* One-shot appearance for content that arrives asynchronously (e.g. a
@@ -99,7 +194,7 @@ body {
 :root {
   --cal-bg-popover: #ffffff;
   --cal-border: #e5e7eb;
-  --cal-text-main: #0a0a0a;
+  --cal-text-main: #012c6a;
   --cal-text-muted: #737373;
   --cal-text-disabled: #d4d4d4;
   --cal-hover-bg: #f5f5f5;
@@ -220,4 +315,3 @@ body {
   gap: 8px;
   padding: 2px;
 }
-

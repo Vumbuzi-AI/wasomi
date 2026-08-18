@@ -10,6 +10,13 @@ defmodule Wasomi.Catalog.Analytics do
   Every function accepts the same `opts`:
 
     * `:course_id` - scope to a single course (default: every course)
+    * `:user_id` - scope to a single learner (default: every learner). Where
+      a function's denominator is "eligible/active learners"
+      (`module_completion_rates/1`), this narrows that denominator down to
+      just this one user instead of merely filtering the numerator, so a
+      single-student view still reads as a percentage rather than an
+      always-100%-or-0% artifact of comparing one user's activity against
+      the whole course's enrollment count.
     * `:from` / `:to` - a `Date` range applied to the *activity* being
       measured (lecture completion, quiz submission, or payment date).
       This does not affect who counts as an eligible learner for
@@ -37,6 +44,7 @@ defmodule Wasomi.Catalog.Analytics do
   """
   def module_completion_rates(opts \\ []) do
     course_id = Keyword.get(opts, :course_id)
+    user_id = Keyword.get(opts, :user_id)
     {from, to} = date_bounds(opts)
 
     modules =
@@ -60,6 +68,7 @@ defmodule Wasomi.Catalog.Analytics do
       |> join(:inner, [p, l], m in CourseModule, on: m.id == l.module_id)
       |> where([p], p.status == :completed)
       |> filter_module_course(course_id, m_binding: 2)
+      |> filter_user(user_id)
       |> filter_range(:completed_at, from, to)
       |> group_by([p, l, m], [m.id, p.user_id])
       |> select([p, l, m], {m.id, p.user_id, count(p.id)})
@@ -72,7 +81,10 @@ defmodule Wasomi.Catalog.Analytics do
         end
       end)
 
-    active_by_course = Enrollments.count_active_by_course()
+    active_by_course =
+      if user_id,
+        do: Enrollments.count_active_by_course_for_user(user_id),
+        else: Enrollments.count_active_by_course()
 
     modules
     |> Enum.filter(&(Map.get(lecture_counts, &1.id, 0) > 0))
@@ -98,12 +110,14 @@ defmodule Wasomi.Catalog.Analytics do
   """
   def average_quiz_scores(opts \\ []) do
     course_id = Keyword.get(opts, :course_id)
+    user_id = Keyword.get(opts, :user_id)
     {from, to} = date_bounds(opts)
 
     QuizSubmission
     |> join(:inner, [s], q in Quiz, on: q.id == s.quiz_id)
     |> join(:inner, [s, q], m in CourseModule, on: m.id == q.module_id)
     |> filter_module_course(course_id, m_binding: 2)
+    |> filter_user(user_id)
     |> filter_range(:submitted_at, from, to)
     |> group_by([s, q, m], [m.id, q.title])
     |> select([s, q, m], %{
@@ -169,11 +183,13 @@ defmodule Wasomi.Catalog.Analytics do
   """
   def monthly_revenue(opts \\ []) do
     course_id = Keyword.get(opts, :course_id)
+    user_id = Keyword.get(opts, :user_id)
     {from, to} = date_bounds(opts)
 
     Payment
     |> where([p], p.status == :successful)
     |> filter_payment_course(course_id)
+    |> filter_user(user_id)
     |> filter_range(:paid_at, from, to)
     |> group_by([p], fragment("date_trunc('month', ?)", p.paid_at))
     |> select([p], %{
@@ -192,11 +208,13 @@ defmodule Wasomi.Catalog.Analytics do
   """
   def revenue_by_course(opts \\ []) do
     course_id = Keyword.get(opts, :course_id)
+    user_id = Keyword.get(opts, :user_id)
     {from, to} = date_bounds(opts)
 
     Payment
     |> where([p], p.status == :successful)
     |> filter_payment_course(course_id)
+    |> filter_user(user_id)
     |> filter_range(:paid_at, from, to)
     |> join(:inner, [p], c in Course, on: c.id == p.course_id)
     |> group_by([p, c], c.id)
@@ -210,12 +228,14 @@ defmodule Wasomi.Catalog.Analytics do
   """
   def quiz_pass_rate_by_course(opts \\ []) do
     course_id = Keyword.get(opts, :course_id)
+    user_id = Keyword.get(opts, :user_id)
     {from, to} = date_bounds(opts)
 
     QuizSubmission
     |> join(:inner, [s], q in Quiz, on: q.id == s.quiz_id)
     |> join(:inner, [s, q], m in CourseModule, on: m.id == q.module_id)
     |> filter_module_course(course_id, m_binding: 2)
+    |> filter_user(user_id)
     |> filter_range(:submitted_at, from, to)
     |> group_by([s, q, m], m.course_id)
     |> select([s, q, m], %{
@@ -245,11 +265,12 @@ defmodule Wasomi.Catalog.Analytics do
   @doc """
   One row per course combining enrollment, completion rate, quiz pass
   rate, and revenue — the org-wide course leaderboard for the analytics
-  overview. Same `:course_id`/`:from`/`:to` scoping as the rest of this
-  module. Sorted richest-first by revenue.
+  overview. Same `:course_id`/`:user_id`/`:from`/`:to` scoping as the rest
+  of this module. Sorted richest-first by revenue.
   """
   def course_scorecards(opts \\ []) do
     course_id = Keyword.get(opts, :course_id)
+    user_id = Keyword.get(opts, :user_id)
 
     courses =
       Course
@@ -260,7 +281,11 @@ defmodule Wasomi.Catalog.Analytics do
     revenue_by_course = opts |> revenue_by_course() |> Map.new(&{&1.course_id, &1.revenue_minor})
     completion_by_course = completion_rate_by_course(opts)
     pass_rate_by_course = quiz_pass_rate_by_course(opts)
-    enrolled_by_course = Enrollments.count_active_by_course()
+
+    enrolled_by_course =
+      if user_id,
+        do: Enrollments.count_active_by_course_for_user(user_id),
+        else: Enrollments.count_active_by_course()
 
     courses
     |> Enum.map(fn course ->
@@ -346,6 +371,13 @@ defmodule Wasomi.Catalog.Analytics do
 
   defp filter_payment_course(query, nil), do: query
   defp filter_payment_course(query, course_id), do: where(query, [p], p.course_id == ^course_id)
+
+  # Same binding-0-is-the-subject-table rule as `filter_range/4` below —
+  # `LectureProgress`, `QuizSubmission`, and `Payment` all have `user_id`
+  # directly on the base table, so naming just that first binding filters
+  # correctly regardless of how many joins come after it.
+  defp filter_user(query, nil), do: query
+  defp filter_user(query, user_id), do: where(query, [x], x.user_id == ^user_id)
 
   # Binding 0 is always the "subject" table (LectureProgress, QuizSubmission,
   # or Payment) across every query this module runs, so a single pair of

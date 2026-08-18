@@ -2,6 +2,7 @@ defmodule WasomiWeb.AdminLive.Payments do
   use WasomiWeb, :live_view
 
   alias Wasomi.{Catalog, Enrollments, Payments}
+  alias Wasomi.Catalog.Analytics
   alias Wasomi.Paginate
   alias Wasomi.Payments.Payment
 
@@ -27,6 +28,8 @@ defmodule WasomiWeb.AdminLive.Payments do
       |> assign(:page_number, Paginate.parse_page(params["page"]))
       |> assign(:sort_by, parse_sort_by(params["sort_by"]))
       |> assign(:sort_dir, parse_sort_dir(params["sort_dir"]))
+      |> assign(:chart_from, parse_date(params["from"]))
+      |> assign(:chart_to, parse_date(params["to"]))
       |> load_tab()
 
     {:noreply, socket}
@@ -40,6 +43,16 @@ defmodule WasomiWeb.AdminLive.Payments do
   defp parse_sort_by(value), do: Enum.find(@sort_values, :date, &(Atom.to_string(&1) == value))
   defp parse_sort_dir("asc"), do: :asc
   defp parse_sort_dir(_), do: :desc
+
+  defp parse_date(nil), do: nil
+  defp parse_date(""), do: nil
+
+  defp parse_date(value) do
+    case Date.from_iso8601(value) do
+      {:ok, date} -> date
+      _ -> nil
+    end
+  end
 
   defp load_tab(%{assigns: %{tab: :payments}} = socket) do
     page =
@@ -82,16 +95,90 @@ defmodule WasomiWeb.AdminLive.Payments do
     gross_revenue_minor = Payments.total_revenue_minor()
     paid_enrolments = Payments.count_payments(:successful)
 
+    chart_opts = [from: socket.assigns.chart_from, to: socket.assigns.chart_to]
+
     socket
     |> assign(:revenue_page, Paginate.paginate_list(rows, socket.assigns.page_number, @page_size))
     |> assign(:gross_revenue_minor, gross_revenue_minor)
     |> assign(:paid_enrolments, paid_enrolments)
     |> assign(:average_payment_minor, average(gross_revenue_minor, paid_enrolments))
     |> assign(:courses_with_revenue, map_size(revenue_by_course))
+    |> assign(
+      :revenue_trend_chart,
+      revenue_trend_chart_config(Analytics.monthly_revenue(chart_opts))
+    )
+    |> assign(
+      :revenue_by_course_chart,
+      revenue_by_course_chart_config(Analytics.revenue_by_course(chart_opts))
+    )
   end
 
   defp average(_total, 0), do: 0
   defp average(total, count), do: div(total, count)
+
+  # Chart.js config maps are JSON-encoded and handed to the `Chart` JS hook
+  # as-is, so every value here must be JSON-safe (no functions) — this is
+  # why axis tick formatting stays plain numbers instead of currency strings.
+  defp revenue_trend_chart_config(rows) do
+    %{
+      type: "line",
+      data: %{
+        labels: Enum.map(rows, &Calendar.strftime(&1.month, "%b %Y")),
+        datasets: [
+          %{
+            label: "Revenue (KES)",
+            data: Enum.map(rows, &((&1.revenue_minor || 0) / 100)),
+            borderColor: "#f97316",
+            backgroundColor: "rgba(249, 115, 22, 0.15)",
+            pointBackgroundColor: "#f97316",
+            pointRadius: 4,
+            pointHoverRadius: 6,
+            borderWidth: 2,
+            tension: 0.35,
+            fill: true
+          }
+        ]
+      },
+      options: %{
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: %{legend: %{display: false}},
+        scales: %{
+          y: %{beginAtZero: true, grid: %{color: "rgba(0, 0, 0, 0.05)"}},
+          x: %{grid: %{display: false}}
+        }
+      }
+    }
+  end
+
+  defp revenue_by_course_chart_config(rows) do
+    top_rows = Enum.take(rows, 8)
+
+    %{
+      type: "bar",
+      data: %{
+        labels: Enum.map(top_rows, & &1.title),
+        datasets: [
+          %{
+            label: "Revenue (KES)",
+            data: Enum.map(top_rows, &((&1.revenue_minor || 0) / 100)),
+            backgroundColor: "#012c6a",
+            borderRadius: 6,
+            maxBarThickness: 48
+          }
+        ]
+      },
+      options: %{
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: %{legend: %{display: false}},
+        scales: %{
+          y: %{beginAtZero: true, grid: %{color: "rgba(0, 0, 0, 0.05)"}},
+          x: %{grid: %{display: false}}
+        }
+      }
+    }
+  end
 
   @impl true
   def handle_event("search", %{"q" => query}, socket) do
@@ -104,6 +191,13 @@ defmodule WasomiWeb.AdminLive.Payments do
            sort_by: socket.assigns.sort_by,
            sort_dir: socket.assigns.sort_dir
          )
+     )}
+  end
+
+  def handle_event("filter_chart_dates", %{"from" => from, "to" => to}, socket) do
+    {:noreply,
+     push_patch(socket,
+       to: payments_path(:revenue, search: socket.assigns.search, from: from, to: to)
      )}
   end
 
@@ -134,9 +228,20 @@ defmodule WasomiWeb.AdminLive.Payments do
     page = Keyword.get(opts, :page, 1)
     sort_by = Keyword.get(opts, :sort_by, :date)
     sort_dir = Keyword.get(opts, :sort_dir, :desc)
+    from = Keyword.get(opts, :from)
+    to = Keyword.get(opts, :to)
 
     params =
-      %{tab: tab, status: status, q: search, page: page, sort_by: sort_by, sort_dir: sort_dir}
+      %{
+        tab: tab,
+        status: status,
+        q: search,
+        page: page,
+        sort_by: sort_by,
+        sort_dir: sort_dir,
+        from: from,
+        to: to
+      }
       |> Enum.reject(fn
         {:tab, :payments} -> true
         {:page, 1} -> true
@@ -152,7 +257,7 @@ defmodule WasomiWeb.AdminLive.Payments do
   def render(assigns) do
     ~H"""
     <.admin_layout active={:payments} current_user={@current_user}>
-      <div class="mx-auto max-w-container space-y-8 px-5 py-10 lg:px-10">
+      <div class="w-full space-y-5 px-5 py-8 lg:px-8">
         <.page_header title="Payments and revenue">
           <:subtitle>Review course revenue and learner payment attempts.</:subtitle>
           <:actions>
@@ -235,6 +340,72 @@ defmodule WasomiWeb.AdminLive.Payments do
           />
         </div>
 
+        <div :if={@tab == :revenue} class="rounded-3xl border border-black/5 bg-white p-6">
+          <div class="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h2 class="text-xl font-semibold text-ink">Revenue charts</h2>
+              <p class="mt-1 text-sm text-body">Filter the charts by payment date range.</p>
+            </div>
+            <form phx-change="filter_chart_dates" class="flex flex-wrap items-end gap-3">
+              <label class="text-xs font-semibold uppercase tracking-wide text-body">
+                From
+                <input
+                  type="date"
+                  name="from"
+                  value={@chart_from}
+                  max={Date.utc_today()}
+                  class="mt-1 block rounded-xl border border-black/10 px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
+                />
+              </label>
+              <label class="text-xs font-semibold uppercase tracking-wide text-body">
+                To
+                <input
+                  type="date"
+                  name="to"
+                  value={@chart_to}
+                  max={Date.utc_today()}
+                  class="mt-1 block rounded-xl border border-black/10 px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none"
+                />
+              </label>
+              <.link
+                :if={@chart_from || @chart_to}
+                patch={payments_path(:revenue, search: @search)}
+                class="pb-2 text-sm font-medium text-primary hover:text-ink"
+              >
+                Clear
+              </.link>
+            </form>
+          </div>
+
+          <div class="mt-6 grid gap-6 lg:grid-cols-2">
+            <div>
+              <h3 class="text-sm font-semibold text-ink">Revenue trend</h3>
+              <p class="text-xs text-body">Successful payments by month.</p>
+              <div class="mt-3 h-72">
+                <canvas
+                  id="revenue-trend-chart"
+                  phx-hook="Chart"
+                  data-config={Jason.encode!(@revenue_trend_chart)}
+                >
+                </canvas>
+              </div>
+            </div>
+            <div>
+              <h3 class="text-sm font-semibold text-ink">Revenue by course</h3>
+              <p class="text-xs text-body">Top 8 courses by successful revenue.</p>
+              <div class="mt-3 h-72">
+                <canvas
+                  id="revenue-by-course-chart"
+                  phx-hook="Chart"
+                  phx-update="ignore"
+                  data-config={Jason.encode!(@revenue_by_course_chart)}
+                >
+                </canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div :if={@tab == :payments} class="rounded-3xl border border-black/5 bg-white p-6">
           <div class="flex flex-wrap items-center justify-between gap-4">
             <div>
@@ -298,7 +469,6 @@ defmodule WasomiWeb.AdminLive.Payments do
               <table class="w-full text-left text-sm">
                 <thead class="border-b border-black/5 text-xs uppercase tracking-wide text-body">
                   <tr>
-                    <th class="px-6 py-4 font-semibold">Payment ID</th>
                     <.sortable_th
                       label="Learner"
                       field={:learner}
@@ -314,13 +484,6 @@ defmodule WasomiWeb.AdminLive.Payments do
                       path_fn={&sort_path(@status_filter, @search, &1, &2)}
                     />
                     <th class="px-6 py-4 font-semibold">Provider</th>
-                    <.sortable_th
-                      label="Reference"
-                      field={:reference}
-                      current_sort_by={@sort_by}
-                      current_sort_dir={@sort_dir}
-                      path_fn={&sort_path(@status_filter, @search, &1, &2)}
-                    />
                     <.sortable_th
                       label="Amount"
                       field={:amount}
@@ -350,7 +513,6 @@ defmodule WasomiWeb.AdminLive.Payments do
                     :for={payment <- @payments_page.entries}
                     class="transition hover:bg-neutral-50/60"
                   >
-                    <td class="px-6 py-4 text-xs text-body">PAY-{payment.id}</td>
                     <td class="px-6 py-4">
                       <.link
                         :if={payment.user}
@@ -363,7 +525,6 @@ defmodule WasomiWeb.AdminLive.Payments do
                     </td>
                     <td class="px-6 py-4 text-body">{payment.course && payment.course.title}</td>
                     <td class="px-6 py-4 capitalize text-body">{payment.provider}</td>
-                    <td class="px-6 py-4 text-xs text-body">{payment.provider_reference}</td>
                     <td class="px-6 py-4 font-semibold text-ink">
                       {Payments.format_amount(payment)}
                     </td>
@@ -416,7 +577,9 @@ defmodule WasomiWeb.AdminLive.Payments do
           <.paginated_table
             page={@revenue_page.page}
             total_pages={@revenue_page.total_pages}
-            path_fn={&payments_path(:revenue, search: @search, page: &1)}
+            path_fn={
+              &payments_path(:revenue, search: @search, from: @chart_from, to: @chart_to, page: &1)
+            }
           >
             <div :if={@revenue_page.entries != []} class="mt-6 overflow-x-auto">
               <table class="w-full text-left text-sm">

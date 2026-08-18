@@ -89,6 +89,21 @@ defmodule Wasomi.Enrollments do
   end
 
   @doc """
+  Counts one learner's active enrollments keyed by `course_id` — the
+  single-user equivalent of `count_active_by_course/0`, used to scope the
+  analytics "eligible learners" denominator down to just that learner when
+  the admin dashboard is filtered to a specific student.
+  """
+  def count_active_by_course_for_user(user_id) do
+    Enrollment
+    |> where([e], e.status == :active and e.user_id == ^user_id)
+    |> group_by([e], e.course_id)
+    |> select([e], {e.course_id, count(e.id)})
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  @doc """
   Counts active enrollments for a single course.
   """
   def count_active_for_course(course_id) do

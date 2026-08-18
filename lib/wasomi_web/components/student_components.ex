@@ -20,7 +20,6 @@ defmodule WasomiWeb.StudentComponents do
   @nav_items [
     %{key: :dashboard, label: "Dashboard", icon: "hero-squares-2x2", path: "/dashboard"},
     %{key: :courses, label: "My courses", icon: "hero-academic-cap", path: "/courses-taken"},
-    %{key: :study, label: "Study", icon: "hero-rectangle-stack", path: "/learn/study"},
     %{key: :certificates, label: "Certificates", icon: "hero-trophy", path: "/certificates"},
     %{key: :browse, label: "Browse catalog", icon: "hero-magnifying-glass", path: "/courses"},
     %{key: :account, label: "Account", icon: "hero-cog-6-tooth", path: "/users/settings"}
@@ -37,6 +36,7 @@ defmodule WasomiWeb.StudentComponents do
   """
   attr :active, :atom, default: nil
   attr :current_user, :map, required: true
+  attr :embedded, :boolean, default: false
   slot :inner_block, required: true
 
   def student_layout(assigns) do
@@ -45,7 +45,10 @@ defmodule WasomiWeb.StudentComponents do
     ~H"""
     <div class="min-h-screen bg-soft text-ink lg:flex">
       <%!-- Mobile top bar --%>
-      <div class="flex items-center justify-between border-b border-black/5 bg-white px-5 py-4 lg:hidden">
+      <div
+        :if={!@embedded}
+        class="flex items-center justify-between border-b border-black/5 bg-white px-5 py-4 lg:hidden"
+      >
         <.link navigate={~p"/dashboard"} class="flex items-center">
           <img src={~p"/images/logo.png"} alt="Wasomi" class="h-7 w-auto" />
         </.link>
@@ -60,6 +63,7 @@ defmodule WasomiWeb.StudentComponents do
 
       <%!-- Sidebar --%>
       <aside
+        :if={!@embedded}
         id="student-sidebar"
         phx-update="ignore"
         class="app-sidebar hidden w-full shrink-0 border-b border-black/5 bg-white lg:flex lg:h-screen lg:w-72 lg:flex-col lg:border-b-0 lg:border-r"
@@ -220,7 +224,7 @@ defmodule WasomiWeb.StudentComponents do
       class={[
         "sidebar-row group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition",
         if(@item.key == @active,
-          do: "bg-mint text-primary",
+          do: "bg-dark text-white shadow-sm",
           else: "text-body hover:bg-soft hover:text-primary"
         )
       ]}

@@ -6,7 +6,7 @@ defmodule Wasomi.MediaTest do
   import Wasomi.CatalogFixtures
 
   alias Wasomi.Media
-  alias Wasomi.Media.Mux
+  alias Wasomi.Media.Cloudflare
 
   setup :verify_on_exit!
 
@@ -68,30 +68,67 @@ defmodule Wasomi.MediaTest do
     end
   end
 
+  describe "Cloudflare Stream API adapter" do
+    test "creates a private direct upload restricted to the configured origin" do
+      lecture = lecture_fixture()
+
+      Req.Test.stub(Cloudflare, fn conn ->
+        assert conn.method == "POST"
+        assert conn.request_path == "/client/v4/accounts/test-account-id/stream/direct_upload"
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        payload = Jason.decode!(body)
+        assert payload["requireSignedURLs"]
+        assert payload["allowedOrigins"] == []
+        assert payload["meta"] == %{"lecture_id" => to_string(lecture.id)}
+
+        Req.Test.json(conn, %{
+          success: true,
+          result: %{uid: "video-123", uploadURL: "https://upload.example.test/once"}
+        })
+      end)
+
+      assert {:ok, %{id: "video-123", url: "https://upload.example.test/once"}} =
+               Cloudflare.create_upload(lecture, cors_origin: "http://localhost:4000")
+    end
+
+    test "maps Cloudflare processing and ready states to the media behaviour" do
+      Req.Test.stub(Cloudflare, fn conn ->
+        assert conn.request_path == "/client/v4/accounts/test-account-id/stream/video-123"
+
+        Req.Test.json(conn, %{
+          success: true,
+          result: %{uid: "video-123", readyToStream: false, status: %{state: "inprogress"}}
+        })
+      end)
+
+      assert {:ok, :processing} = Cloudflare.upload_status("video-123")
+    end
+  end
+
   setup do
     private_key = :public_key.generate_key({:rsa, 1024, 65_537})
     pem = :public_key.pem_encode([:public_key.pem_entry_encode(:RSAPrivateKey, private_key)])
 
-    previous_key = Application.get_env(:wasomi, :mux_signing_private_key)
-    previous_id = Application.get_env(:wasomi, :mux_signing_key_id)
+    previous_key = Application.get_env(:wasomi, :cloudflare_stream_signing_private_key)
+    previous_id = Application.get_env(:wasomi, :cloudflare_stream_signing_key_id)
 
-    Application.put_env(:wasomi, :mux_signing_private_key, Base.encode64(pem))
-    Application.put_env(:wasomi, :mux_signing_key_id, "test-key")
+    Application.put_env(:wasomi, :cloudflare_stream_signing_private_key, Base.encode64(pem))
+    Application.put_env(:wasomi, :cloudflare_stream_signing_key_id, "test-key")
 
     on_exit(fn ->
-      restore_env(:mux_signing_private_key, previous_key)
-      restore_env(:mux_signing_key_id, previous_id)
+      restore_env(:cloudflare_stream_signing_private_key, previous_key)
+      restore_env(:cloudflare_stream_signing_key_id, previous_id)
     end)
 
     %{private_key: private_key}
   end
 
-  test "Mux signs viewer-bound playback JWTs with enough lifetime for the lecture", %{
+  test "Cloudflare signs playback JWTs with enough lifetime for the lecture", %{
     private_key: private_key
   } do
     lecture =
       lecture_fixture(
-        video_provider: :mux,
+        video_provider: :cloudflare,
         video_asset_id: "signed-playback-id",
         duration_seconds: 900
       )
@@ -100,19 +137,17 @@ defmodule Wasomi.MediaTest do
     other_user = user_fixture()
     issued_after = System.system_time(:second)
 
-    assert {:ok, token} = Mux.playback_token(lecture, user, 300)
-    assert {:ok, other_token} = Mux.playback_token(lecture, other_user, 300)
-    refute token == other_token
+    assert {:ok, token} = Cloudflare.playback_token(lecture, user, 300)
+    assert {:ok, other_token} = Cloudflare.playback_token(lecture, other_user, 300)
+    assert token == other_token
 
     [header_segment, claims_segment, signature_segment] = String.split(token, ".")
     claims = claims_segment |> Base.url_decode64!(padding: false) |> Jason.decode!()
     header = header_segment |> Base.url_decode64!(padding: false) |> Jason.decode!()
 
-    assert header == %{"alg" => "RS256", "typ" => "JWT"}
+    assert header == %{"alg" => "RS256", "kid" => "test-key"}
     assert claims["sub"] == "signed-playback-id"
-    assert claims["aud"] == "v"
     assert claims["kid"] == "test-key"
-    assert is_binary(claims["viewer_id"])
     assert claims["exp"] >= issued_after + 960
 
     signature = Base.url_decode64!(signature_segment, padding: false)
@@ -128,14 +163,19 @@ defmodule Wasomi.MediaTest do
 
   test "thumbnail_url/2 builds a URL where the playback id and signed token round-trip intact" do
     lecture =
-      lecture_fixture(video_provider: :mux, video_asset_id: "av1Ab2_XyZ-9", duration_seconds: 120)
+      lecture_fixture(
+        video_provider: :cloudflare,
+        video_asset_id: "av1Ab2_XyZ-9",
+        duration_seconds: 120
+      )
 
     user = user_fixture()
 
-    assert {:ok, url} = Mux.thumbnail_url(lecture, user)
-    assert String.starts_with?(url, "https://image.mux.com/av1Ab2_XyZ-9/thumbnail.jpg?token=")
+    assert {:ok, url} = Cloudflare.thumbnail_url(lecture, user)
+    assert String.starts_with?(url, "https://customer-test-customer-code.cloudflarestream.com/")
+    assert String.ends_with?(url, "/thumbnails/thumbnail.jpg")
 
-    token = url |> String.split("token=") |> List.last()
+    token = url |> String.split("/") |> Enum.at(-3)
     assert [_header, _claims, _signature] = String.split(token, ".")
 
     # playback_id is a path segment (URI.encode/1), token is a query value
@@ -145,26 +185,24 @@ defmodule Wasomi.MediaTest do
     refute token =~ "%"
   end
 
-  test "download_url/1 builds a signed static-rendition URL for the transcription pipeline" do
-    lecture =
-      lecture_fixture(video_provider: :mux, video_asset_id: "av1Ab2_XyZ-9", duration_seconds: 120)
+  test "delivery URLs accept the full Cloudflare customer hostname" do
+    previous_code = Application.get_env(:wasomi, :cloudflare_stream_customer_code)
 
-    assert {:ok, url} = Mux.download_url(lecture)
-    assert String.starts_with?(url, "https://stream.mux.com/av1Ab2_XyZ-9/low.mp4?token=")
+    Application.put_env(
+      :wasomi,
+      :cloudflare_stream_customer_code,
+      "customer-up8nrq4n6u7emwif.cloudflarestream.com"
+    )
 
-    token = url |> String.split("token=") |> List.last()
-    [header_segment, claims_segment, _signature_segment] = String.split(token, ".")
-    claims = claims_segment |> Base.url_decode64!(padding: false) |> Jason.decode!()
-    header = header_segment |> Base.url_decode64!(padding: false) |> Jason.decode!()
+    on_exit(fn -> restore_env(:cloudflare_stream_customer_code, previous_code) end)
 
-    assert header == %{"alg" => "RS256", "typ" => "JWT"}
-    assert claims["sub"] == "av1Ab2_XyZ-9"
-    assert claims["aud"] == "v"
+    assert Cloudflare.delivery_url("signed.jwt.token", "/manifest/video.m3u8") ==
+             "https://customer-up8nrq4n6u7emwif.cloudflarestream.com/signed.jwt.token/manifest/video.m3u8"
   end
 
-  test "download_url/1 rejects a non-Mux lecture" do
-    lecture = lecture_fixture(video_provider: :cloudflare, video_asset_id: "some-id")
-    assert {:error, {:unsupported_video_provider, :cloudflare}} = Mux.download_url(lecture)
+  test "download_url/1 rejects a non-Cloudflare lecture" do
+    lecture = lecture_fixture(video_provider: :bunny, video_asset_id: "some-id")
+    assert {:error, {:unsupported_video_provider, :bunny}} = Cloudflare.download_url(lecture)
   end
 
   defp restore_env(key, nil), do: Application.delete_env(:wasomi, key)

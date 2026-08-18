@@ -42,7 +42,7 @@ defmodule Wasomi.Payments do
   def format_minor(amount, currency \\ "KES") do
     (amount || 0)
     |> Money.new(currency)
-    |> Money.to_string(symbol: false, code: true)
+    |> Money.to_string(symbol: false, code: true, fractional_unit: false)
   end
 
   @doc """

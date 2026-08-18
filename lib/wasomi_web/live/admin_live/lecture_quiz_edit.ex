@@ -2,12 +2,25 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
   use WasomiWeb, :live_view
 
   alias Wasomi.Assessments
+  alias Wasomi.Assessments.LectureQuiz
   alias Wasomi.Assessments.LectureQuizQuestion
   alias Wasomi.Catalog
   alias Wasomi.Catalog.Workers.TranscribeLecture
 
+  # The standalone route already gets `current_user` from the router's
+  # `:require_admin` live_session on_mount. When embedded as a modal via
+  # `live_render/3` inside `CourseShow`, no router on_mount runs at all —
+  # this fills the gap. `assign_new` first checks the parent LiveView's own
+  # assigns (see `Static.nested_render/3`), so when embedded it just
+  # inherits `current_user` from `CourseShow` instead of re-deriving it.
+  on_mount {WasomiWeb.UserAuth, :mount_current_user}
+
   @impl true
-  def mount(%{"course_slug" => course_slug, "lecture_id" => lecture_id}, _session, socket) do
+  def mount(params, session, socket) do
+    course_slug = param(params, "course_slug") || session["course_slug"]
+    lecture_id = param(params, "lecture_id") || session["lecture_id"]
+    embedded? = session["embedded"] == true
+
     lecture = load_lecture!(lecture_id, course_slug)
     lecture_quiz = Assessments.get_lecture_quiz(lecture.id)
 
@@ -23,21 +36,42 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
     {:ok,
      socket
      |> assign(:page_title, "Lecture quiz")
+     |> assign(:embedded?, embedded?)
      |> assign(:course_slug, course_slug)
      |> assign(:lecture, lecture)
      |> assign(:document_resources, Enum.filter(lecture.resources, &(&1.kind == :document)))
      |> assign(:transcript, transcript)
      |> assign(:default_resources, defaults)
      |> assign(:selected_resources, defaults)
+     |> assign(:active_tab, :generate)
+     |> assign(:generating_questions?, false)
      |> assign(:deleting_question_id, nil)
      |> assign(:confirming_publish_all?, false)
      |> assign(:confirming_delete_all?, false)
-     |> assign_lecture_quiz(lecture_quiz)}
+     |> assign_lecture_quiz(lecture_quiz)
+     |> select_initial_tab(param(params, "tab") || session["initial_tab"])}
   end
 
   @impl true
-  def handle_info({:lecture_quiz_generation_updated, _generation}, socket) do
-    {:noreply, reload(socket)}
+  def handle_info({:lecture_quiz_generation_updated, generation}, socket) do
+    socket = reload(socket)
+
+    case generation.status do
+      :ready ->
+        {:noreply,
+         socket
+         |> assign(:generating_questions?, false)
+         |> assign(:active_tab, :questions)}
+
+      :failed ->
+        {:noreply,
+         socket
+         |> assign(:generating_questions?, false)
+         |> put_flash(:error, "Question generation failed. Please try again.")}
+
+      status when status in [:pending, :processing] ->
+        {:noreply, assign(socket, :generating_questions?, true)}
+    end
   end
 
   def handle_info({:lecture_transcript_updated, transcript}, socket) do
@@ -57,6 +91,14 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
   def handle_event("validate", params, socket) do
     resource_keys = params |> Map.get("resources", []) |> List.wrap()
     {:noreply, assign(socket, :selected_resources, resource_keys)}
+  end
+
+  def handle_event("select_tab", %{"tab" => "generate"}, socket) do
+    {:noreply, assign(socket, :active_tab, :generate)}
+  end
+
+  def handle_event("select_tab", %{"tab" => "questions"}, socket) do
+    {:noreply, assign(socket, :active_tab, :questions)}
   end
 
   def handle_event("generate_transcript", _params, socket) do
@@ -253,11 +295,17 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
         question_options: blank_options(type)
       })
 
-    {:noreply, assign(socket, :new_question_form, to_form(changeset))}
+    {:noreply,
+     socket
+     |> assign(:new_question_form, to_form(changeset))
+     |> assign(:new_question_type, type)}
   end
 
   def handle_event("cancel_new_question", _params, socket) do
-    {:noreply, assign(socket, :new_question_form, nil)}
+    {:noreply,
+     socket
+     |> assign(:new_question_form, nil)
+     |> assign(:new_question_type, nil)}
   end
 
   def handle_event("save_new_question", params, socket) do
@@ -277,6 +325,7 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
          socket
          |> put_flash(:info, "Question added.")
          |> assign(:new_question_form, nil)
+         |> assign(:new_question_type, nil)
          |> reload()}
 
       {:error, changeset} ->
@@ -343,347 +392,420 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
   end
 
   @impl true
+  def render(%{embedded?: true} = assigns) do
+    ~H"""
+    <div class="max-h-[75vh] w-full overflow-y-auto">
+      <.quiz_content {assigns} />
+    </div>
+    """
+  end
+
   def render(assigns) do
     ~H"""
     <.admin_layout active={:courses} current_user={@current_user}>
-      <div class="mx-auto max-w-4xl space-y-8 px-5 py-10 lg:px-8">
-        <.link
-          navigate={~p"/admin/courses/#{@course_slug}"}
-          class="inline-flex items-center gap-1.5 text-sm font-medium text-muted hover:text-primary transition active:scale-[0.96]"
+      <.quiz_content {assigns} />
+    </.admin_layout>
+    """
+  end
+
+  defp quiz_content(assigns) do
+    ~H"""
+    <div class="mx-auto max-w-4xl space-y-8 px-5 py-10 lg:px-8">
+      <.link
+        :if={!@embedded?}
+        navigate={~p"/admin/courses/#{@course_slug}"}
+        class="inline-flex items-center gap-1.5 text-sm font-medium text-muted hover:text-primary transition active:scale-[0.96]"
+      >
+        <.icon name="hero-arrow-left-mini" class="h-4 w-4" /> Back to course
+      </.link>
+
+      <header>
+        <p class="text-sm font-semibold uppercase tracking-wider text-primary">Lecture quiz</p>
+        <h1 class="mt-2 text-3xl font-semibold text-ink">{@lecture.title}</h1>
+        <p class="mt-2 text-body">
+          Edit questions inline and drag to reorder. Published questions are live immediately for learners.
+        </p>
+      </header>
+
+      <nav class="flex w-fit gap-1 rounded-full bg-neutral-100 p-1" aria-label="Lecture quiz steps">
+        <button
+          id="generate-tab"
+          type="button"
+          phx-click="select_tab"
+          phx-value-tab="generate"
+          aria-selected={@active_tab == :generate}
+          class={tab_class(@active_tab == :generate)}
         >
-          <.icon name="hero-arrow-left-mini" class="h-4 w-4" /> Back to course
-        </.link>
+          Generate
+        </button>
+        <button
+          id="questions-tab"
+          type="button"
+          phx-click="select_tab"
+          phx-value-tab="questions"
+          aria-selected={@active_tab == :questions}
+          class={tab_class(@active_tab == :questions)}
+        >
+          Questions
+          <span :if={@lecture_quiz} class="ml-1 text-xs opacity-70">
+            {length(@lecture_quiz.questions)}
+          </span>
+        </button>
+      </nav>
 
-        <header>
-          <p class="text-sm font-semibold uppercase tracking-wider text-primary">Lecture quiz</p>
-          <h1 class="mt-2 text-3xl font-semibold text-ink">{@lecture.title}</h1>
-          <p class="mt-2 text-body">
-            Edit questions inline and drag to reorder. Published questions are live immediately for learners.
-          </p>
-        </header>
+      <section
+        :if={@active_tab == :generate}
+        id="generate-section"
+        class="rounded-3xl border border-black/5 bg-white p-6 shadow-sm"
+      >
+        <h2 class="text-lg font-semibold text-ink">Generate questions</h2>
+        <p class="mt-1 text-sm text-body">
+          Pick which of this lecture's resources should feed the AI, choose difficulty and question count.
+        </p>
 
-        <section class="rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
-          <h2 class="text-lg font-semibold text-ink">Generate questions</h2>
-          <p class="mt-1 text-sm text-body">
-            Pick which of this lecture's resources should feed the AI, choose difficulty and question count.
-          </p>
+        <form
+          id="generate-lecture-quiz-form"
+          phx-change="validate"
+          phx-submit="generate"
+          class="mt-5 space-y-5"
+        >
+          <fieldset class="space-y-2 min-w-0">
+            <legend class="text-sm font-medium text-ink">Resources</legend>
 
-          <form
-            id="generate-lecture-quiz-form"
-            phx-change="validate"
-            phx-submit="generate"
-            class="mt-5 space-y-5"
-          >
-            <fieldset class="space-y-2 min-w-0">
-              <legend class="text-sm font-medium text-ink">Resources</legend>
-
-              <div
-                :if={@lecture.video_asset_id}
-                class="flex items-center justify-between gap-3 rounded-xl border border-black/5 px-4 py-2.5 min-w-0 max-w-full overflow-hidden"
-              >
-                <label class={[
-                  "flex items-center gap-2 text-sm min-w-0 flex-1 truncate",
-                  transcript_ready?(@transcript) && "text-ink",
-                  !transcript_ready?(@transcript) && "text-muted"
-                ]}>
-                  <input
-                    type="checkbox"
-                    name="resources[]"
-                    value="video"
-                    checked={"video" in @selected_resources}
-                    disabled={!transcript_ready?(@transcript)}
-                    class="shrink-0 rounded border-black/20 text-primary focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
-                  />
-                  <span class="truncate">
-                    Primary video
-                    <span class="text-xs text-muted">({transcript_status_label(@transcript)})</span>
-                  </span>
-                </label>
-                <button
-                  :if={transcript_needs_generation?(@transcript)}
-                  type="button"
-                  phx-click="generate_transcript"
-                  class="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-black/10 px-3 py-1.5 text-xs font-medium text-ink transition hover:border-primary hover:text-primary active:scale-[0.96]"
-                >
-                  <.icon name="hero-document-text" class="h-3.5 w-3.5" />
-                  {if @transcript && @transcript.status == :failed,
-                    do: "Retry transcript",
-                    else: "Generate transcript"}
-                </button>
-                <span
-                  :if={@transcript && @transcript.status in [:pending, :processing]}
-                  class="inline-flex shrink-0 items-center gap-1.5 text-xs text-muted"
-                >
-                  <.icon name="hero-arrow-path" class="h-3.5 w-3.5 animate-spin" /> Transcribing…
-                </span>
-              </div>
-
-              <label
-                :for={resource <- @document_resources}
-                class="flex items-center gap-2 rounded-xl border border-black/5 px-4 py-2.5 text-sm text-ink min-w-0 max-w-full overflow-hidden"
-              >
+            <div
+              :if={@lecture.video_asset_id}
+              class="flex items-center justify-between gap-3 rounded-xl border border-black/5 px-4 py-2.5 min-w-0 max-w-full overflow-hidden"
+            >
+              <label class={[
+                "flex items-center gap-2 text-sm min-w-0 flex-1 truncate",
+                transcript_ready?(@transcript) && "text-ink",
+                !transcript_ready?(@transcript) && "text-muted"
+              ]}>
                 <input
                   type="checkbox"
                   name="resources[]"
-                  value={to_string(resource.id)}
-                  checked={to_string(resource.id) in @selected_resources}
-                  class="shrink-0 rounded border-black/20 text-primary focus:ring-primary"
+                  value="video"
+                  checked={"video" in @selected_resources}
+                  disabled={!transcript_ready?(@transcript)}
+                  class="shrink-0 rounded border-black/20 text-primary focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
                 />
-                <span class="truncate min-w-0 flex-1" title={resource.name}>{resource.name}</span>
-              </label>
-
-              <p
-                :if={is_nil(@lecture.video_asset_id) and @document_resources == []}
-                class="text-sm text-muted"
-              >
-                This lecture has no resources to generate from yet.
-              </p>
-            </fieldset>
-
-            <div class="flex flex-wrap items-end gap-4">
-              <div>
-                <label for="difficulty" class="block text-sm font-medium text-ink">Difficulty</label>
-                <select
-                  id="difficulty"
-                  name="difficulty"
-                  class="mt-1 rounded-lg border border-black/10 px-3 py-2 text-sm focus:border-primary focus:ring-0"
-                >
-                  <option value="mixed" selected>Mixed</option>
-                  <option value="easy">Easy</option>
-                  <option value="medium">Medium</option>
-                  <option value="hard">Hard</option>
-                </select>
-              </div>
-
-              <div>
-                <label for="question_count" class="block text-sm font-medium text-ink">
-                  Number of questions
-                </label>
-                <input
-                  type="number"
-                  id="question_count"
-                  name="question_count"
-                  min="3"
-                  max="25"
-                  value="10"
-                  class="mt-1 w-24 rounded-lg border border-black/10 px-3 py-2 text-sm focus:border-primary focus:ring-0"
-                />
-              </div>
-
-              <button
-                type="submit"
-                disabled={@selected_resources == []}
-                class="inline-flex items-center gap-2 rounded-full bg-ink px-6 py-3 text-sm font-semibold text-white transition hover:bg-primary active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-ink disabled:active:scale-100"
-              >
-                Generate lecture quiz
-              </button>
-            </div>
-          </form>
-
-          <ul :if={@generations != []} class="mt-5 space-y-2">
-            <li
-              :for={generation <- @generations}
-              class="flex items-center justify-between gap-3 rounded-xl border border-black/5 px-4 py-3 text-sm"
-            >
-              <div class="min-w-0">
-                <p class="truncate font-medium text-ink">{generation.source_label}</p>
-                <p class="mt-0.5 text-xs text-muted">
-                  {Phoenix.Naming.humanize(generation.difficulty)} · {generation.question_count_requested} questions requested
-                </p>
-                <p :if={generation.status == :failed} class="mt-0.5 text-xs text-red-600">
-                  {generation.error_message}
-                </p>
-              </div>
-              <.generation_status_badge
-                status={generation.status}
-                generated_count={generation.questions_generated_count}
-              />
-            </li>
-          </ul>
-        </section>
-
-        <section id="questions-section" class="space-y-6">
-          <div class="flex flex-wrap items-center justify-between gap-4 border-b border-black/5 pb-4">
-            <div>
-              <h2 class="text-xl font-semibold text-ink">Questions</h2>
-              <p :if={@lecture_quiz} class="mt-0.5 text-xs text-body">
-                {length(@lecture_quiz.questions)} question(s)
-                <span :if={draft_questions(@lecture_quiz) != []}>
-                  · {length(draft_questions(@lecture_quiz))} draft(s)
+                <span class="truncate">
+                  Primary video
+                  <span class="text-xs text-muted">({transcript_status_label(@transcript)})</span>
                 </span>
-              </p>
+              </label>
+              <button
+                :if={transcript_needs_generation?(@transcript)}
+                type="button"
+                phx-click="generate_transcript"
+                class="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-black/10 px-3 py-1.5 text-xs font-medium text-ink transition hover:border-primary hover:text-primary active:scale-[0.96]"
+              >
+                <.icon name="hero-document-text" class="h-3.5 w-3.5" />
+                {if @transcript && @transcript.status == :failed,
+                  do: "Retry transcript",
+                  else: "Generate transcript"}
+              </button>
+              <span
+                :if={@transcript && @transcript.status in [:pending, :processing]}
+                class="inline-flex shrink-0 items-center gap-1.5 text-xs text-muted"
+              >
+                <.icon name="hero-arrow-path" class="h-3.5 w-3.5 animate-spin" /> Transcribing…
+              </span>
             </div>
 
-            <div :if={is_nil(@new_question_form)} class="flex flex-wrap items-center gap-3">
-              <button
-                :if={@lecture_quiz && draft_questions(@lecture_quiz) != []}
-                type="button"
-                phx-click="confirm_publish_all"
-                class="rounded-full bg-mint px-4 py-2 text-xs font-semibold text-primary transition hover:bg-emerald-200 active:scale-[0.96]"
-              >
-                Publish all drafts
-              </button>
-              <button
-                :if={@lecture_quiz && draft_questions(@lecture_quiz) != []}
-                type="button"
-                phx-click="confirm_delete_all"
-                class="rounded-full border border-black/10 px-4 py-2 text-xs font-medium text-muted transition hover:border-red-300 hover:text-red-600 active:scale-[0.96]"
-              >
-                Delete all drafts
-              </button>
+            <label
+              :for={resource <- @document_resources}
+              class="flex items-center gap-2 rounded-xl border border-black/5 px-4 py-2.5 text-sm text-ink min-w-0 max-w-full overflow-hidden"
+            >
+              <input
+                type="checkbox"
+                name="resources[]"
+                value={to_string(resource.id)}
+                checked={to_string(resource.id) in @selected_resources}
+                class="shrink-0 rounded border-black/20 text-primary focus:ring-primary"
+              />
+              <span class="truncate min-w-0 flex-1" title={resource.name}>{resource.name}</span>
+            </label>
 
-              <div class="inline-flex rounded-full bg-primary p-0.5 shadow-sm">
+            <p
+              :if={is_nil(@lecture.video_asset_id) and @document_resources == []}
+              class="text-sm text-muted"
+            >
+              This lecture has no resources to generate from yet.
+            </p>
+          </fieldset>
+
+          <div class="flex flex-wrap items-end gap-4">
+            <div>
+              <label for="difficulty" class="block text-sm font-medium text-ink">Difficulty</label>
+              <select
+                id="difficulty"
+                name="difficulty"
+                class="mt-1 rounded-lg border border-black/10 px-3 py-2 text-sm focus:border-primary focus:ring-0"
+              >
+                <option value="mixed" selected>Mixed</option>
+                <option value="easy">Easy</option>
+                <option value="medium">Medium</option>
+                <option value="hard">Hard</option>
+              </select>
+            </div>
+
+            <div>
+              <label for="question_count" class="block text-sm font-medium text-ink">
+                Number of questions
+              </label>
+              <input
+                type="number"
+                id="question_count"
+                name="question_count"
+                min="3"
+                max="25"
+                value="10"
+                class="mt-1 w-24 rounded-lg border border-black/10 px-3 py-2 text-sm focus:border-primary focus:ring-0"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={@selected_resources == [] or @generating_questions?}
+              class="inline-flex items-center gap-2 rounded-full bg-ink px-6 py-3 text-sm font-semibold text-white transition hover:bg-primary active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-ink disabled:active:scale-100"
+            >
+              <.icon :if={@generating_questions?} name="hero-arrow-path" class="h-4 w-4 animate-spin" />
+              {if @generating_questions?, do: "Generating questions…", else: "Generate lecture quiz"}
+            </button>
+          </div>
+        </form>
+
+        <ul :if={@generations != []} class="mt-5 space-y-2">
+          <li
+            :for={generation <- @generations}
+            class="flex items-center justify-between gap-3 rounded-xl border border-black/5 px-4 py-3 text-sm"
+          >
+            <div class="min-w-0">
+              <p class="truncate font-medium text-ink">{generation.source_label}</p>
+              <p class="mt-0.5 text-xs text-muted">
+                {Phoenix.Naming.humanize(generation.difficulty)} · {generation.question_count_requested} questions requested
+              </p>
+            </div>
+            <.generation_status_badge
+              status={generation.status}
+              generated_count={generation.questions_generated_count}
+            />
+          </li>
+        </ul>
+      </section>
+
+      <section :if={@active_tab == :questions} id="questions-section" class="space-y-6">
+        <div class="flex flex-wrap items-center justify-between gap-4 border-b border-black/5 pb-4">
+          <div>
+            <h2 class="text-xl font-semibold text-ink">Questions</h2>
+            <p :if={@lecture_quiz} class="mt-0.5 text-xs text-body">
+              {length(@lecture_quiz.questions)} question(s)
+              <span :if={draft_questions(@lecture_quiz) != []}>
+                · {length(draft_questions(@lecture_quiz))} draft(s)
+              </span>
+            </p>
+          </div>
+
+          <div class="flex flex-wrap items-end gap-4">
+            <div class="space-y-1.5">
+              <p class="text-[11px] font-semibold uppercase tracking-wider text-muted">
+                Add a question
+              </p>
+              <div class="inline-flex rounded-full border border-black/10 bg-white p-1 shadow-sm">
                 <button
                   id="add-question"
                   type="button"
                   phx-click="new_question"
-                  class="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2 text-sm font-semibold text-white transition hover:bg-ink active:scale-[0.96]"
+                  class="inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold text-ink transition hover:bg-orange-50 hover:text-primary active:scale-[0.96]"
                 >
-                  <.icon name="hero-plus" class="h-4 w-4" /> Add question
+                  <.icon name="hero-list-bullet" class="h-4 w-4" /> Multiple choice
                 </button>
                 <button
                   id="add-true-false-question"
                   type="button"
                   phx-click="new_question"
                   phx-value-type="true_false"
-                  title="Add True/False question"
-                  class="inline-flex items-center rounded-full px-3 py-2 text-xs font-medium text-white/90 transition hover:bg-ink hover:text-white active:scale-[0.96]"
+                  class="inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold text-ink transition hover:bg-orange-50 hover:text-primary active:scale-[0.96]"
                 >
-                  T/F
+                  <.icon name="hero-arrows-right-left" class="h-4 w-4" /> True / false
+                </button>
+              </div>
+            </div>
+
+            <div
+              :if={@lecture_quiz && draft_questions(@lecture_quiz) != []}
+              class="space-y-1.5 border-l border-black/10 pl-4"
+            >
+              <p class="text-[11px] font-semibold uppercase tracking-wider text-muted">
+                Draft actions
+              </p>
+              <div class="flex items-center gap-2">
+                <button
+                  type="button"
+                  phx-click="confirm_delete_all"
+                  class="inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-xs font-medium text-muted transition hover:bg-red-50 hover:text-red-600 active:scale-[0.96]"
+                >
+                  <.icon name="hero-trash" class="h-4 w-4" /> Delete drafts
+                </button>
+                <button
+                  type="button"
+                  phx-click="confirm_publish_all"
+                  class="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-ink active:scale-[0.96]"
+                >
+                  <% draft_count = length(draft_questions(@lecture_quiz)) %>
+                  <.icon name="hero-check-circle" class="h-4 w-4" />
+                  Publish {draft_count} {if draft_count ==
+                                              1,
+                                            do: "draft",
+                                            else: "drafts"}
                 </button>
               </div>
             </div>
           </div>
+        </div>
 
-          <div
-            :if={@lecture_quiz && @lecture_quiz.questions != []}
-            id="quiz-questions"
-            phx-hook="SortableList"
-            data-event="reorder_questions"
-            data-order-key="ids"
-            class="space-y-5"
+        <div
+          :if={@lecture_quiz && @lecture_quiz.questions != []}
+          id="quiz-questions"
+          phx-hook="SortableList"
+          data-event="reorder_questions"
+          data-order-key="ids"
+          class="space-y-5"
+        >
+          <article
+            :for={{question, index} <- Enum.with_index(@lecture_quiz.questions, 1)}
+            id={"question-#{question.id}"}
+            data-sortable-item
+            data-id={question.id}
+            class="rounded-3xl border border-black/5 bg-white p-6 shadow-sm data-[dragging=true]:opacity-50 lg:p-8"
           >
-            <article
-              :for={{question, index} <- Enum.with_index(@lecture_quiz.questions, 1)}
-              id={"question-#{question.id}"}
-              data-sortable-item
-              data-id={question.id}
-              class="rounded-3xl border border-black/5 bg-white p-6 shadow-sm data-[dragging=true]:opacity-50 lg:p-8"
-            >
-              <div class="mb-5 flex items-center justify-between gap-4">
-                <div class="flex items-center gap-3">
-                  <button
-                    type="button"
-                    data-sortable-handle
-                    title="Drag to reorder"
-                    class="cursor-grab rounded-lg p-2 text-muted hover:bg-neutral-50 hover:text-ink active:cursor-grabbing"
-                  >
-                    <.icon name="hero-bars-3" class="h-5 w-5" />
-                  </button>
-                  <h2 class="font-semibold text-ink">Question {index}</h2>
-                  <span class={[
-                    "rounded-full px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wider",
-                    question.status == :published && "bg-mint text-primary",
-                    question.status == :draft && "bg-neutral-50 text-body"
-                  ]}>
-                    {Phoenix.Naming.humanize(question.status)}
-                  </span>
-                </div>
-                <div class="flex items-center gap-4">
-                  <button
-                    :if={question.status == :draft}
-                    type="button"
-                    phx-click="publish_question"
-                    phx-value-id={question.id}
-                    class="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:text-ink transition active:scale-[0.96]"
-                  >
-                    <.icon name="hero-check-circle" class="h-4 w-4" /> Publish
-                  </button>
-                  <button
-                    type="button"
-                    phx-click="confirm_delete_question"
-                    phx-value-id={question.id}
-                    class="inline-flex items-center gap-1.5 text-sm font-medium text-red-500 hover:text-red-700 transition active:scale-[0.96]"
-                  >
-                    <.icon name="hero-trash" class="h-4 w-4" /> Remove
-                  </button>
-                </div>
+            <div class="mb-5 flex items-center justify-between gap-4">
+              <div class="flex items-center gap-3">
+                <button
+                  type="button"
+                  data-sortable-handle
+                  title="Drag to reorder"
+                  class="cursor-grab rounded-lg p-2 text-muted hover:bg-neutral-50 hover:text-ink active:cursor-grabbing"
+                >
+                  <.icon name="hero-bars-3" class="h-5 w-5" />
+                </button>
+                <h2 class="font-semibold text-ink">Question {index}</h2>
+                <span class={[
+                  "rounded-full px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wider",
+                  question.status == :published && "bg-mint text-primary",
+                  question.status == :draft && "bg-neutral-50 text-body"
+                ]}>
+                  {Phoenix.Naming.humanize(question.status)}
+                </span>
               </div>
-
-              <.question_form
-                form={Map.fetch!(@question_forms, question.id)}
-                question={question}
-                dirty={MapSet.member?(@dirty_question_ids, question.id)}
-              />
-            </article>
-          </div>
-
-          <section
-            :if={
-              is_nil(@lecture_quiz) or (@lecture_quiz.questions == [] and is_nil(@new_question_form))
-            }
-            id="empty-quiz"
-            class="rounded-3xl border border-dashed border-black/10 bg-white p-10 text-center"
-          >
-            <p class="font-medium text-ink">This lecture quiz has no questions yet.</p>
-            <p class="mt-1 text-sm text-body">
-              Add your first question manually or generate from lecture resources above.
-            </p>
-            <div class="mt-5 flex justify-center">
-              <button
-                type="button"
-                phx-click="new_question"
-                class="inline-flex items-center gap-2 rounded-full bg-primary px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-ink active:scale-[0.96]"
-              >
-                <.icon name="hero-plus" class="h-4 w-4" /> Add question
-              </button>
+              <div class="flex items-center gap-4">
+                <button
+                  :if={question.status == :draft}
+                  type="button"
+                  phx-click="publish_question"
+                  phx-value-id={question.id}
+                  class="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:text-ink transition active:scale-[0.96]"
+                >
+                  <.icon name="hero-check-circle" class="h-4 w-4" /> Publish
+                </button>
+                <button
+                  type="button"
+                  phx-click="confirm_delete_question"
+                  phx-value-id={question.id}
+                  class="inline-flex items-center gap-1.5 text-sm font-medium text-red-500 hover:text-red-700 transition active:scale-[0.96]"
+                >
+                  <.icon name="hero-trash" class="h-4 w-4" /> Remove
+                </button>
+              </div>
             </div>
-          </section>
 
-          <section
-            :if={@new_question_form}
-            id="new-question"
-            class="rounded-3xl border border-primary/20 bg-white p-6 shadow-sm lg:p-8"
-          >
-            <h2 class="mb-5 font-semibold text-ink">New question</h2>
-            <.question_form form={@new_question_form} question={nil} />
-          </section>
+            <.question_form
+              form={Map.fetch!(@question_forms, question.id)}
+              question={question}
+              dirty={MapSet.member?(@dirty_question_ids, question.id)}
+            />
+          </article>
+        </div>
+
+        <section
+          :if={is_nil(@lecture_quiz) or @lecture_quiz.questions == []}
+          id="empty-quiz"
+          class="rounded-3xl border border-dashed border-black/10 bg-white p-10 text-center"
+        >
+          <p class="font-medium text-ink">This lecture quiz has no questions yet.</p>
+          <p class="mt-1 text-sm text-body">
+            Add your first question manually or generate from lecture resources above.
+          </p>
+          <div class="mt-5 flex justify-center">
+            <button
+              type="button"
+              phx-click="new_question"
+              class="inline-flex items-center gap-2 rounded-full bg-primary px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-ink active:scale-[0.96]"
+            >
+              <.icon name="hero-plus" class="h-4 w-4" /> Add question
+            </button>
+          </div>
         </section>
-      </div>
+      </section>
+    </div>
 
-      <.confirm_modal
-        :if={@deleting_question_id}
-        id="delete-question-modal"
-        title="Delete this question?"
-        confirm={JS.push("delete_question", value: %{id: @deleting_question_id})}
-        cancel={JS.push("cancel_delete_question")}
-      >
-        This can't be undone.
-      </.confirm_modal>
+    <.modal
+      :if={@new_question_form}
+      id="new-question-modal"
+      show
+      dismissable={false}
+      max_width="max-w-3xl"
+      on_cancel={JS.push("cancel_new_question")}
+    >
+      <h2 id="new-question-modal-title" class="mb-5 text-lg font-semibold text-ink">
+        {if @new_question_type == "true_false",
+          do: "New True/False question",
+          else: "New multiple-choice question"}
+      </h2>
+      <.question_form form={@new_question_form} question={nil} />
+    </.modal>
 
-      <.confirm_modal
-        :if={@confirming_publish_all?}
-        id="publish-all-modal"
-        title="Publish all draft questions?"
-        variant={:primary}
-        confirm_label="Publish all"
-        confirm={JS.push("publish_all_drafts")}
-        cancel={JS.push("cancel_publish_all")}
-      >
-        Every draft question becomes visible to learners immediately.
-      </.confirm_modal>
+    <.confirm_modal
+      :if={@deleting_question_id}
+      id="delete-question-modal"
+      title="Delete this question?"
+      confirm={JS.push("delete_question", value: %{id: @deleting_question_id})}
+      cancel={JS.push("cancel_delete_question")}
+    >
+      This can't be undone.
+    </.confirm_modal>
 
-      <.confirm_modal
-        :if={@confirming_delete_all?}
-        id="delete-all-modal"
-        title="Delete all draft questions?"
-        confirm={JS.push("delete_all_drafts")}
-        cancel={JS.push("cancel_delete_all")}
-      >
-        Published questions are unaffected. This can't be undone.
-      </.confirm_modal>
-    </.admin_layout>
+    <.confirm_modal
+      :if={@confirming_publish_all?}
+      id="publish-all-modal"
+      title="Save all draft questions?"
+      variant={:primary}
+      confirm_label="Publish questions"
+      confirm={JS.push("publish_all_drafts")}
+      cancel={JS.push("cancel_publish_all")}
+    >
+      Every draft question becomes visible to learners immediately.
+    </.confirm_modal>
+
+    <.confirm_modal
+      :if={@confirming_delete_all?}
+      id="delete-all-modal"
+      title="Delete all draft questions?"
+      confirm={JS.push("delete_all_drafts")}
+      cancel={JS.push("cancel_delete_all")}
+    >
+      Published questions are unaffected. This can't be undone.
+    </.confirm_modal>
     """
+  end
+
+  defp tab_class(active?) do
+    [
+      "rounded-full px-5 py-2 text-sm font-semibold transition active:scale-[0.96]",
+      active? && "bg-white text-primary shadow-sm",
+      !active? && "text-muted hover:text-ink"
+    ]
   end
 
   attr :status, :atom, required: true
@@ -710,6 +832,13 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
   defp generation_status_label(:ready, generated_count), do: "#{generated_count} generated"
   defp generation_status_label(status, _generated_count), do: Phoenix.Naming.humanize(status)
 
+  # A nested LiveView mounted via `live_render/3` (rather than the router)
+  # receives `:not_mounted_at_router` here instead of a params map — this
+  # module supports both, reading course_slug/lecture_id from `session` in
+  # that case (see the modal in `CourseShow`).
+  defp param(params, key) when is_map(params), do: params[key]
+  defp param(_params, _key), do: nil
+
   defp load_lecture!(lecture_id, course_slug) do
     course = Catalog.get_course_by_slug!(course_slug)
 
@@ -730,6 +859,7 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
     |> assign(:question_forms, %{})
     |> assign(:dirty_question_ids, MapSet.new())
     |> assign(:new_question_form, nil)
+    |> assign(:new_question_type, nil)
   end
 
   defp assign_lecture_quiz(socket, lecture_quiz) do
@@ -740,12 +870,18 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
         {question.id, to_form(Assessments.change_lecture_quiz_question(question))}
       end)
 
+    generations =
+      loaded
+      |> Assessments.list_lecture_quiz_generations()
+      |> visible_generations()
+
     socket
     |> assign(:lecture_quiz, loaded)
-    |> assign(:generations, Assessments.list_lecture_quiz_generations(loaded))
+    |> assign(:generations, generations)
     |> assign(:question_forms, forms)
     |> assign_new(:dirty_question_ids, fn -> MapSet.new() end)
     |> assign_new(:new_question_form, fn -> nil end)
+    |> assign_new(:new_question_type, fn -> nil end)
   end
 
   defp reload(socket) do
@@ -753,12 +889,47 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
     assign_lecture_quiz(socket, lecture_quiz)
   end
 
+  # The caller can ask for a specific tab (the course page opens this view as a
+  # modal from either "Add quiz" or "View questions"). Without a request, fall
+  # back to whichever tab has something to show.
+  defp select_initial_tab(socket, "questions"), do: assign(socket, :active_tab, :questions)
+  defp select_initial_tab(socket, "generate"), do: assign(socket, :active_tab, :generate)
+  defp select_initial_tab(socket, _tab), do: show_existing_questions(socket)
+
+  defp show_existing_questions(%{assigns: %{lecture_quiz: %{questions: [_ | _]}}} = socket) do
+    assign(socket, :active_tab, :questions)
+  end
+
+  defp show_existing_questions(socket), do: socket
+
+  # Keep completed generations as useful history. An in-flight generation is
+  # useful only when it is the current (newest) attempt; older pending or
+  # processing rows are stale, and failed attempts are not useful here.
+  defp visible_generations([
+         %{status: status} = current_generation | older_generations
+       ])
+       when status in [:pending, :processing] do
+    [current_generation | Enum.filter(older_generations, &(&1.status == :ready))]
+  end
+
+  defp visible_generations(generations) do
+    Enum.filter(generations, &(&1.status == :ready))
+  end
+
   defp do_generate(lecture, attrs, socket) do
     case Assessments.start_lecture_quiz_generation(lecture, socket.assigns.current_user, attrs) do
-      {:ok, _generation} ->
+      {:ok, generation} ->
+        if connected?(socket) and is_nil(socket.assigns.lecture_quiz) do
+          Assessments.subscribe_to_lecture_quiz_generation(%LectureQuiz{
+            id: generation.lecture_quiz_id
+          })
+        end
+
         {:noreply,
          socket
          |> put_flash(:info, "Generating draft questions in the background…")
+         |> assign(:generating_questions?, true)
+         |> assign(:active_tab, :generate)
          |> reload()}
 
       {:error, %Ecto.Changeset{} = changeset} ->

@@ -168,6 +168,14 @@ defmodule WasomiWeb.AdminLive.Components.ResourceUploader do
   defp upload_error_to_string(:unsupported_content_type), do: "That file type is not supported."
   defp upload_error_to_string(:document_too_large), do: "Files must be 50 MB or smaller."
   defp upload_error_to_string(:forbidden), do: "You are not allowed to upload resources."
+
+  defp upload_error_to_string(:external_client_failure),
+    do:
+      "The direct upload was blocked. Confirm that R2 CORS allows PUT and the Content-Type header from this site."
+
+  defp upload_error_to_string(:r2_not_configured),
+    do: "R2 storage credentials are not configured on this server."
+
   defp upload_error_to_string(message) when is_binary(message), do: message
   defp upload_error_to_string(_), do: "Could not prepare this upload."
 end

@@ -3,20 +3,77 @@ defmodule WasomiWeb.StudyHubLiveTest do
   use Oban.Testing, repo: Wasomi.Repo
 
   import Phoenix.LiveViewTest
+  import Mox
   import Wasomi.CatalogFixtures
   import Wasomi.AssessmentsFixtures
 
   alias Wasomi.Assessments
   alias Wasomi.Assessments.Workers.GenerateFlashcardsWorker
   alias Wasomi.Assessments.Workers.GeneratePracticeSetQuestionsWorker
+  alias Wasomi.Assessments.Workers.GenerateSmartTestWorker
+  alias Wasomi.Assessments.Workers.GenerateStudyGuideWorker
   alias Wasomi.Enrollments
 
   setup :register_and_log_in_user
+  setup :verify_on_exit!
 
   defp enroll!(user, course) do
     {:ok, pending} = Enrollments.create_pending_enrollment(user, course)
     {:ok, active} = Enrollments.activate_enrollment(pending)
     active
+  end
+
+  describe "capture protection" do
+    test "the hub is guarded and watermarked with the viewer's identity", %{
+      conn: conn,
+      user: user
+    } do
+      {:ok, view, _html} = live(conn, ~p"/learn/study")
+
+      assert has_element?(
+               view,
+               "#study-hub[phx-hook='CaptureGuard'][data-watermark='User ##{user.id}']"
+             )
+
+      refute has_element?(view, "#study-hub[data-watermark*='#{user.email}']")
+    end
+
+    test "a reported capture attempt is logged", %{conn: conn, user: user} do
+      {:ok, view, _html} = live(conn, ~p"/learn/study")
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert render_hook(view, "capture-attempt", %{"kind" => "copy"})
+        end)
+
+      assert log =~ "capture attempt: kind=copy user_id=#{user.id} surface=study_hub"
+    end
+  end
+
+  describe "embedded study" do
+    test "uses the course page chrome and preserves it while choosing a flashcard scope", %{
+      conn: conn,
+      user: user
+    } do
+      course = course_fixture(status: :published)
+      module = course_module_fixture(course_id: course.id, position: 1)
+      lecture_fixture(module_id: module.id, position: 1)
+      enroll!(user, course)
+
+      {:ok, view, _html} =
+        live(
+          conn,
+          ~p"/learn/study?#{%{course: course.slug, module: module.id, mode: "flashcards", embedded: true}}"
+        )
+
+      refute has_element?(view, "#student-sidebar")
+      assert has_element?(view, "h2", "Study the whole module, or one lesson?")
+
+      view |> element("button[phx-value-scope='module']") |> render_click()
+
+      refute has_element?(view, "#student-sidebar")
+      assert render(view) =~ "Build your flashcards"
+    end
   end
 
   describe "course picker" do
@@ -142,15 +199,16 @@ defmodule WasomiWeb.StudyHubLiveTest do
         |> render_click()
 
       assert html =~ "What do you want to do?"
-      refute html =~ "Timed quiz"
+      assert html =~ "Smart Test"
     end
   end
 
   describe "mode picker" do
-    test "offers Flashcards, Extra practice, and Timed quiz for a whole-module scope", %{
-      conn: conn,
-      user: user
-    } do
+    test "offers Study guide, Flashcards, Extra practice, and Smart Test for a whole-module scope",
+         %{
+           conn: conn,
+           user: user
+         } do
       course = course_fixture(status: :published)
       module = course_module_fixture(course_id: course.id, position: 1)
       lecture_fixture(module_id: module.id, position: 1)
@@ -162,12 +220,13 @@ defmodule WasomiWeb.StudyHubLiveTest do
           ~p"/learn/study?#{%{course: course.slug, module: module.id, scope: "module"}}"
         )
 
+      assert has_element?(view, "button[phx-value-mode='study_guide']", "Study guide")
       assert has_element?(view, "button[phx-value-mode='flashcards']", "Flashcards")
       assert has_element?(view, "button[phx-value-mode='practice']", "Extra practice")
-      assert has_element?(view, "button[phx-value-mode='timed_quiz']", "Timed quiz")
+      assert has_element?(view, "button[phx-value-mode='timed_quiz']", "Smart Test")
     end
 
-    test "hides Timed quiz for a single-lecture scope", %{conn: conn, user: user} do
+    test "offers Smart Test for a single-lecture scope too", %{conn: conn, user: user} do
       course = course_fixture(status: :published)
       module = course_module_fixture(course_id: course.id, position: 1)
       lecture = lecture_fixture(module_id: module.id, position: 1)
@@ -180,28 +239,33 @@ defmodule WasomiWeb.StudyHubLiveTest do
         )
 
       assert has_element?(view, "button[phx-value-mode='flashcards']")
-      refute has_element?(view, "button[phx-value-mode='timed_quiz']")
+      assert has_element?(view, "button[phx-value-mode='timed_quiz']", "Smart Test")
     end
 
-    test "requesting timed_quiz mode via URL for a lecture scope is rejected back to the mode step",
+    test "a lecture-scoped Smart Test URL opens the builder for that lesson",
          %{conn: conn, user: user} do
       course = course_fixture(status: :published)
       module = course_module_fixture(course_id: course.id, position: 1)
-      lecture = lecture_fixture(module_id: module.id, position: 1)
+      lecture = lecture_fixture(module_id: module.id, position: 1, title: "How GS1 works")
       enroll!(user, course)
 
-      {:ok, view, _html} =
+      {:ok, _view, html} =
         live(
           conn,
           ~p"/learn/study?#{%{course: course.slug, module: module.id, scope: "lecture", lecture: lecture.id, mode: "timed_quiz"}}"
         )
 
-      assert has_element?(view, "h2", "What do you want to do?")
+      assert html =~ "Smart Test"
+      assert html =~ "How GS1 works"
+      assert html =~ "Create test"
     end
   end
 
   describe "Flashcards content" do
-    test "first visit creates a pending set and enqueues generation", %{conn: conn, user: user} do
+    test "first visit creates a pending set and waits for the learner to ask", %{
+      conn: conn,
+      user: user
+    } do
       course = course_fixture(status: :published)
       module = course_module_fixture(course_id: course.id, position: 1)
       lecture_fixture(module_id: module.id, position: 1)
@@ -213,10 +277,57 @@ defmodule WasomiWeb.StudyHubLiveTest do
           ~p"/learn/study?#{%{course: course.slug, module: module.id, scope: "module", mode: "flashcards"}}"
         )
 
-      assert html =~ "Generating your flashcards"
+      assert html =~ "Build your flashcards"
+      refute html =~ "Generating your flashcards"
       {:ok, set} = Assessments.get_or_create_flashcard_set(module)
       assert set.status == :pending
-      assert_enqueued(worker: GenerateFlashcardsWorker, args: %{"flashcard_set_id" => set.id})
+      refute_enqueued(worker: GenerateFlashcardsWorker, args: %{"flashcard_set_id" => set.id})
+    end
+
+    test "the setup panel generates on request and offers the module's lectures as scopes", %{
+      conn: conn,
+      user: user
+    } do
+      course = course_fixture(status: :published)
+      module = course_module_fixture(course_id: course.id, position: 1)
+      lecture = lecture_fixture(module_id: module.id, position: 1, title: "Barcodes 101")
+      enroll!(user, course)
+
+      {:ok, view, _html} =
+        live(
+          conn,
+          ~p"/learn/study?#{%{course: course.slug, module: module.id, scope: "module", mode: "flashcards"}}"
+        )
+
+      # Re-pointing at a single lesson keeps the learner in Flashcards rather
+      # than dropping them back on the mode picker.
+      html =
+        view
+        |> element("button[phx-value-scope='lecture'][phx-value-lecture_id='#{lecture.id}']")
+        |> render_click()
+
+      assert html =~ "Barcodes 101"
+      assert html =~ "Build your flashcards"
+
+      html = view |> element("button", "Generate flashcards") |> render_click()
+      assert html =~ "Generating your flashcards"
+
+      {:ok, lecture_set} = Assessments.get_or_create_flashcard_set(lecture)
+      assert lecture_set.status == :processing
+
+      assert_enqueued(
+        worker: GenerateFlashcardsWorker,
+        args: %{"flashcard_set_id" => lecture_set.id}
+      )
+
+      # The whole-module set is untouched — only the scope they asked for is generated.
+      {:ok, module_set} = Assessments.get_or_create_flashcard_set(module)
+      assert module_set.status == :pending
+
+      refute_enqueued(
+        worker: GenerateFlashcardsWorker,
+        args: %{"flashcard_set_id" => module_set.id}
+      )
     end
 
     test "a ready set shows the review UI and rating persists progress", %{
@@ -303,6 +414,95 @@ defmodule WasomiWeb.StudyHubLiveTest do
 
       assert_enqueued(worker: GenerateFlashcardsWorker, args: %{"flashcard_set_id" => set.id})
     end
+
+    test "the deck reports its status breakdown and where the cards came from", %{
+      conn: conn,
+      user: user
+    } do
+      course = course_fixture(status: :published)
+      module = course_module_fixture(course_id: course.id, position: 1)
+      lecture_fixture(module_id: module.id, position: 1)
+      enroll!(user, course)
+
+      set = flashcard_set_fixture(module: module)
+
+      {:ok, 2} =
+        Assessments.mark_flashcard_set_ready(
+          set,
+          [
+            draft_flashcard_attrs(%{front: "Card one"}),
+            draft_flashcard_attrs(%{front: "Card two"})
+          ],
+          source: :practice_questions
+        )
+
+      {:ok, view, _html} =
+        live(
+          conn,
+          ~p"/learn/study?#{%{course: course.slug, module: module.id, scope: "module", mode: "flashcards"}}"
+        )
+
+      html = render(view)
+      assert html =~ "2 cards"
+      assert html =~ "practice questions"
+      assert html =~ "Reviewing"
+      assert html =~ "Mastered"
+    end
+
+    test "rating a card Easy marks it mastered", %{conn: conn, user: user} do
+      course = course_fixture(status: :published)
+      module = course_module_fixture(course_id: course.id, position: 1)
+      lecture_fixture(module_id: module.id, position: 1)
+      enroll!(user, course)
+
+      set = flashcard_set_fixture(module: module)
+      {:ok, 1} = Assessments.mark_flashcard_set_ready(set, [draft_flashcard_attrs()])
+
+      {:ok, view, _html} =
+        live(
+          conn,
+          ~p"/learn/study?#{%{course: course.slug, module: module.id, scope: "module", mode: "flashcards"}}"
+        )
+
+      view |> element("button[phx-value-rating='mastered']") |> render_click()
+
+      [card] = Assessments.list_flashcards(set)
+
+      assert %{status: :mastered} =
+               Wasomi.Repo.get_by!(Assessments.FlashcardProgress,
+                 flashcard_id: card.id,
+                 user_id: user.id
+               )
+    end
+
+    test "generating a new deck clears the old cards and re-enqueues generation", %{
+      conn: conn,
+      user: user
+    } do
+      course = course_fixture(status: :published)
+      module = course_module_fixture(course_id: course.id, position: 1)
+      lecture_fixture(module_id: module.id, position: 1)
+      enroll!(user, course)
+
+      set = flashcard_set_fixture(module: module)
+
+      {:ok, 1} =
+        Assessments.mark_flashcard_set_ready(set, [draft_flashcard_attrs(%{front: "Stale card"})])
+
+      {:ok, view, _html} =
+        live(
+          conn,
+          ~p"/learn/study?#{%{course: course.slug, module: module.id, scope: "module", mode: "flashcards"}}"
+        )
+
+      html = view |> element("button", "Generate a new deck") |> render_click()
+
+      assert html =~ "Generating your flashcards"
+      refute html =~ "Stale card"
+      assert Assessments.list_flashcards(set) == []
+      assert Assessments.get_flashcard_set!(set.id).status == :processing
+      assert_enqueued(worker: GenerateFlashcardsWorker, args: %{"flashcard_set_id" => set.id})
+    end
   end
 
   describe "Extra practice content" do
@@ -364,85 +564,530 @@ defmodule WasomiWeb.StudyHubLiveTest do
     end
   end
 
-  describe "Timed quiz content" do
-    test "starts and can be submitted before finishing the module's lectures", %{
-      conn: conn,
-      user: user
-    } do
+  defp smart_test_path(course, module) do
+    ~p"/learn/study?#{%{course: course.slug, module: module.id, scope: "module", mode: "timed_quiz"}}"
+  end
+
+  describe "Smart Test content" do
+    setup %{user: user} do
       course = course_fixture(status: :published)
       module = course_module_fixture(course_id: course.id, position: 1)
-      lecture_fixture(module_id: module.id, position: 1)
+      lecture = lecture_fixture(module_id: module.id, position: 1, title: "How GS1 works")
       enroll!(user, course)
 
-      quiz = quiz_fixture(%{module: module})
-      question = question_fixture(%{quiz: quiz})
-      correct = Enum.find(question.question_options, & &1.correct)
-
-      {:ok, view, _html} =
-        live(
-          conn,
-          ~p"/learn/study?#{%{course: course.slug, module: module.id, scope: "module", mode: "timed_quiz"}}"
-        )
-
-      # No lecture has been completed, unlike CoursePlayerLive's Module Quiz —
-      # the hub deliberately drops that gate for Timed quiz.
-      html =
-        view
-        |> element("button[phx-value-seconds-per-question='60']")
-        |> render_click()
-
-      assert html =~ "Question 1 of 1"
-      assert has_element?(view, "#quiz-countdown[data-total-seconds='60']")
-
-      view
-      |> element(
-        "input[phx-value-question-id='#{question.id}'][phx-value-option-id='#{correct.id}']"
-      )
-      |> render_click()
-
-      html = view |> element("form[phx-submit='submit-timed-quiz']") |> render_submit()
-
-      assert html =~ "Quiz Passed!"
-      assert [%{score_percent: 100}] = Assessments.list_submissions_for_user(user, quiz)
+      %{course: course, module: module, lecture: lecture}
     end
 
-    test "the deadline expiring auto-submits whatever was answered", %{conn: conn, user: user} do
-      course = course_fixture(status: :published)
-      module = course_module_fixture(course_id: course.id, position: 1)
-      lecture_fixture(module_id: module.id, position: 1)
-      enroll!(user, course)
+    test "opens on the settings form with defaults, and no test to resume yet", %{
+      conn: conn,
+      course: course,
+      module: module
+    } do
+      {:ok, view, html} = live(conn, smart_test_path(course, module))
 
-      quiz = quiz_fixture(%{module: module})
-      question_fixture(%{quiz: quiz})
+      assert html =~ "Smart Test"
+      assert html =~ "10 min"
+      assert html =~ "8 questions"
+      assert html =~ "10 minute limit"
+      refute html =~ "Saved test"
+      assert has_element?(view, "button", "Create test")
+    end
 
-      {:ok, view, _html} =
-        live(
-          conn,
-          ~p"/learn/study?#{%{course: course.slug, module: module.id, scope: "module", mode: "timed_quiz"}}"
-        )
+    test "the duration stepper and question counts drive the summary", %{
+      conn: conn,
+      course: course,
+      module: module
+    } do
+      {:ok, view, _html} = live(conn, smart_test_path(course, module))
 
-      view |> element("button[phx-value-seconds-per-question='30']") |> render_click()
+      html = view |> element("button[phx-value-by='5']") |> render_click()
+      assert html =~ "15 min"
 
-      send(view.pid, :timed_quiz_expired)
+      html =
+        view
+        |> element("form[phx-submit='create-smart-test']")
+        |> render_change(%{
+          "settings" => %{
+            "duration_minutes" => "15",
+            "multiple_choice_count" => "4",
+            "short_answer_count" => "1",
+            "difficulty" => "5"
+          }
+        })
+
+      assert html =~ "5 questions"
+      assert html =~ "5 of 5"
+      # The checkbox was left out of the payload, so the limit is now off.
+      assert html =~ "No time limit"
+    end
+
+    test "settings are clamped rather than trusted", %{conn: conn, course: course, module: module} do
+      {:ok, view, _html} = live(conn, smart_test_path(course, module))
+
+      html =
+        view
+        |> element("form[phx-submit='create-smart-test']")
+        |> render_change(%{
+          "settings" => %{
+            "duration_minutes" => "9999",
+            "multiple_choice_count" => "999",
+            "short_answer_count" => "0",
+            "difficulty" => "99"
+          }
+        })
+
+      assert html =~ "180 min"
+      assert html =~ "20 questions"
+      assert html =~ "5 of 5"
+    end
+
+    test "creating a test enqueues generation and shows the building state", %{
+      conn: conn,
+      user: user,
+      course: course,
+      module: module
+    } do
+      {:ok, view, _html} = live(conn, smart_test_path(course, module))
+
+      html = view |> element("form[phx-submit='create-smart-test']") |> render_submit()
+
+      assert html =~ "Building your Smart Test"
+
+      [smart_test] = Assessments.list_smart_tests(user, module)
+      assert smart_test.status == :pending
+      assert smart_test.multiple_choice_count == 6
+      assert smart_test.short_answer_count == 2
+
+      assert_enqueued(
+        worker: GenerateSmartTestWorker,
+        args: %{"smart_test_id" => smart_test.id}
+      )
+    end
+
+    test "generation finishing swaps the building state for the launchpad", %{
+      conn: conn,
+      user: user,
+      course: course,
+      module: module
+    } do
+      {:ok, view, _html} = live(conn, smart_test_path(course, module))
+      view |> element("form[phx-submit='create-smart-test']") |> render_submit()
+
+      [smart_test] = Assessments.list_smart_tests(user, module)
+
+      {:ok, _count} =
+        Assessments.mark_smart_test_ready(smart_test, [
+          draft_smart_test_choice_attrs(prompt: "Which is true?"),
+          draft_smart_test_written_attrs(prompt: "Explain it.")
+        ])
+
+      html = render(view)
+      assert html =~ "Your Smart Test is ready"
+      assert has_element?(view, "button", "Start your test")
+    end
+
+    test "a saved test can be resumed from the settings screen", %{
+      conn: conn,
+      user: user,
+      module: module,
+      course: course
+    } do
+      ready_smart_test_fixture(user: user, module: module, difficulty: 4)
+
+      {:ok, view, html} = live(conn, smart_test_path(course, module))
+
+      assert html =~ "Saved test"
+      assert html =~ "Not started"
+      assert html =~ "4 of 5"
+
+      html = view |> element("button[phx-click='open-smart-test']") |> render_click()
+      assert html =~ "Your Smart Test is ready"
+    end
+
+    test "starting the test shows every question, keeps answers, and scores on finish", %{
+      conn: conn,
+      user: user,
+      module: module,
+      course: course
+    } do
+      smart_test = ready_smart_test_fixture(user: user, module: module)
+      [choice, written] = smart_test.smart_test_questions
+      correct = Enum.find(choice.smart_test_question_options, & &1.correct)
+
+      {:ok, view, _html} = live(conn, smart_test_path(course, module))
+      view |> element("button[phx-click='open-smart-test']") |> render_click()
+      html = view |> element("button", "Start your test") |> render_click()
+
+      assert html =~ "Complete every question, then check your score."
+      assert html =~ choice.prompt
+      assert html =~ written.prompt
+      assert has_element?(view, "#smart-test-countdown")
+
+      view
+      |> element("button[phx-value-option-id='#{correct.id}']")
+      |> render_click()
+
+      view
+      |> element("form[phx-change='answer-smart-test-text']")
+      |> render_change(%{"question_id" => written.id, "response" => "They work together."})
+
+      # Answers are persisted as they're given, not gathered at submit time.
+      assert [%{response_option_id: option_id}, %{response_text: "They work together."}] =
+               Assessments.list_smart_test_questions(smart_test)
+
+      assert option_id == correct.id
+
+      expect(Wasomi.LectureQuestionScorerMock, :score, fn _, _, _ -> {:ok, 1.0} end)
+
+      html = view |> element("button", "Finish test") |> render_click()
+
+      assert html =~ "Test complete"
+      assert html =~ "100%"
+      assert html =~ "Model answer"
+      assert Assessments.get_smart_test!(smart_test.id).score_percent == 100
+    end
+
+    test "leaving for the settings screen pauses the clock", %{
+      conn: conn,
+      user: user,
+      module: module,
+      course: course
+    } do
+      smart_test = ready_smart_test_fixture(user: user, module: module)
+
+      {:ok, view, _html} = live(conn, smart_test_path(course, module))
+      view |> element("button[phx-click='open-smart-test']") |> render_click()
+      view |> element("button", "Start your test") |> render_click()
+
+      html = view |> element("button", "Test settings") |> render_click()
+
+      assert html =~ "Paused"
+      assert Assessments.get_smart_test!(smart_test.id).paused_at
+
+      html = view |> element("button[phx-click='open-smart-test']") |> render_click()
+      assert html =~ "Test paused"
+
+      html = view |> element("button", "Resume your test") |> render_click()
+      assert html =~ "Complete every question, then check your score."
+      refute Assessments.get_smart_test!(smart_test.id).paused_at
+    end
+
+    test "the deadline expiring scores whatever was answered", %{
+      conn: conn,
+      user: user,
+      module: module,
+      course: course
+    } do
+      smart_test = ready_smart_test_fixture(user: user, module: module)
+
+      {:ok, view, _html} = live(conn, smart_test_path(course, module))
+      view |> element("button[phx-click='open-smart-test']") |> render_click()
+      view |> element("button", "Start your test") |> render_click()
+
+      send(view.pid, :smart_test_expired)
       html = render(view)
 
       assert html =~ "Time&#39;s up!"
-      assert [%{score_percent: 0}] = Assessments.list_submissions_for_user(user, quiz)
+
+      finished = Assessments.get_smart_test!(smart_test.id)
+      assert finished.time_expired
+      assert finished.score_percent == 0
     end
 
-    test "shows an empty state when the module has no quiz yet", %{conn: conn, user: user} do
+    test "an answer arriving after the test is scored is ignored", %{
+      conn: conn,
+      user: user,
+      module: module,
+      course: course
+    } do
+      smart_test = ready_smart_test_fixture(user: user, module: module)
+      [choice, _written] = smart_test.smart_test_questions
+      correct = Enum.find(choice.smart_test_question_options, & &1.correct)
+
+      {:ok, view, _html} = live(conn, smart_test_path(course, module))
+      view |> element("button[phx-click='open-smart-test']") |> render_click()
+      view |> element("button", "Start your test") |> render_click()
+
+      send(view.pid, :smart_test_expired)
+      render(view)
+
+      render_click(view, "answer-smart-test-choice", %{
+        "question-id" => choice.id,
+        "option-id" => correct.id
+      })
+
+      assert [%{response_option_id: nil, score: 0.0} | _] =
+               Assessments.list_smart_test_questions(smart_test)
+    end
+
+    test "a retake clears the previous attempt but keeps the questions", %{
+      conn: conn,
+      user: user,
+      module: module,
+      course: course
+    } do
+      smart_test = ready_smart_test_fixture(user: user, module: module)
+
+      {:ok, view, _html} = live(conn, smart_test_path(course, module))
+      view |> element("button[phx-click='open-smart-test']") |> render_click()
+      view |> element("button", "Start your test") |> render_click()
+      view |> element("button", "Finish test") |> render_click()
+
+      html = view |> element("button", "Retake this test") |> render_click()
+
+      assert html =~ "Your Smart Test is ready"
+      reset = Assessments.get_smart_test!(smart_test.id)
+      refute reset.score_percent
+      assert length(Assessments.list_smart_test_questions(reset)) == 2
+    end
+
+    test "a failed generation offers a retry", %{
+      conn: conn,
+      user: user,
+      module: module,
+      course: course
+    } do
+      smart_test = smart_test_fixture(user: user, module: module)
+      Assessments.mark_smart_test_failed(smart_test, "no_resources_available")
+
+      {:ok, view, _html} = live(conn, smart_test_path(course, module))
+      html = view |> element("button[phx-click='open-smart-test']") |> render_click()
+
+      assert html =~ "We couldn&#39;t build this Smart Test."
+
+      view |> element("button", "Try again") |> render_click()
+
+      assert_enqueued(
+        worker: GenerateSmartTestWorker,
+        args: %{"smart_test_id" => smart_test.id}
+      )
+    end
+  end
+
+  defp study_guide_path(course, module) do
+    ~p"/learn/study?#{%{course: course.slug, module: module.id, scope: "module", mode: "study_guide"}}"
+  end
+
+  describe "Study guide content" do
+    setup %{user: user} do
       course = course_fixture(status: :published)
-      module = course_module_fixture(course_id: course.id, position: 1)
-      lecture_fixture(module_id: module.id, position: 1)
+      module = course_module_fixture(course_id: course.id, position: 1, title: "Barcode basics")
+      lecture = lecture_fixture(module_id: module.id, position: 1, title: "How GS1 works")
       enroll!(user, course)
 
-      {:ok, view, _html} =
+      %{course: course, module: module, lecture: lecture}
+    end
+
+    test "opens on the brief, with the styles to choose from and nothing generated yet", %{
+      conn: conn,
+      course: course,
+      module: module
+    } do
+      {:ok, view, html} = live(conn, study_guide_path(course, module))
+
+      assert html =~ "Study guide"
+      assert html =~ "Short notes"
+      assert html =~ "As a story"
+      assert html =~ "Cheat sheet"
+      assert html =~ "By analogy"
+      refute html =~ "Your guides"
+      assert has_element?(view, "button", "Write my study guide")
+    end
+
+    test "the brief reflects the style, depth, level and focus the learner picks", %{
+      conn: conn,
+      course: course,
+      module: module
+    } do
+      {:ok, view, _html} = live(conn, study_guide_path(course, module))
+
+      view
+      |> element("form[phx-submit='create-study-guide']")
+      |> render_change(%{
+        "settings" => %{
+          "style" => "story",
+          "depth" => "deep",
+          "reading_level" => "beginner",
+          "focus" => "check digits only"
+        }
+      })
+
+      assert has_element?(view, "input[name='settings[style]'][value='story'][checked]")
+      assert has_element?(view, "input[name='settings[depth]'][value='deep'][checked]")
+
+      assert has_element?(
+               view,
+               "input[name='settings[reading_level]'][value='beginner'][checked]"
+             )
+
+      refute has_element?(view, "input[name='settings[style]'][value='notes'][checked]")
+      assert render(view) =~ "check digits only"
+    end
+
+    test "a hand-edited style is ignored rather than trusted", %{
+      conn: conn,
+      user: user,
+      course: course,
+      module: module
+    } do
+      {:ok, view, _html} = live(conn, study_guide_path(course, module))
+
+      view
+      |> element("form[phx-submit='create-study-guide']")
+      |> render_change(%{"settings" => %{"style" => "limerick", "depth" => "nope"}})
+
+      view |> element("form[phx-submit='create-study-guide']") |> render_submit()
+
+      [guide] = Assessments.list_study_guides(user, module)
+      assert guide.style == :notes
+      assert guide.depth == :standard
+    end
+
+    test "asking for a guide enqueues generation and shows the writing state", %{
+      conn: conn,
+      user: user,
+      course: course,
+      module: module
+    } do
+      {:ok, view, _html} = live(conn, study_guide_path(course, module))
+
+      html =
+        view
+        |> element("form[phx-submit='create-study-guide']")
+        |> render_submit(%{
+          "settings" => %{
+            "style" => "story",
+            "depth" => "brief",
+            "reading_level" => "intermediate",
+            "include_examples" => "true",
+            "focus" => "  check digits  "
+          }
+        })
+
+      assert html =~ "Writing your study guide"
+
+      [guide] = Assessments.list_study_guides(user, module)
+      assert guide.status == :pending
+      assert guide.style == :story
+      assert guide.depth == :brief
+      assert guide.include_examples
+      refute guide.include_key_terms
+      assert guide.focus == "check digits"
+
+      assert_enqueued(worker: GenerateStudyGuideWorker, args: %{"study_guide_id" => guide.id})
+    end
+
+    test "generation finishing swaps the writing state for the document", %{
+      conn: conn,
+      user: user,
+      course: course,
+      module: module
+    } do
+      {:ok, view, _html} = live(conn, study_guide_path(course, module))
+      view |> element("form[phx-submit='create-study-guide']") |> render_submit()
+
+      [guide] = Assessments.list_study_guides(user, module)
+      {:ok, 2} = Assessments.mark_study_guide_ready(guide, draft_study_guide_attrs())
+
+      html = render(view)
+      assert html =~ "How GS1 barcodes identify a product"
+      assert html =~ "The gist"
+      assert html =~ "Where the number comes from"
+      # Body prose is split into paragraphs by us, not by the model's markup.
+      assert html =~ "A prefix identifies the company."
+      assert html =~ "The item number is yours to assign."
+      assert html =~ "The prefix is issued by GS1"
+      assert html =~ "Key idea:"
+      assert html =~ "Key terms"
+      assert html =~ "GTIN"
+      assert html =~ "Before you move on"
+    end
+
+    test "a failed generation offers a retry", %{
+      conn: conn,
+      user: user,
+      course: course,
+      module: module
+    } do
+      {:ok, view, _html} = live(conn, study_guide_path(course, module))
+      view |> element("form[phx-submit='create-study-guide']") |> render_submit()
+
+      [guide] = Assessments.list_study_guides(user, module)
+      Assessments.mark_study_guide_failed(guide, "boom")
+
+      assert render(view) =~ "We couldn't write this study guide"
+
+      view |> element("button", "Try again") |> render_click()
+      assert_enqueued(worker: GenerateStudyGuideWorker, args: %{"study_guide_id" => guide.id})
+    end
+
+    test "landing on a scope with a finished guide opens the document, not the brief", %{
+      conn: conn,
+      user: user,
+      course: course,
+      module: module
+    } do
+      ready_study_guide_fixture(user: user, module: module, style: :cheat_sheet)
+
+      {:ok, view, html} = live(conn, study_guide_path(course, module))
+
+      assert html =~ "How GS1 barcodes identify a product"
+      assert has_element?(view, "button", "Guide settings")
+
+      html = view |> element("button", "Guide settings") |> render_click()
+      assert html =~ "Your guides"
+      assert html =~ "Write my study guide"
+    end
+
+    test "saved guides can be reopened and deleted", %{
+      conn: conn,
+      user: user,
+      course: course,
+      module: module
+    } do
+      guide = ready_study_guide_fixture(user: user, module: module, style: :story)
+
+      {:ok, view, _html} = live(conn, study_guide_path(course, module))
+      view |> element("button", "Guide settings") |> render_click()
+
+      html = view |> element("button[phx-click='open-study-guide']") |> render_click()
+      assert html =~ "How GS1 barcodes identify a product"
+
+      view |> element("button", "Guide settings") |> render_click()
+      html = view |> element("button[phx-click='delete-study-guide']") |> render_click()
+
+      refute html =~ "Your guides"
+      assert Assessments.list_study_guides(user, module) == []
+      refute Assessments.get_user_study_guide(user, guide.id)
+    end
+
+    test "another learner's guide id can't be opened", %{
+      conn: conn,
+      course: course,
+      module: module
+    } do
+      other_guide = ready_study_guide_fixture(module: module)
+
+      {:ok, view, _html} = live(conn, study_guide_path(course, module))
+
+      assert render_click(view, "open-study-guide", %{"id" => to_string(other_guide.id)})
+      refute render(view) =~ "How GS1 barcodes identify a product"
+    end
+
+    test "a lecture-scoped guide is titled for that lesson", %{
+      conn: conn,
+      course: course,
+      module: module,
+      lecture: lecture
+    } do
+      {:ok, _view, html} =
         live(
           conn,
-          ~p"/learn/study?#{%{course: course.slug, module: module.id, scope: "module", mode: "timed_quiz"}}"
+          ~p"/learn/study?#{%{course: course.slug, module: module.id, scope: "lecture", lecture: lecture.id, mode: "study_guide"}}"
         )
 
-      assert render(view) =~ "doesn&#39;t have a quiz yet"
+      assert html =~ "How GS1 works"
+      assert html =~ "Write my study guide"
     end
   end
 

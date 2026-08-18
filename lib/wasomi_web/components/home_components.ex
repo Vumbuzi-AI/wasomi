@@ -250,19 +250,19 @@ defmodule WasomiWeb.HomeComponents do
 
   def hero(assigns) do
     ~H"""
-    <section class="relative isolate min-h-[560px] overflow-hidden bg-dark lg:min-h-[640px]">
+    <section class="relative isolate min-h-[640px] overflow-hidden bg-dark lg:min-h-[740px]">
       <img
         src="/images/hero-home.png"
         alt=""
         aria-hidden="true"
-        class="absolute inset-0 h-full w-full animate-image-in object-cover"
+        class="absolute inset-0 h-full w-full animate-image-in object-cover object-top"
       />
       <div class="relative mx-auto flex min-h-[560px] max-w-container items-center px-5 py-16 lg:min-h-[640px] lg:px-8">
         <div class="max-w-2xl animate-fade-up opacity-0">
-          <h1 class="max-w-lg text-4xl font-semibold leading-[1.1] text-white sm:text-5xl lg:text-6xl">
+          <h1 class="max-w-xl text-5xl font-semibold leading-[1.1] text-white sm:text-6xl lg:text-7xl">
             Learn the standards behind <span class="text-primary">trusted products.</span>
           </h1>
-          <p class="mt-6 max-w-md text-lg text-white/80">
+          <p class="mt-6 max-w-lg text-xl text-white/80">
             Build practical GS1 skills in barcodes, product identification, data quality and traceability.
           </p>
           <div class="mt-8 flex flex-wrap items-center gap-4">
@@ -325,20 +325,20 @@ defmodule WasomiWeb.HomeComponents do
             <img src="/images/gs1-box.png" alt="GS1-labeled shipping box" class="w-full max-w-md" />
           </div>
           <div id="about-content" phx-hook="RevealOnScroll" class="opacity-0">
-            <h2 class="text-4xl font-bold text-dark sm:text-5xl">About Wasomi</h2>
-            <p class="mt-6 max-w-xl text-body">
+            <h2 class="text-5xl font-bold text-dark sm:text-6xl">About Wasomi</h2>
+            <p class="mt-6 max-w-xl text-lg text-body">
               Wasomi turns GS1 standards into clear, practical lessons. Learn how barcodes, product
               identification, data quality, and traceability work, then use that knowledge in real
               business situations.
             </p>
             <div class="mt-10 grid grid-cols-2 gap-8">
               <div class="border-t-2 border-dark pt-4">
-                <p class="font-bold text-dark">Learn clearly</p>
-                <p class="mt-1 text-sm text-body">Short, focused GS1 lessons</p>
+                <p class="text-lg font-bold text-dark">Learn clearly</p>
+                <p class="mt-1 text-base text-body">Short, focused GS1 lessons</p>
               </div>
               <div class="border-t-2 border-dark pt-4">
-                <p class="font-bold text-dark">Apply confidently</p>
-                <p class="mt-1 text-sm text-body">Examples built around real products</p>
+                <p class="text-lg font-bold text-dark">Apply confidently</p>
+                <p class="mt-1 text-base text-body">Examples built around real products</p>
               </div>
             </div>
           </div>
@@ -353,8 +353,10 @@ defmodule WasomiWeb.HomeComponents do
     <section class="bg-white py-20 lg:py-28">
       <div class="mx-auto max-w-container px-5 lg:px-8">
         <div class="text-center">
-          <h2 class="text-4xl font-bold text-dark sm:text-5xl">See GS1 in action</h2>
-          <p class="mt-4 text-body">Select a step to see how Wasomi makes GS1 standards practical.</p>
+          <h2 class="text-5xl font-bold text-dark sm:text-6xl">See GS1 in action</h2>
+          <p class="mt-4 text-lg text-body">
+            Select a step to see how Wasomi makes GS1 standards practical.
+          </p>
         </div>
 
         <div class="mx-auto mt-10 max-w-5xl">
@@ -366,25 +368,25 @@ defmodule WasomiWeb.HomeComponents do
           <div class="mb-6 grid grid-cols-2 divide-x divide-black/10 border border-black/10 sm:grid-cols-4">
             <label
               for="gs1-step-1"
-              class="cursor-pointer border-b border-black/10 px-5 py-4 text-center text-sm font-semibold text-dark transition peer-checked/s1:border-b-0 peer-checked/s1:bg-dark peer-checked/s1:text-white sm:border-b-0"
+              class="cursor-pointer border-b border-black/10 px-5 py-4 text-center text-base font-semibold text-dark transition peer-checked/s1:border-b-0 peer-checked/s1:bg-dark peer-checked/s1:text-white sm:border-b-0"
             >
               <span class="text-primary peer-checked/s1:text-primary">01</span> Identify
             </label>
             <label
               for="gs1-step-2"
-              class="cursor-pointer border-b border-black/10 px-5 py-4 text-center text-sm font-semibold text-dark transition peer-checked/s2:border-b-0 peer-checked/s2:bg-dark peer-checked/s2:text-white sm:border-b-0"
+              class="cursor-pointer border-b border-black/10 px-5 py-4 text-center text-base font-semibold text-dark transition peer-checked/s2:border-b-0 peer-checked/s2:bg-dark peer-checked/s2:text-white sm:border-b-0"
             >
               <span class="text-primary">02</span> Capture
             </label>
             <label
               for="gs1-step-3"
-              class="cursor-pointer px-5 py-4 text-center text-sm font-semibold text-dark transition peer-checked/s3:bg-dark peer-checked/s3:text-white"
+              class="cursor-pointer px-5 py-4 text-center text-base font-semibold text-dark transition peer-checked/s3:bg-dark peer-checked/s3:text-white"
             >
               <span class="text-primary">03</span> Share
             </label>
             <label
               for="gs1-step-4"
-              class="cursor-pointer px-5 py-4 text-center text-sm font-semibold text-dark transition peer-checked/s4:bg-dark peer-checked/s4:text-white"
+              class="cursor-pointer px-5 py-4 text-center text-base font-semibold text-dark transition peer-checked/s4:bg-dark peer-checked/s4:text-white"
             >
               <span class="text-primary">04</span> Verify
             </label>
@@ -468,8 +470,8 @@ defmodule WasomiWeb.HomeComponents do
         {render_slot(@inner_block)}
       </span>
       <div>
-        <p class="font-semibold text-white">Sample product</p>
-        <p class="mt-1 text-sm text-white/60">GTIN 0614141000015</p>
+        <p class="text-lg font-semibold text-white">Sample product</p>
+        <p class="mt-1 text-base text-white/60">GTIN 0614141000015</p>
       </div>
       <.gs1_barcode />
     </div>
@@ -517,9 +519,9 @@ defmodule WasomiWeb.HomeComponents do
     ~H"""
     <div class="flex flex-col items-center gap-5 px-8 py-12 text-center lg:py-16">
       <p class="text-sm font-bold uppercase tracking-wide text-primary">{@eyebrow}</p>
-      <h3 class="max-w-sm text-3xl font-bold text-dark sm:text-4xl">{@title}</h3>
-      <p class="max-w-md text-body">{@description}</p>
-      <p class="flex items-center gap-2 font-semibold text-dark">
+      <h3 class="max-w-sm text-4xl font-bold text-dark sm:text-5xl">{@title}</h3>
+      <p class="max-w-md text-lg text-body">{@description}</p>
+      <p class="flex items-center gap-2 text-lg font-semibold text-dark">
         <svg
           class="h-5 w-5 text-primary"
           viewBox="0 0 24 24"
@@ -535,22 +537,20 @@ defmodule WasomiWeb.HomeComponents do
       </p>
       <label
         for={@next}
-        class="group inline-flex cursor-pointer items-center gap-2 rounded-full bg-dark py-1.5 pl-6 pr-1.5 font-medium text-white transition hover:bg-primary"
+        class="group inline-flex cursor-pointer items-center gap-2 bg-dark px-6 py-3 font-semibold text-white transition hover:bg-primary"
       >
         {@next_label}
-        <span class="grid h-9 w-9 place-items-center rounded-full bg-primary text-white transition group-hover:bg-dark">
-          <svg
-            class="h-4 w-4"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" />
-          </svg>
-        </span>
+        <svg
+          class="h-4 w-4"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.5"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" />
+        </svg>
       </label>
     </div>
     """
@@ -580,10 +580,10 @@ defmodule WasomiWeb.HomeComponents do
     ~H"""
     <section id="courses" class="bg-slate-50 py-20 lg:py-28">
       <div class="mx-auto max-w-container px-5 lg:px-8">
-        <h2 class="mx-auto max-w-2xl text-center text-3xl font-semibold text-dark sm:text-4xl lg:text-5xl">
+        <h2 class="mx-auto max-w-2xl text-center text-4xl font-semibold text-dark sm:text-5xl lg:text-6xl">
           Build practical GS1 skills
         </h2>
-        <p class="mx-auto mt-4 max-w-2xl text-center text-body">
+        <p class="mx-auto mt-4 max-w-2xl text-center text-lg text-body">
           Compare clear course outcomes, see what each course covers and choose the right place to
           start.
         </p>
@@ -631,10 +631,10 @@ defmodule WasomiWeb.HomeComponents do
     <section class="bg-white py-20 lg:py-28">
       <div class="mx-auto max-w-container px-5 lg:px-8">
         <div class="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-end">
-          <h2 class="max-w-md text-4xl font-bold leading-[1.1] text-dark sm:text-5xl">
+          <h2 class="max-w-lg text-5xl font-bold leading-[1.1] text-dark sm:text-6xl">
             Use GS1 skills in real workplaces.
           </h2>
-          <p class="text-body sm:text-right">
+          <p class="text-lg text-body sm:text-right">
             See where the standards you learn on Wasomi show up every day.
           </p>
         </div>
@@ -655,8 +655,8 @@ defmodule WasomiWeb.HomeComponents do
               </svg>
               <span class="text-base font-bold">01</span>
             </div>
-            <h3 class="mt-16 text-2xl font-bold text-white">Retail</h3>
-            <p class="mt-3 text-base text-white/70">
+            <h3 class="mt-16 text-3xl font-bold text-white">Retail</h3>
+            <p class="mt-3 text-lg text-white/70">
               Identify products and improve checkout accuracy.
             </p>
           </div>
@@ -676,8 +676,8 @@ defmodule WasomiWeb.HomeComponents do
               </svg>
               <span class="text-base font-bold">02</span>
             </div>
-            <h3 class="mt-16 text-2xl font-bold text-white">Healthcare</h3>
-            <p class="mt-3 text-base text-white/70">
+            <h3 class="mt-16 text-3xl font-bold text-white">Healthcare</h3>
+            <p class="mt-3 text-lg text-white/70">
               Support safer identification of medicines and devices.
             </p>
           </div>
@@ -701,8 +701,8 @@ defmodule WasomiWeb.HomeComponents do
               </svg>
               <span class="text-base font-bold">03</span>
             </div>
-            <h3 class="mt-16 text-2xl font-bold text-white">Logistics</h3>
-            <p class="mt-3 text-base text-white/70">
+            <h3 class="mt-16 text-3xl font-bold text-white">Logistics</h3>
+            <p class="mt-3 text-lg text-white/70">
               Track cartons, pallets and movement across locations.
             </p>
           </div>
@@ -722,8 +722,8 @@ defmodule WasomiWeb.HomeComponents do
               </svg>
               <span class="text-base font-bold">04</span>
             </div>
-            <h3 class="mt-16 text-2xl font-bold text-white">Manufacturing</h3>
-            <p class="mt-3 text-base text-white/70">
+            <h3 class="mt-16 text-3xl font-bold text-white">Manufacturing</h3>
+            <p class="mt-3 text-lg text-white/70">
               Build traceability into production and distribution.
             </p>
           </div>
@@ -738,8 +738,8 @@ defmodule WasomiWeb.HomeComponents do
     <section id="how-it-works" class="bg-slate-50 py-20 lg:py-28">
       <div class="mx-auto max-w-container px-5 lg:px-8">
         <div class="text-center">
-          <h2 class="text-4xl font-bold text-dark sm:text-5xl">How it works</h2>
-          <p class="mx-auto mt-4 max-w-xl text-body">
+          <h2 class="text-5xl font-bold text-dark sm:text-6xl">How it works</h2>
+          <p class="mx-auto mt-4 max-w-xl text-lg text-body">
             Choose a course, learn each standard, practise and finish with proof of completion.
           </p>
         </div>
@@ -861,10 +861,10 @@ defmodule WasomiWeb.HomeComponents do
       <div class="mx-auto max-w-container px-5 lg:px-8">
         <div class="grid items-center gap-16 lg:grid-cols-2">
           <div>
-            <h2 class="max-w-md text-4xl font-bold leading-[1.1] text-dark sm:text-5xl">
+            <h2 class="max-w-lg text-5xl font-bold leading-[1.1] text-dark sm:text-6xl">
               Earn a certificate after completing a course.
             </h2>
-            <p class="mt-4 max-w-md text-body">
+            <p class="mt-4 max-w-md text-lg text-body">
               Keep a clear record of the course, learner, completion date and certificate number.
             </p>
             <ul class="mt-6 space-y-3">
@@ -1116,7 +1116,7 @@ defmodule WasomiWeb.HomeComponents do
     <section id="mentors" class="bg-dark py-20 lg:py-28">
       <div class="mx-auto max-w-container px-5 lg:px-8">
         <div class="flex flex-col items-start justify-between gap-6 sm:flex-row sm:items-end">
-          <h2 class="max-w-xl text-3xl font-semibold text-white sm:text-4xl">
+          <h2 class="max-w-xl text-4xl font-semibold text-white sm:text-5xl">
             Learn from the Best in the Industry
           </h2>
           <a
@@ -1199,10 +1199,10 @@ defmodule WasomiWeb.HomeComponents do
     ~H"""
     <section id="faqs" class="bg-slate-50 py-20 lg:py-28">
       <div class="mx-auto max-w-3xl px-5 lg:px-8">
-        <h2 class="text-center text-3xl font-semibold text-dark sm:text-4xl">
+        <h2 class="text-center text-4xl font-semibold text-dark sm:text-5xl">
           Frequently Asked Questions
         </h2>
-        <p class="mx-auto mt-4 max-w-xl text-center text-body">
+        <p class="mx-auto mt-4 max-w-xl text-center text-lg text-body">
           Quick answers before you start learning.
         </p>
         <div class="mt-12 space-y-4">
@@ -1256,7 +1256,7 @@ defmodule WasomiWeb.HomeComponents do
 
   def footer(assigns) do
     ~H"""
-    <footer class="bg-secondary pb-8 pt-16">
+    <footer class="bg-dark pb-8 pt-16">
       <div class="mx-auto max-w-container px-5 lg:px-8">
         <div class="grid gap-12 sm:grid-cols-2 lg:grid-cols-[1.3fr_1fr_1fr_1fr]">
           <div>

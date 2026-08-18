@@ -10,7 +10,7 @@ config :wasomi, Wasomi.Repo,
   show_sensitive_data_on_connection_error: true,
   pool_size: 10
 
-# media_provider is dynamically configured in runtime.exs based on MUX_TOKEN_ID in .env.
+# media_provider is dynamically configured in runtime.exs based on the Cloudflare Stream token.
 
 # Store quiz-generation source PDFs on disk locally so this works without R2.
 config :wasomi, assessments_storage: Wasomi.Assessments.Storage.Local

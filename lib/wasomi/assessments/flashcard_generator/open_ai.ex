@@ -40,11 +40,15 @@ defmodule Wasomi.Assessments.FlashcardGenerator.OpenAI do
     min_count = Keyword.get(opts, :min_count, 10)
     max_count = Keyword.get(opts, :max_count, 30)
 
+    request_cards(system_prompt(), user_prompt(text, min_count, max_count))
+  end
+
+  defp request_cards(system_prompt, user_prompt) do
     body = %{
       "model" => model(),
       "messages" => [
-        %{"role" => "system", "content" => system_prompt()},
-        %{"role" => "user", "content" => user_prompt(text, min_count, max_count)}
+        %{"role" => "system", "content" => system_prompt},
+        %{"role" => "user", "content" => user_prompt}
       ],
       "response_format" => %{
         "type" => "json_schema",

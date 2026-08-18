@@ -11,9 +11,17 @@ config :wasomi,
   ecto_repos: [Wasomi.Repo],
   generators: [timestamp_type: :utc_datetime],
   payment_provider: Wasomi.Paystack,
-  media_provider: Wasomi.Media.Mux,
+  media_provider: Wasomi.Media.Cloudflare,
   storage_provider: Wasomi.Storage.R2,
   certificate_renderer: Wasomi.Certificates.Renderer.ChromicPdf,
+  chromic_pdf_options: [
+    session_pool: [
+      size: 2,
+      init_timeout: 30_000,
+      timeout: 30_000,
+      checkout_timeout: 30_000
+    ]
+  ],
   certificate_storage: Wasomi.Certificates.Storage.R2,
   assessments_storage: Wasomi.Assessments.Storage.R2,
   pdf_extractor: Wasomi.Assessments.PdfExtractor.PdfToText,
@@ -21,17 +29,10 @@ config :wasomi,
   transcriber: Wasomi.Catalog.Transcriber.OpenAI,
   lecture_question_scorer: Wasomi.Catalog.LectureQuestionScorer.OpenAI,
   lecture_resource_reader: Wasomi.Assessments.LectureResourceReader.Storage,
-  catalog_storage: Wasomi.Catalog.Storage.R2,
-  overview_script_generator: Wasomi.Catalog.OverviewScriptGenerator.OpenAI,
-  overview_narrator: Wasomi.Catalog.OverviewNarrator.OpenAI,
-  overview_image_generator: Wasomi.Catalog.OverviewImageGenerator.OpenAI,
-  slide_renderer: Wasomi.Catalog.SlideRenderer.ChromicPdf,
-  video_assembler: Wasomi.Catalog.VideoAssembler.Ffmpeg,
-  link_text_fetcher: Wasomi.Catalog.LinkTextFetcher.HttpFetch,
   paystack_api_url: "https://api.paystack.co",
   paystack_callback_url: "http://localhost:4000/payments/paystack/callback",
-  mux_api_url: "https://api.mux.com",
-  mux_cors_origin: "http://localhost:4000"
+  cloudflare_api_url: "https://api.cloudflare.com",
+  cloudflare_stream_origin: "http://localhost:4000"
 
 config :wasomi, Oban,
   repo: Wasomi.Repo,
@@ -41,7 +42,6 @@ config :wasomi, Oban,
     mailers: 5,
     quiz_generation: 2,
     transcription: 2,
-    lecture_overview: 1,
     default: 10
   ],
   plugins: [

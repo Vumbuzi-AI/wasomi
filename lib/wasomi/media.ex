@@ -23,17 +23,6 @@ defmodule Wasomi.Media do
   @callback thumbnail_url(Lecture.t(), User.t()) :: {:ok, String.t()} | {:error, term()}
   @callback download_url(Lecture.t()) :: {:ok, String.t()} | {:error, term()}
 
-  # A source video that's already hosted somewhere we control (e.g. a
-  # generated AI video overview, already sitting in object storage) never
-  # needs the browser-upload dance `create_upload/2` exists for — the
-  # provider can just fetch it directly from a URL we hand it. Reuses
-  # `upload_status/1`'s exact result shape for `asset_status/1` since it's
-  # the same "processing" lifecycle once the provider has the source in
-  # hand, just entered from a different starting point.
-  @callback create_asset_from_url(Lecture.t(), String.t(), keyword()) ::
-              {:ok, %{asset_id: String.t()}} | {:error, term()}
-  @callback asset_status(String.t()) :: {:ok, upload_status()} | {:error, term()}
-
   def playback_token(user, lecture, ttl \\ 300, adapter \\ configured_adapter()) do
     with {:ok, lecture} <- Enrollments.authorize_lecture(user, lecture) do
       adapter.playback_token(lecture, user, ttl)
@@ -91,29 +80,6 @@ defmodule Wasomi.Media do
 
   def upload_status(_user, _upload_id, _adapter), do: {:error, :forbidden}
 
-  def create_asset_from_url(user, lecture, url, opts \\ [], adapter \\ configured_adapter())
-
-  def create_asset_from_url(
-        %User{role: :admin},
-        %Lecture{} = lecture,
-        url,
-        opts,
-        adapter
-      )
-      when is_binary(url) do
-    adapter.create_asset_from_url(lecture, url, opts)
-  end
-
-  def create_asset_from_url(_user, _lecture, _url, _opts, _adapter), do: {:error, :forbidden}
-
-  def asset_status(user, asset_id, adapter \\ configured_adapter())
-
-  def asset_status(%User{role: :admin}, asset_id, adapter) when is_binary(asset_id) do
-    adapter.asset_status(asset_id)
-  end
-
-  def asset_status(_user, _asset_id, _adapter), do: {:error, :forbidden}
-
   def thumbnail_url(user, lecture, adapter \\ configured_adapter())
 
   def thumbnail_url(%User{role: :admin} = user, %Lecture{} = lecture, adapter),
@@ -139,13 +105,9 @@ defmodule Wasomi.Media do
   # A full HLS URL (e.g. seeded public sample) is streamed directly, no token.
   defp protected_stream_url(%Lecture{video_asset_id: "http" <> _ = url}, _token), do: {:ok, url}
 
-  defp protected_stream_url(%Lecture{video_provider: :mux, video_asset_id: playback_id}, token)
-       when is_binary(playback_id) and playback_id != "" do
-    # playback_id is a path segment (URI.encode/1's default is exactly the
-    # right predicate for that); token is a query *value*, so it gets the
-    # form-encoding helper meant for that job instead.
-    {:ok,
-     "https://stream.mux.com/#{URI.encode(playback_id)}.m3u8?token=#{URI.encode_www_form(token)}"}
+  defp protected_stream_url(%Lecture{video_provider: :cloudflare}, token)
+       when is_binary(token) and token != "" do
+    {:ok, Wasomi.Media.Cloudflare.delivery_url(token, "/manifest/video.m3u8")}
   end
 
   defp protected_stream_url(%Lecture{video_provider: provider}, _token),

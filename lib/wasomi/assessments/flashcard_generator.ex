@@ -1,6 +1,8 @@
 defmodule Wasomi.Assessments.FlashcardGenerator do
   @moduledoc """
-  Boundary for turning extracted document text into draft flashcards.
+  Boundary for turning course material into draft flashcards.
+
+  `generate_flashcards/2` works from extracted document/transcript text.
 
   Implementations return already-parsed, shape-checked data — a list of
   `%{front: String.t(), back: String.t()}` maps — never raw model output.

@@ -11,6 +11,12 @@ defmodule WasomiWeb.HomeLive do
      socket
      |> assign(:page_title, "Wasomi Business Institute")
      |> assign(:page_title_suffix, "")
+     |> assign(
+       :meta_description,
+       "Build practical GS1 standards skills with online courses from Wasomi Business Institute."
+     )
+     |> assign(:meta_robots, "index, follow")
+     |> assign(:canonical_url, url(~p"/"))
      |> assign(:current_user, current_user(session))
      |> assign(:courses, Catalog.list_published_courses())}
   end

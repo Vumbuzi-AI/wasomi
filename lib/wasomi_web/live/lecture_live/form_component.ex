@@ -4,7 +4,6 @@ defmodule WasomiWeb.LectureLive.FormComponent do
   require Logger
 
   alias Wasomi.{Catalog, Media, Storage}
-  alias Wasomi.Catalog.Workers.{AttachLectureOverviewVideoWorker, GenerateLectureOverviewWorker}
   alias WasomiWeb.AdminLive.Components.ResourceUploader
 
   @impl true
@@ -14,7 +13,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
       <.header>
         {@title}
         <:subtitle :if={@action == :edit}>
-          Add the lecture content, supporting resources, and common learner questions.
+          Update the basics, video, resources, and learner questions — each step saves as you go.
         </:subtitle>
         <:subtitle :if={@action == :new}>
           A few short steps — each one saves as you go, so nothing is lost if you close this
@@ -22,126 +21,68 @@ defmodule WasomiWeb.LectureLive.FormComponent do
         </:subtitle>
       </.header>
 
-      <%!-- Associated via the `form` attribute below rather than nested inside
-      either .simple_form's or a wizard step's own <form> — nested <form>
-      elements are invalid HTML and get silently dropped by the browser's
-      parser on parse. Keeping this one as a real, separate <form> (rather
-      than a plain div + phx-change-synced assign) means "Save link" always
-      submits whatever is actually in the input at the moment of the click,
-      with no server round-trip in between to go stale. --%>
-      <form id="add-link-form" phx-submit="add-link" phx-target={@myself} class="hidden"></form>
+      <div class="mt-8">
+        <%!-- Associated via the `form` attribute below rather than nested inside
+      a wizard step's own <form> — nested <form> elements are invalid HTML
+      and get silently dropped by the browser's parser on parse. Keeping
+      this one as a real, separate <form> (rather than a plain div +
+      phx-change-synced assign) means "Save link" always submits whatever
+      is actually in the input at the moment of the click, with no server
+      round-trip in between to go stale. --%>
+        <form id="add-link-form" phx-submit="add-link" phx-target={@myself} class="hidden"></form>
 
-      <div :if={@action == :new}>
-        <.wizard_steps step={@step} max_reached_step={@max_reached_step} myself={@myself} />
+        <div>
+          <.wizard_steps step={@step} max_reached_step={@max_reached_step} myself={@myself} />
 
-        <.basics_step :if={@step == :basics} form={@form} myself={@myself} />
+          <.basics_step :if={@step == :basics} form={@form} myself={@myself} action={@action} />
 
-        <.video_step
-          :if={@step == :video}
-          myself={@myself}
-          video_upload_state={@video_upload_state}
-          video_thumbnail_url={@video_thumbnail_url}
-          video_local_preview_url={@video_local_preview_url}
-          video_filename={@video_filename}
-          video_size={@video_size}
-          video_upload_message={@video_upload_message}
-        />
+          <.video_step
+            :if={@step == :video}
+            myself={@myself}
+            video_upload_state={@video_upload_state}
+            video_thumbnail_url={@video_thumbnail_url}
+            video_local_preview_url={@video_local_preview_url}
+            video_filename={@video_filename}
+            video_size={@video_size}
+            video_upload_message={@video_upload_message}
+            video_playback_lecture_id={video_playback_lecture_id(@lecture, @video_ready)}
+          />
 
-        <.resources_step
-          :if={@step == :resources}
-          myself={@myself}
-          current_user={@current_user}
-          uploads={@uploads}
-          video_ready={@video_ready}
-          resource_rows={@resource_rows}
-          resource_error={@resource_error}
-          resource_mode={@resource_mode}
-          resource_link_reset={@resource_link_reset}
-        />
+          <.resources_step
+            :if={@step == :resources}
+            myself={@myself}
+            current_user={@current_user}
+            uploads={@uploads}
+            video_ready={@video_ready}
+            resource_rows={@resource_rows}
+            resource_error={@resource_error}
+            resource_mode={@resource_mode}
+            resource_link_reset={@resource_link_reset}
+          />
 
-        <.video_overview_step
-          :if={@step == :video_overview}
-          lecture={@lecture}
-          myself={@myself}
-          overview_generation={@overview_generation}
-        />
+          <.questions_step
+            :if={@step == :questions}
+            question_rows={@question_rows}
+            myself={@myself}
+            video_ready={@video_ready}
+            action={@action}
+          />
 
-        <.questions_step
-          :if={@step == :questions}
-          question_rows={@question_rows}
-          myself={@myself}
-          video_ready={@video_ready}
-        />
-
-        <.done_step
-          :if={@step == :done}
-          lecture={@lecture}
-          myself={@myself}
-          course_slug={@course_slug}
-        />
+          <.done_step
+            :if={@step == :done}
+            lecture={@lecture}
+            myself={@myself}
+            course_slug={@course_slug}
+            action={@action}
+          />
+        </div>
       </div>
-
-      <.simple_form
-        :if={@action == :edit}
-        for={@form}
-        id="lecture-form"
-        phx-target={@myself}
-        phx-change="validate"
-        phx-submit="save"
-      >
-        <.input field={@form[:title]} type="text" label="Title" required />
-        <.input field={@form[:description]} type="textarea" label="Description" rows="4" required />
-
-        <.video_section
-          myself={@myself}
-          video_upload_state={@video_upload_state}
-          video_thumbnail_url={@video_thumbnail_url}
-          video_local_preview_url={@video_local_preview_url}
-          video_filename={@video_filename}
-          video_size={@video_size}
-          video_upload_message={@video_upload_message}
-        />
-
-        <.resources_section
-          myself={@myself}
-          current_user={@current_user}
-          uploads={@uploads}
-          resource_rows={@resource_rows}
-          resource_error={@resource_error}
-          resource_mode={@resource_mode}
-          resource_link_reset={@resource_link_reset}
-        />
-
-        <.overview_generation_section
-          :if={@lecture.id}
-          lecture={@lecture}
-          overview_generation={@overview_generation}
-          myself={@myself}
-        />
-
-        <.questions_section myself={@myself} question_rows={@question_rows} />
-
-        <:actions>
-          <p
-            :if={save_disabled?(@form, @resource_rows, @question_rows, @video_ready)}
-            class="text-sm text-amber-700"
-          >
-            Add a video or at least one resource, and finish all uploads, before saving.
-          </p>
-          <.button
-            disabled={save_disabled?(@form, @resource_rows, @question_rows, @video_ready)}
-            phx-disable-with="Saving..."
-          >
-            Save Lecture
-          </.button>
-        </:actions>
-      </.simple_form>
     </div>
     """
   end
 
-  # --- Shared sections (reused by both the edit-mode single page and the
-  # new-lecture wizard's Content/Questions steps) ---------------------------
+  # --- Shared sections (reused by the wizard's Video/Resources/Questions
+  # steps, in both create and edit mode) ------------------------------------
 
   attr :myself, :any, required: true
   attr :video_upload_state, :atom, required: true
@@ -150,6 +91,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
   attr :video_filename, :any, default: nil
   attr :video_size, :any, default: nil
   attr :video_upload_message, :any, default: nil
+  attr :video_playback_lecture_id, :any, default: nil
 
   defp video_section(assigns) do
     ~H"""
@@ -163,7 +105,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
 
       <div
         id="lecture-video-upload"
-        phx-hook="MuxUpload"
+        phx-hook="StreamUpload"
         phx-target={@myself}
         class="group relative rounded-2xl border-2 border-dashed border-black/10 bg-white p-6 text-center transition-colors hover:border-primary"
       >
@@ -195,13 +137,47 @@ defmodule WasomiWeb.LectureLive.FormComponent do
             <.icon name="hero-x-mark" class="h-4 w-4" />
           </button>
 
+          <%!-- A saved video plays right here, so the video can be reviewed
+          without leaving the wizard. The file input above is
+          `pointer-events-none` once a video exists, so the player's own
+          controls stay clickable through it. --%>
+          <div
+            :if={@video_playback_lecture_id}
+            id={"lecture-video-playback-#{@video_playback_lecture_id}"}
+            phx-hook="AdminVideoPlayback"
+            phx-update="ignore"
+            data-playback-url={
+              ~p"/media/lectures/#{@video_playback_lecture_id}/playback?preview=true"
+            }
+            class="pointer-events-auto relative aspect-video w-full overflow-hidden rounded-xl bg-black"
+          >
+            <div
+              data-role="player"
+              class="absolute inset-0 grid place-items-center text-sm text-white/70"
+            >
+              Loading video…
+            </div>
+          </div>
+
           <div class="flex items-center justify-center gap-3">
-            <div class="relative h-16 w-28 shrink-0 overflow-hidden rounded-lg bg-black">
+            <div
+              :if={is_nil(@video_playback_lecture_id)}
+              class="relative h-16 w-28 shrink-0 overflow-hidden rounded-lg bg-black"
+            >
+              <%!-- Base layer: a signed thumbnail URL can fail to load
+              (expired token, a provider that serves no thumbnails, an
+              asset id that isn't a real playback id), which otherwise
+              leaves the tile showing the browser's broken-image glyph.
+              `onerror` drops the failed <img>, revealing this icon. --%>
+              <div class="absolute inset-0 grid place-items-center text-white/60">
+                <.icon name="hero-film" class="h-5 w-5" />
+              </div>
               <img
                 :if={@video_thumbnail_url || @video_local_preview_url}
                 data-role="thumbnail"
                 src={@video_thumbnail_url || @video_local_preview_url}
-                class="animate-fade-in h-full w-full object-cover outline outline-1 -outline-offset-1 outline-black/10"
+                onerror="this.remove()"
+                class="animate-fade-in relative h-full w-full object-cover outline outline-1 -outline-offset-1 outline-black/10"
               />
               <div
                 :if={
@@ -392,121 +368,6 @@ defmodule WasomiWeb.LectureLive.FormComponent do
     """
   end
 
-  attr :lecture, :any, required: true
-  attr :overview_generation, :any, default: nil
-  attr :myself, :any, required: true
-
-  defp overview_generation_section(assigns) do
-    ~H"""
-    <section
-      id="lecture-overview-generation"
-      class="space-y-4 rounded-2xl border border-black/5 bg-soft/40 p-4 sm:p-5"
-    >
-      <div>
-        <h3 class="font-semibold text-ink">AI video overview</h3>
-        <p class="mt-1 text-sm text-muted">
-          Generates a narrated video from this lecture's resources — an alternative to uploading
-          one directly.
-        </p>
-      </div>
-
-      <p
-        :if={overview_source_resources(@lecture) == []}
-        class="rounded-xl bg-white px-4 py-3 text-sm text-muted"
-      >
-        Save this lecture with at least one document or link resource first.
-      </p>
-
-      <div :if={overview_source_resources(@lecture) != []}>
-        <button
-          :if={is_nil(@overview_generation) or @overview_generation.status in [:ready, :failed]}
-          type="button"
-          phx-click="generate-overview"
-          phx-target={@myself}
-          class="rounded-full border border-primary px-4 py-2 text-sm font-medium text-primary hover:bg-mint"
-        >
-          {if @overview_generation, do: "Generate again", else: "Generate video overview"}
-        </button>
-
-        <div
-          :if={@overview_generation && @overview_generation.status in [:pending, :processing]}
-          class="flex items-center gap-3 rounded-xl bg-white px-4 py-3"
-        >
-          <.icon name="hero-arrow-path" class="h-4 w-4 animate-spin text-primary" />
-          <p class="text-sm text-ink">{generation_status_message(@overview_generation)}</p>
-          <button
-            type="button"
-            phx-click="cancel-overview-generation"
-            phx-target={@myself}
-            class="ml-auto text-sm font-medium text-rose-600 hover:text-rose-800"
-          >
-            Cancel
-          </button>
-        </div>
-
-        <p
-          :if={@overview_generation && @overview_generation.status == :failed}
-          class="mt-3 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700"
-        >
-          Generation failed: {@overview_generation.error_message || "unknown error"}
-        </p>
-
-        <% video_url = @overview_generation && overview_video_url(@overview_generation) %>
-
-        <div :if={@overview_generation && @overview_generation.status == :ready} class="mt-3">
-          <video :if={video_url} controls class="w-full max-w-md rounded-xl bg-black" src={video_url}>
-          </video>
-          <p :if={is_nil(video_url)} class="rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">
-            Video generated, but no public URL is configured (R2_PUBLIC_URL) to preview it.
-          </p>
-        </div>
-
-        <div :if={@overview_generation && @overview_generation.status == :ready} class="mt-4">
-          <button
-            :if={@overview_generation.attach_status in [:not_attached, :attach_failed]}
-            type="button"
-            phx-click="attach-overview-video"
-            phx-target={@myself}
-            class="rounded-full bg-ink px-4 py-2 text-sm font-medium text-white hover:bg-ink/90"
-          >
-            Use this as the lecture video
-          </button>
-
-          <div
-            :if={@overview_generation.attach_status == :attaching}
-            class="flex items-center gap-3 rounded-xl bg-white px-4 py-3"
-          >
-            <.icon name="hero-arrow-path" class="h-4 w-4 animate-spin text-primary" />
-            <p class="text-sm text-ink">Attaching to the lecture… this can take a minute.</p>
-            <button
-              type="button"
-              phx-click="refresh-overview-video-attach-status"
-              phx-target={@myself}
-              class="ml-auto text-sm font-medium text-primary hover:text-ink"
-            >
-              Refresh status
-            </button>
-          </div>
-
-          <p
-            :if={@overview_generation.attach_status == :attached}
-            class="flex items-center gap-2 rounded-xl bg-mint px-4 py-3 text-sm font-medium text-primary"
-          >
-            <.icon name="hero-check-circle" class="h-4 w-4" /> This video is now the lecture's video.
-          </p>
-
-          <p
-            :if={@overview_generation.attach_status == :attach_failed}
-            class="mt-2 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700"
-          >
-            Couldn't attach this video: {@overview_generation.attach_error_message || "unknown error"}
-          </p>
-        </div>
-      </div>
-    </section>
-    """
-  end
-
   attr :myself, :any, required: true
   attr :question_rows, :list, required: true
 
@@ -618,12 +479,17 @@ defmodule WasomiWeb.LectureLive.FormComponent do
 
   attr :form, :any, required: true
   attr :myself, :any, required: true
+  attr :action, :atom, default: :new
 
   defp basics_step(assigns) do
     ~H"""
     <div>
       <p class="mb-4 text-sm text-muted">
-        Start with a title and description — you can add video, resources, and questions next.
+        <%= if @action == :edit do %>
+          Update the title and description — video, resources, and questions are on the next steps.
+        <% else %>
+          Start with a title and description — you can add video, resources, and questions next.
+        <% end %>
       </p>
       <.simple_form
         for={@form}
@@ -658,6 +524,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
   attr :video_filename, :any, default: nil
   attr :video_size, :any, default: nil
   attr :video_upload_message, :any, default: nil
+  attr :video_playback_lecture_id, :any, default: nil
 
   defp video_step(assigns) do
     ~H"""
@@ -674,6 +541,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
         video_filename={@video_filename}
         video_size={@video_size}
         video_upload_message={@video_upload_message}
+        video_playback_lecture_id={@video_playback_lecture_id}
       />
 
       <div class="mt-6 flex items-center justify-between">
@@ -750,49 +618,10 @@ defmodule WasomiWeb.LectureLive.FormComponent do
     """
   end
 
-  attr :lecture, :any, required: true
-  attr :myself, :any, required: true
-  attr :overview_generation, :any, default: nil
-
-  defp video_overview_step(assigns) do
-    ~H"""
-    <div>
-      <p class="mb-4 text-sm text-muted">
-        Optional — generate a video from your resources, or skip and add one later.
-      </p>
-
-      <.overview_generation_section
-        lecture={@lecture}
-        overview_generation={@overview_generation}
-        myself={@myself}
-      />
-
-      <div class="mt-6 flex items-center justify-between">
-        <button
-          type="button"
-          phx-target={@myself}
-          phx-click="go-to-step"
-          phx-value-step="resources"
-          class="text-sm font-medium text-muted hover:text-ink"
-        >
-          Back
-        </button>
-        <button
-          type="button"
-          phx-target={@myself}
-          phx-click="continue-video-overview"
-          class="rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-white hover:bg-primary"
-        >
-          Continue
-        </button>
-      </div>
-    </div>
-    """
-  end
-
   attr :question_rows, :list, required: true
   attr :myself, :any, required: true
   attr :video_ready, :any, default: nil
+  attr :action, :atom, default: :new
 
   defp questions_step(assigns) do
     ~H"""
@@ -803,7 +632,11 @@ defmodule WasomiWeb.LectureLive.FormComponent do
       phx-submit="save-questions"
     >
       <p class="mb-4 text-sm text-muted">
-        Optional — you can add these later from the edit page.
+        <%= if @action == :edit do %>
+          Optional — add, edit or remove the questions learners ask about this lecture.
+        <% else %>
+          Optional — you can add these later from the edit page.
+        <% end %>
       </p>
 
       <.questions_section myself={@myself} question_rows={@question_rows} />
@@ -813,7 +646,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
           type="button"
           phx-target={@myself}
           phx-click="go-to-step"
-          phx-value-step={if is_nil(@video_ready), do: "video_overview", else: "resources"}
+          phx-value-step="resources"
           class="text-sm font-medium text-muted hover:text-ink"
         >
           Back
@@ -839,6 +672,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
   attr :lecture, :any, required: true
   attr :myself, :any, required: true
   attr :course_slug, :string, required: true
+  attr :action, :atom, default: :new
 
   defp done_step(assigns) do
     ~H"""
@@ -860,6 +694,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
           <.icon name="hero-clipboard-document-check" class="h-4 w-4" /> Generate a quiz
         </.link>
         <button
+          :if={@action == :new}
           type="button"
           phx-target={@myself}
           phx-click="add-another-lecture"
@@ -903,24 +738,6 @@ defmodule WasomiWeb.LectureLive.FormComponent do
           end)
 
         assign(socket, :resource_rows, socket.assigns.resource_rows ++ rows)
-    end
-  end
-
-  # A targeted `send_update/3` from course_show.ex's `:lecture_overview_generation_updated`
-  # handler (the PubSub broadcast lands on the shared LiveView process, not
-  # this component — course_show.ex is the only place that can have a
-  # `handle_info/2` for it, and routes the result back in here). Guarded on
-  # matching `lecture_id` since course_show.ex broadcasts to this
-  # component's id under both possible mount ids (the real lecture id in
-  # edit mode, `:new_lecture` mid-wizard) without knowing which one is
-  # actually live.
-  @impl true
-  def update(%{overview_generation: generation} = assigns, socket)
-      when not is_map_key(assigns, :lecture) do
-    if socket.assigns.lecture.id == generation.lecture_id do
-      {:ok, socket |> assign(:overview_generation, generation) |> maybe_start_ticking()}
-    else
-      {:ok, socket}
     end
   end
 
@@ -974,10 +791,14 @@ defmodule WasomiWeb.LectureLive.FormComponent do
       |> assign_new(:video_local_preview_url, fn -> nil end)
       |> assign_new(:video_filename, fn -> existing_video_ready && "Current video" end)
       |> assign_new(:video_size, fn -> nil end)
-      |> assign_new(:overview_generation, fn -> latest_overview_generation(lecture) end)
-      |> assign_new(:overview_subscribed_lecture_id, fn -> nil end)
       |> assign_new(:step, fn -> :basics end)
-      |> assign_new(:max_reached_step, fn -> 0 end)
+      # An existing lecture has already been through every step, so editing
+      # starts with all four tabs unlocked (Done stays out of reach until a
+      # step is actually saved) rather than forcing a walk back through the
+      # wizard in order.
+      |> assign_new(:max_reached_step, fn ->
+        if socket.assigns.action == :edit, do: step_index(:questions), else: 0
+      end)
 
     socket =
       if Map.has_key?(socket.assigns, :uploads) and
@@ -987,24 +808,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
         ResourceUploader.configure_upload(socket, lecture.id)
       end
 
-    # Subscribe (once per distinct lecture id — "Add another lecture"
-    # resets to a fresh, unsaved lecture mid-session, which later gets a
-    # different real id once its own Basics step saves) so status updates
-    # from the background generation job arrive live instead of only on a
-    # manual "Refresh status" click. The resulting PubSub messages land on
-    # this shared process's mailbox, but course_show.ex — not this
-    # component — is what actually has a `handle_info/2` for them; see the
-    # targeted `update/2` clause above for how they get routed back in.
-    socket =
-      if connected?(socket) and lecture.id &&
-           socket.assigns.overview_subscribed_lecture_id != lecture.id do
-        Catalog.subscribe_to_overview_generation(lecture)
-        assign(socket, :overview_subscribed_lecture_id, lecture.id)
-      else
-        socket
-      end
-
-    {:ok, maybe_start_ticking(socket)}
+    {:ok, socket}
   end
 
   @impl true
@@ -1088,56 +892,6 @@ defmodule WasomiWeb.LectureLive.FormComponent do
     end
   end
 
-  def handle_event("generate-overview", _params, socket) do
-    lecture = socket.assigns.lecture
-
-    case Catalog.create_overview_generation(lecture, socket.assigns.current_user) do
-      {:ok, generation} ->
-        Oban.insert(GenerateLectureOverviewWorker.new(%{"generation_id" => generation.id}))
-
-        {:noreply, assign(socket, :overview_generation, generation)}
-
-      {:error, _changeset} ->
-        {:noreply,
-         put_flash(socket, :error, "Could not start video overview generation. Try again.")}
-    end
-  end
-
-  def handle_event("cancel-overview-generation", _params, socket) do
-    case socket.assigns.overview_generation do
-      %{status: status} = generation when status in [:pending, :processing] ->
-        updated = Catalog.cancel_overview_generation(generation)
-        {:noreply, assign(socket, :overview_generation, updated)}
-
-      _ ->
-        {:noreply, socket}
-    end
-  end
-
-  def handle_event("attach-overview-video", _params, socket) do
-    case socket.assigns.overview_generation do
-      %{status: :ready} = generation ->
-        updated = Catalog.mark_overview_video_attaching(generation)
-        Oban.insert(AttachLectureOverviewVideoWorker.new(%{"generation_id" => updated.id}))
-
-        {:noreply, assign(socket, :overview_generation, updated)}
-
-      _ ->
-        {:noreply, socket}
-    end
-  end
-
-  def handle_event("refresh-overview-video-attach-status", _params, socket) do
-    case socket.assigns.overview_generation do
-      nil ->
-        {:noreply, socket}
-
-      generation ->
-        {:noreply,
-         assign(socket, :overview_generation, Catalog.get_overview_generation!(generation.id))}
-    end
-  end
-
   def handle_event("add-question", _params, socket) do
     {:noreply,
      assign(socket, question_rows: socket.assigns.question_rows ++ [%{question: "", answer: ""}])}
@@ -1161,8 +915,8 @@ defmodule WasomiWeb.LectureLive.FormComponent do
          socket
          |> assign(:video_upload, upload)
          |> assign(:video_upload_state, :uploading)
-         |> assign(:video_upload_message, "Uploading directly to Mux…")
-         |> push_event("mux-upload-ready", %{url: upload.url})}
+         |> assign(:video_upload_message, "Uploading directly to Cloudflare Stream…")
+         |> push_event("stream-upload-ready", %{url: upload.url})}
 
       {:error, reason} ->
         {:noreply,
@@ -1179,8 +933,11 @@ defmodule WasomiWeb.LectureLive.FormComponent do
     {:noreply,
      socket
      |> assign(:video_upload_state, :processing)
-     |> assign(:video_upload_message, "Upload complete. Mux is preparing protected playback…")
-     |> push_event("mux-check-upload", %{})}
+     |> assign(
+       :video_upload_message,
+       "Upload complete. Cloudflare Stream is preparing protected playback…"
+     )
+     |> push_event("stream-check-upload", %{})}
   end
 
   def handle_event("upload-failed", params, socket) do
@@ -1201,7 +958,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
      |> assign(:video_local_preview_url, nil)
      |> assign(:video_filename, nil)
      |> assign(:video_size, nil)
-     |> push_event("mux-reset", %{})}
+     |> push_event("stream-reset", %{})}
   end
 
   def handle_event("local-preview", %{"data_url" => data_url}, socket) do
@@ -1218,7 +975,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
         {:noreply,
          socket
          |> assign(:video_ready, %{
-           video_provider: :mux,
+           video_provider: :cloudflare,
            video_asset_id: playback_id,
            duration_seconds: duration_seconds
          })
@@ -1230,8 +987,8 @@ defmodule WasomiWeb.LectureLive.FormComponent do
         {:noreply,
          socket
          |> assign(:video_upload_state, :processing)
-         |> assign(:video_upload_message, "Mux is still processing the video…")
-         |> push_event("mux-check-upload", %{})}
+         |> assign(:video_upload_message, "Cloudflare Stream is still processing the video…")
+         |> push_event("stream-check-upload", %{})}
 
       {:error, reason} ->
         {:noreply,
@@ -1239,58 +996,12 @@ defmodule WasomiWeb.LectureLive.FormComponent do
          |> assign(:video_upload_state, :error)
          |> assign(
            :video_upload_message,
-           "Mux could not process this upload: #{video_error_message(reason)}"
+           "Cloudflare Stream could not process this upload: #{video_error_message(reason)}"
          )}
     end
   end
 
   def handle_event("check-upload", _params, socket), do: {:noreply, socket}
-
-  def handle_event("save", %{"lecture" => lecture_params} = params, socket) do
-    socket = consume_resource_uploads(socket)
-    lecture_params = put_video_fields(socket, lecture_params)
-    questions = question_params(params, socket.assigns.question_rows)
-
-    case validate_resources(socket.assigns.resource_rows) do
-      :ok ->
-        result =
-          Catalog.update_lecture_content(
-            socket.assigns.lecture,
-            lecture_params,
-            socket.assigns.resource_rows,
-            questions
-          )
-
-        case result do
-          {:ok, lecture} ->
-            notify_parent({:saved, lecture})
-
-            {:noreply,
-             socket
-             |> put_flash(:info, "Lecture updated successfully")
-             |> push_patch(to: socket.assigns.patch)}
-
-          {:error, %Ecto.Changeset{} = changeset} ->
-            {:noreply, assign(socket, form: to_form(changeset, action: :validate))}
-
-          {:error, :video_or_resource_required} ->
-            {:noreply,
-             assign(socket,
-               resource_error:
-                 "Add a video, or at least one resource (document, link, etc.), before saving."
-             )}
-
-          {:error, _reason} ->
-            {:noreply,
-             assign(socket,
-               resource_error: "Could not save this lecture. Check the highlighted fields."
-             )}
-        end
-
-      {:error, message} ->
-        {:noreply, assign(socket, resource_error: message)}
-    end
-  end
 
   def handle_event("save-basics", %{"lecture" => lecture_params}, socket) do
     lecture = socket.assigns.lecture
@@ -1373,10 +1084,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
           {:ok, lecture} ->
             notify_parent({:content_saved, lecture})
 
-            next_step =
-              if is_nil(socket.assigns.video_ready), do: :video_overview, else: :questions
-
-            {:noreply, socket |> assign(:lecture, lecture) |> advance_to(next_step)}
+            {:noreply, socket |> assign(:lecture, lecture) |> advance_to(:questions)}
 
           {:error, :video_or_resource_required} ->
             {:noreply,
@@ -1396,10 +1104,6 @@ defmodule WasomiWeb.LectureLive.FormComponent do
       {:error, message} ->
         {:noreply, assign(socket, resource_error: message)}
     end
-  end
-
-  def handle_event("continue-video-overview", _params, socket) do
-    {:noreply, advance_to(socket, :questions)}
   end
 
   # Keeps `@question_rows` in sync with what's actually typed, as it's
@@ -1497,8 +1201,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
      |> assign(:video_local_preview_url, nil)
      |> assign(:video_filename, nil)
      |> assign(:video_size, nil)
-     |> assign(:overview_generation, nil)
-     |> push_event("mux-reset", %{})}
+     |> push_event("stream-reset", %{})}
   end
 
   defp advance_to(socket, step) do
@@ -1510,14 +1213,12 @@ defmodule WasomiWeb.LectureLive.FormComponent do
   defp step_index(:basics), do: 0
   defp step_index(:video), do: 1
   defp step_index(:resources), do: 2
-  defp step_index(:video_overview), do: 3
-  defp step_index(:questions), do: 4
-  defp step_index(:done), do: 5
+  defp step_index(:questions), do: 3
+  defp step_index(:done), do: 4
 
   defp step_from_param("basics"), do: {:ok, :basics}
   defp step_from_param("video"), do: {:ok, :video}
   defp step_from_param("resources"), do: {:ok, :resources}
-  defp step_from_param("video_overview"), do: {:ok, :video_overview}
   defp step_from_param("questions"), do: {:ok, :questions}
   defp step_from_param(_step), do: :error
 
@@ -1537,7 +1238,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
     do: resolve_thumbnail_url(socket.assigns.current_user, playback_id)
 
   defp resolve_thumbnail_url(current_user, playback_id) do
-    lecture = %Catalog.Lecture{video_provider: :mux, video_asset_id: playback_id}
+    lecture = %Catalog.Lecture{video_provider: :cloudflare, video_asset_id: playback_id}
 
     case safe_media_call(fn -> Media.thumbnail_url(current_user, lecture) end) do
       {:ok, url} -> url
@@ -1547,105 +1248,27 @@ defmodule WasomiWeb.LectureLive.FormComponent do
 
   defp existing_video_ready(%Catalog.Lecture{
          id: id,
-         video_provider: :mux,
+         video_provider: :cloudflare,
          video_asset_id: asset_id,
          duration_seconds: duration
        })
        when not is_nil(id) and is_binary(asset_id) and asset_id != "" do
-    %{video_provider: :mux, video_asset_id: asset_id, duration_seconds: duration}
+    %{video_provider: :cloudflare, video_asset_id: asset_id, duration_seconds: duration}
   end
 
   defp existing_video_ready(_lecture), do: nil
 
-  # `nil` for an unsaved (:new-action) lecture — generation needs a
-  # persisted lecture id, and its resources need to already be saved (the
-  # worker reads them from the DB, not from this form's live draft state).
-  defp latest_overview_generation(%Catalog.Lecture{id: id}) when not is_nil(id) do
-    %Catalog.Lecture{id: id}
-    |> Catalog.list_overview_generations_for_lecture()
-    |> List.first()
-  end
+  # Playback is signed from the lecture row, so a player is only offered once
+  # the asset currently held in the form is the one actually persisted — a
+  # just-uploaded asset isn't playable until the Video step is saved.
+  defp video_playback_lecture_id(
+         %Catalog.Lecture{id: id, video_asset_id: asset_id},
+         %{video_asset_id: asset_id}
+       )
+       when not is_nil(id) and is_binary(asset_id) and asset_id != "",
+       do: id
 
-  defp latest_overview_generation(_lecture), do: nil
-
-  # Checked against `lecture.resources` (persisted, from the DB) rather
-  # than `@resource_rows` (this form's live draft state) deliberately —
-  # the worker reads a fresh DB preload, so a resource only just added in
-  # this form (not yet saved) wouldn't be visible to it either.
-  defp overview_source_resources(%Catalog.Lecture{resources: resources})
-       when is_list(resources) do
-    Enum.filter(resources, &(&1.kind in [:document, :link]))
-  end
-
-  defp overview_source_resources(_lecture), do: []
-
-  defp overview_video_url(generation), do: Catalog.overview_video_url(generation)
-
-  # Progressively discloses more detail rather than dumping elapsed time
-  # and a "may be stuck" caveat on the user from the very first second —
-  # showing "running for 0s" the instant this starts reads as broken, not
-  # reassuring, and warning language has no business appearing before
-  # it's actually earned. `course_show.ex`'s `:tick_overview_generation`
-  # handler re-renders this every second (see `maybe_start_ticking/1`
-  # below) so the elapsed time genuinely counts up live.
-  @generation_elapsed_grace_seconds 10
-  # A real, empirically observed 10-scene generation took 6m13s (measured
-  # directly from a generation's inserted_at -> updated_at once :ready) —
-  # this is a multi-step AI video pipeline (script -> narration -> image
-  # generation -> rendering per scene), not a quick text call, and a
-  # longer lecture's source material can easily produce close to the max
-  # scene count. The threshold needs real headroom above that observed
-  # normal case, not a guessed "a minute or two."
-  @generation_stuck_threshold_seconds 600
-
-  defp generation_status_message(%{inserted_at: inserted_at}) do
-    seconds = DateTime.diff(DateTime.utc_now(), inserted_at)
-
-    cond do
-      seconds < @generation_elapsed_grace_seconds ->
-        "Generating…"
-
-      seconds < @generation_stuck_threshold_seconds ->
-        "Generating… running for #{format_duration(seconds)}. Can take several minutes — " <>
-          "longer lectures with more resources take longer."
-
-      true ->
-        "Generating… running for #{format_duration(seconds)}. This is taking longer than " <>
-          "usual — it may be stuck."
-    end
-  end
-
-  defp format_duration(seconds) do
-    cond do
-      seconds < 60 -> "#{seconds}s"
-      seconds < 3600 -> "#{div(seconds, 60)}m #{rem(seconds, 60)}s"
-      true -> "#{div(seconds, 3600)}h #{rem(div(seconds, 60), 60)}m"
-    end
-  end
-
-  # A LiveComponent has no process of its own to `Process.send_after/3`
-  # from (`self()` here resolves to the *parent* LiveView), so the actual
-  # repeating timer lives in course_show.ex's `:tick_overview_generation`
-  # handler, kicked off once here and then perpetuating itself for as
-  # long as the generation stays `:pending`/`:processing` — see that
-  # handler for where it stops. Guarded on `overview_ticking_generation_id`
-  # so a re-render (this runs on every `update/2`) never starts a second,
-  # competing tick loop for the same generation.
-  defp maybe_start_ticking(socket) do
-    ticking_id = socket.assigns[:overview_ticking_generation_id]
-
-    case socket.assigns[:overview_generation] do
-      %{id: id, status: status} when status in [:pending, :processing] and ticking_id != id ->
-        if connected?(socket) do
-          Process.send_after(self(), {:tick_overview_generation, id}, 1000)
-        end
-
-        assign(socket, :overview_ticking_generation_id, id)
-
-      _ ->
-        socket
-    end
-  end
+  defp video_playback_lecture_id(_lecture, _video_ready), do: nil
 
   defp safe_media_call(fun) do
     fun.()
@@ -1667,39 +1290,31 @@ defmodule WasomiWeb.LectureLive.FormComponent do
 
   defp video_error_message({:exception, message}), do: message
 
-  defp video_error_message({:mux, %{"messages" => [_ | _] = messages}}),
-    do: "Mux rejected the request (#{Enum.join(messages, " ")})"
-
-  defp video_error_message({:mux, %{"type" => type}}), do: "Mux rejected the request (#{type})"
-
-  defp video_error_message({:mux, status, _body}) when is_integer(status),
-    do: "Mux returned an unexpected response (HTTP #{status})"
-
-  defp video_error_message({:mux_asset_errored, errors}) when is_list(errors) do
-    case errors |> Enum.flat_map(&Map.get(&1, "messages", [])) |> Enum.join(" ") do
-      "" -> "Mux could not process this video"
-      messages -> "Mux could not process this video (#{messages})"
-    end
+  defp video_error_message({:cloudflare, status, %{"errors" => errors}})
+       when is_integer(status) and is_list(errors) do
+    messages = errors |> Enum.map(&Map.get(&1, "message")) |> Enum.reject(&is_nil/1)
+    "Cloudflare Stream rejected the request (#{Enum.join(messages, " ")})"
   end
 
-  defp video_error_message(:mux_asset_has_no_signed_playback_id),
-    do: "Mux processed the video but did not return a signed playback ID"
+  defp video_error_message({:cloudflare, status, _body}) when is_integer(status),
+    do: "Cloudflare Stream returned an unexpected response (HTTP #{status})"
 
-  defp video_error_message({:mux_upload_errored, _error}),
-    do: "Mux reported that the upload failed — try selecting the file again"
-
-  defp video_error_message({:invalid_mux_signing_key, message}),
+  defp video_error_message({:cloudflare_video_errored, status}),
     do:
-      "the Mux signing key isn't configured correctly (MUX_SIGNING_KEY_ID / MUX_SIGNING_PRIVATE_KEY): #{message}"
+      "Cloudflare Stream could not process this video (#{status["errorReason"] || "unknown error"})"
+
+  defp video_error_message({:invalid_cloudflare_signing_key, message}),
+    do: "the Cloudflare Stream signing key isn't configured correctly: #{message}"
 
   defp video_error_message(reason), do: inspect(reason)
 
   defp upload_failure_message(status) when is_integer(status),
-    do: "The upload to Mux failed (HTTP #{status}). Remove it and try selecting the file again."
+    do:
+      "The upload to Cloudflare Stream failed (HTTP #{status}). Remove it and try selecting the file again."
 
   defp upload_failure_message(_status),
     do:
-      "The upload to Mux failed because of a network error. Remove it and try selecting the file again."
+      "The upload to Cloudflare Stream failed because of a network error. Remove it and try selecting the file again."
 
   defp normalize_filename(filename) when is_binary(filename) do
     case String.trim(filename) do
@@ -1730,7 +1345,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
     case socket.assigns.video_ready do
       %{video_asset_id: asset_id, duration_seconds: duration} ->
         Map.merge(params, %{
-          "video_provider" => "mux",
+          "video_provider" => "cloudflare",
           "video_asset_id" => asset_id,
           "duration_seconds" => duration
         })
@@ -1829,16 +1444,6 @@ defmodule WasomiWeb.LectureLive.FormComponent do
 
   defp trim_param(value) when is_binary(value), do: String.trim(value)
   defp trim_param(_value), do: ""
-
-  defp save_disabled?(form, resources, questions, video_ready) do
-    required = [:title, :description, :position]
-
-    Enum.any?(required, &blank?(form[&1].value)) or
-      (is_nil(video_ready) and resources == []) or
-      Enum.any?(resources, &(resource_status(&1) in [:uploading, :error])) or
-      Enum.any?(resources, &(blank?(&1[:name]) or (&1[:kind] == :link and !valid_url?(&1[:url])))) or
-      Enum.any?(questions, &(blank?(&1[:question]) or blank?(&1[:answer])))
-  end
 
   defp basics_disabled?(form) do
     Enum.any?([:title, :description], &blank?(form[&1].value))

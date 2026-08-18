@@ -8,6 +8,12 @@ defmodule Wasomi.Assessments.FlashcardSet do
     field :cards_generated_count, :integer
     field :generated_at, :utc_datetime
 
+    # Which material the cards were actually drawn from — `nil` until the set
+    # is generated. Learners are told this, because "these cards came from the
+    # questions you'll be tested on" and "these cards came from the lesson
+    # text" are meaningfully different study aids.
+    field :source, Ecto.Enum, values: [:practice_questions, :lesson_text]
+
     belongs_to :module, Wasomi.Catalog.CourseModule, foreign_key: :module_id
     belongs_to :lecture, Wasomi.Catalog.Lecture, foreign_key: :lecture_id
 
@@ -24,6 +30,7 @@ defmodule Wasomi.Assessments.FlashcardSet do
       :error_message,
       :cards_generated_count,
       :generated_at,
+      :source,
       :module_id,
       :lecture_id
     ])
@@ -35,6 +42,7 @@ defmodule Wasomi.Assessments.FlashcardSet do
     |> unique_constraint(:lecture_id, message: "already has a flashcard set")
     |> check_constraint(:module_id, name: :flashcard_sets_scope_must_be_exclusive)
     |> check_constraint(:status, name: :flashcard_sets_status_must_be_valid)
+    |> check_constraint(:source, name: :flashcard_sets_source_must_be_valid)
   end
 
   # A set belongs to exactly one scope — a whole module or a single lecture,

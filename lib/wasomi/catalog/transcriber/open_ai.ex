@@ -5,7 +5,7 @@ defmodule Wasomi.Catalog.Transcriber.OpenAI do
   OpenAI's transcription endpoint takes an uploaded file, not a remote URL,
   so this downloads the (already time-limited, signed) media URL directly
   and re-uploads the bytes as multipart form data — same `Req`-direct
-  approach as `Wasomi.Media.Mux` and `Wasomi.Assessments.QuestionGenerator.OpenAI`,
+  approach as `Wasomi.Media.Cloudflare` and `Wasomi.Assessments.QuestionGenerator.OpenAI`,
   no SDK.
   """
 

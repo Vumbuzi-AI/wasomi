@@ -76,7 +76,12 @@ defmodule Wasomi.Seeds.CloudflareVideo do
     path
   rescue
     error in ErlangError ->
-      raise "Seeds require ffmpeg to create the one-minute Cloudflare video: #{Exception.message(error)}"
+      reraise RuntimeError,
+              [
+                message:
+                  "Seeds require ffmpeg to create the one-minute Cloudflare video: #{Exception.message(error)}"
+              ],
+              __STACKTRACE__
   end
 
   def ensure_uploaded!(

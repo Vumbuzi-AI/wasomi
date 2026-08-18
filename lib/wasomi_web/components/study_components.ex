@@ -1843,10 +1843,7 @@ defmodule WasomiWeb.StudyComponents do
         <p :if={@study_guide.focus} class="mt-4 text-sm italic text-muted">
           Focused on: {@study_guide.focus}
         </p>
-        <div
-          :if={@study_guide.summary}
-          class="mt-6 rounded-3xl border-l-4 border-primary bg-mint/40 p-6"
-        >
+        <div :if={@study_guide.summary} class="mt-6 rounded-3xl bg-mint/40 p-6">
           <p class="text-xs font-semibold uppercase tracking-wider text-primary">The gist</p>
           <p class="mt-2 text-body">{@study_guide.summary}</p>
         </div>

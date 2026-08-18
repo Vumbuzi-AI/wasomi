@@ -1888,7 +1888,7 @@ defmodule WasomiWeb.StudyComponents do
 
             <p
               :if={section.callout}
-              class="mt-5 rounded-2xl border border-primary/20 bg-mint/40 p-5 text-sm font-medium text-ink"
+              class="mt-5 rounded-2xl bg-mint/40 p-5 text-sm font-medium text-ink"
             >
               <span class="mr-1.5 font-semibold text-primary">Key idea:</span>{section.callout}
             </p>

@@ -226,6 +226,37 @@ defmodule WasomiWeb.AdminLive.Analytics do
 
         <div :if={@active_tab == :overview} class="space-y-6">
           <section class="analytics-card overflow-hidden">
+            <div class="flex flex-wrap items-baseline justify-between gap-3 border-b border-neutral-700 px-6 py-7 lg:px-8">
+              <div>
+                <p class="text-xs font-bold uppercase tracking-wider text-primary">Journey</p>
+                <h3 class="mt-2 text-3xl font-medium text-ink">Conversion funnel</h3>
+              </div>
+              <p :if={@funnel_overall_conversion} class="text-sm text-body">
+                <span class="font-semibold text-primary">{@funnel_overall_conversion}%</span>
+                overall, checkout to certificate
+              </p>
+            </div>
+            <div class="flex flex-wrap items-stretch gap-3 px-6 py-7 lg:px-8">
+              <div :for={step <- @funnel} class="contents">
+                <div class="min-w-[140px] flex-1 rounded-2xl border border-black/5 bg-white p-4 text-center shadow-sm">
+                  <p class="text-xs font-semibold uppercase tracking-wide text-body">{step.step}</p>
+                  <p class="mt-2 text-3xl font-bold text-ink">{step.count}</p>
+                  <p class="mt-1 text-xs font-medium text-body">
+                    {if step.percent_of_previous,
+                      do: "#{step.percent_of_previous}% of previous",
+                      else: raw("&nbsp;")}
+                  </p>
+                </div>
+                <.icon
+                  :if={!step.last?}
+                  name="hero-chevron-right"
+                  class="h-5 w-5 shrink-0 self-center text-body"
+                />
+              </div>
+            </div>
+          </section>
+
+          <section class="analytics-card overflow-hidden">
             <div class="flex flex-wrap items-start justify-between gap-4 border-b border-neutral-700 px-6 py-7 lg:px-8">
               <div>
                 <p class="text-xs font-bold uppercase tracking-wider text-primary">
@@ -450,12 +481,15 @@ defmodule WasomiWeb.AdminLive.Analytics do
   defp assign_analytics(socket, opts) do
     course_id = Keyword.get(opts, :course_id)
     user_id = Keyword.get(opts, :user_id)
+    funnel = Analytics.funnel(opts)
     scorecards = Analytics.course_scorecards(opts)
     revenue_by_course = Analytics.revenue_by_course(opts)
     module_rows = build_module_rows(course_id, opts)
     module_query = Map.get(socket.assigns, :module_query, "")
 
     socket
+    |> assign(:funnel, funnel_widget_data(funnel))
+    |> assign(:funnel_overall_conversion, funnel_overall_conversion(funnel))
     |> assign(
       :scorecards_page,
       Paginate.paginate_list(scorecards, socket.assigns.page_number, @page_size)
@@ -524,6 +558,27 @@ defmodule WasomiWeb.AdminLive.Analytics do
 
   defp percent_or_dash(nil), do: "—"
   defp percent_or_dash(value), do: "#{value}%"
+
+  defp funnel_overall_conversion([%{count: 0} | _]), do: nil
+  defp funnel_overall_conversion(steps), do: percent(List.last(steps).count, hd(steps).count)
+
+  defp funnel_widget_data(steps) do
+    last_index = length(steps) - 1
+
+    steps
+    |> Enum.with_index()
+    |> Enum.map(fn {%{count: count} = step, index} ->
+      previous_count = index > 0 && Enum.at(steps, index - 1).count
+
+      Map.merge(step, %{
+        percent_of_previous: previous_count && percent(count, previous_count),
+        last?: index == last_index
+      })
+    end)
+  end
+
+  defp percent(_count, 0), do: 0
+  defp percent(count, total), do: round(count / total * 100)
 
   defp student_option_label(%{name: name, email: email}) when is_binary(name) and name != "",
     do: "#{name} (#{email})"

@@ -97,6 +97,11 @@ defmodule WasomiWeb.AdminLive.Payments do
 
     chart_opts = [from: socket.assigns.chart_from, to: socket.assigns.chart_to]
 
+    revenue_chart_rows =
+      chart_opts
+      |> Analytics.revenue_by_course()
+      |> filter_revenue_rows(socket.assigns.search)
+
     socket
     |> assign(:revenue_page, Paginate.paginate_list(rows, socket.assigns.page_number, @page_size))
     |> assign(:gross_revenue_minor, gross_revenue_minor)
@@ -109,8 +114,15 @@ defmodule WasomiWeb.AdminLive.Payments do
     )
     |> assign(
       :revenue_by_course_chart,
-      revenue_by_course_chart_config(Analytics.revenue_by_course(chart_opts))
+      revenue_by_course_chart_config(revenue_chart_rows)
     )
+  end
+
+  defp filter_revenue_rows(rows, search) when search in [nil, ""], do: rows
+
+  defp filter_revenue_rows(rows, search) do
+    search = String.downcase(search)
+    Enum.filter(rows, &String.contains?(String.downcase(&1.title), search))
   end
 
   defp average(_total, 0), do: 0
@@ -524,7 +536,10 @@ defmodule WasomiWeb.AdminLive.Payments do
                       <span :if={!payment.user} class="text-muted">—</span>
                     </td>
                     <td class="px-6 py-4 text-body">{payment.course && payment.course.title}</td>
-                    <td class="px-6 py-4 capitalize text-body">{payment.provider}</td>
+                    <td class="px-6 py-4 text-body">
+                      <span class="capitalize">{payment.provider}</span>
+                      <span class="mt-1 block text-xs text-muted">{payment.provider_reference}</span>
+                    </td>
                     <td class="px-6 py-4 font-semibold text-ink">
                       {Payments.format_amount(payment)}
                     </td>

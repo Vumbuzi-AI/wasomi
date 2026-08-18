@@ -34,6 +34,10 @@ config :wasomi,
   cloudflare_api_url: "https://api.cloudflare.com",
   cloudflare_stream_origin: "http://localhost:4000"
 
+# ExAws defaults to :hackney; reuse the app's Finch pool instead so hackney
+# (and its `quic` dependency) stays out of the dependency tree.
+config :ex_aws, http_client: Wasomi.ExAws.HttpClient
+
 config :wasomi, Oban,
   repo: Wasomi.Repo,
   queues: [

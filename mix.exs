@@ -63,7 +63,6 @@ defmodule Wasomi.MixProject do
       {:ex_aws, "~> 2.7"},
       {:ex_aws_s3, "~> 2.5"},
       {:chromic_pdf, "~> 1.17"},
-      {:hackney, "~> 4.0"},
       {:sweet_xml, "~> 0.7"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:mox, "~> 1.2", only: :test},

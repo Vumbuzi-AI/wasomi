@@ -76,6 +76,7 @@ defmodule WasomiWeb.CoursePlayerLive do
          |> assign(:current_question_index, 0)
          |> assign(:active_section, :lessons)
          |> assign(:active_study_tool, nil)
+         |> assign(:lesson_tab, :overview)
          |> assign(:preview?, preview?)
          |> assign(:requested_preview_lecture_id, params["lecture_id"])
          |> assign(:preview_progress, %{})
@@ -180,6 +181,12 @@ defmodule WasomiWeb.CoursePlayerLive do
   end
 
   @impl true
+  def handle_event("select-lesson-tab", %{"tab" => tab}, socket)
+      when tab in ["overview", "materials", "practice", "quiz"] do
+    {:noreply, assign(socket, :lesson_tab, String.to_existing_atom(tab))}
+  end
+
+  @impl true
   def handle_event("select-lecture", %{"id" => id}, socket) do
     lecture = find_lecture(socket.assigns.course, id)
 
@@ -189,6 +196,7 @@ defmodule WasomiWeb.CoursePlayerLive do
        |> assign(:current_quiz, nil)
        |> assign(:quiz_result, nil)
        |> assign(:current_lecture, lecture)
+       |> assign(:lesson_tab, :overview)
        |> assign(:lq_submissions, load_lq_submissions(socket, lecture))
        |> load_lecture_quiz()
        |> assign(:page_title, lecture_page_title(socket, lecture))}
@@ -436,6 +444,7 @@ defmodule WasomiWeb.CoursePlayerLive do
              socket
              |> put_preview_progress(lecture.id, :completed, lecture.duration_seconds || 0)
              |> refresh_progress()
+             |> focus_pending_quiz(lecture)
              |> put_flash(:info, "Lecture marked complete — preview only, nothing was saved.")}
 
           true ->
@@ -532,7 +541,7 @@ defmodule WasomiWeb.CoursePlayerLive do
 
     case result do
       {:ok, _progress, _events} when explicit_complete? ->
-        socket = refresh_progress(socket)
+        socket = socket |> refresh_progress() |> focus_pending_quiz(lecture)
         {:noreply, put_flash(socket, :info, lecture_completed_flash(socket, lecture))}
 
       {:ok, _progress, _events} ->
@@ -776,7 +785,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                       </div>
                     </header>
 
-                    <div :if={@current_lecture.duration_seconds} class="bg-[#333] p-5 sm:p-7">
+                    <div :if={@current_lecture.duration_seconds} class="bg-dark p-4 sm:p-6">
                       <div
                         id={"protected-player-#{@current_lecture.id}"}
                         phx-hook="ProtectedVideo"
@@ -787,8 +796,11 @@ defmodule WasomiWeb.CoursePlayerLive do
                         data-lecture-id={@current_lecture.id}
                         data-preview={to_string(@preview?)}
                         data-start-position={progress_position(@progress, @current_lecture.id)}
+                        data-seek-unlocked={
+                          to_string(progress_status(@progress, @current_lecture.id) == :completed)
+                        }
                         data-watermark={watermark_text(@current_user)}
-                        class="relative aspect-video w-full overflow-hidden border border-white bg-dark"
+                        class="relative mx-auto aspect-video w-full overflow-hidden rounded-2xl bg-black shadow-2xl ring-1 ring-white/15"
                         oncontextmenu="return false"
                       >
                         <div
@@ -806,27 +818,82 @@ defmodule WasomiWeb.CoursePlayerLive do
                         </div>
                       </div>
                     </div>
-                    <div class="bg-white p-7 sm:p-10">
-                      <p
-                        :if={@current_lecture.description not in [nil, ""]}
-                        class="max-w-2xl leading-relaxed text-body"
-                      >
-                        {@current_lecture.description}
-                      </p>
+                    <% completed? = progress_status(@progress, @current_lecture.id) == :completed %>
+                    <% watched_enough? =
+                      is_nil(@current_lecture.duration_seconds) or
+                        Learning.watched_enough?(
+                          progress_position(@progress, @current_lecture.id),
+                          @current_lecture.duration_seconds
+                        ) %>
+                    <% quiz_pending? = lecture_quiz_pending?(assigns, @current_lecture) %>
+                    <% next_lesson = next_lecture(@course, @current_lecture) %>
+                    <% tabs = lesson_tabs(assigns) %>
+                    <% active_tab =
+                      if Enum.any?(tabs, &(&1.id == @lesson_tab)), do: @lesson_tab, else: :overview %>
 
-                      <% watched_enough? =
-                        is_nil(@current_lecture.duration_seconds) or
-                          Learning.watched_enough?(
-                            progress_position(@progress, @current_lecture.id),
-                            @current_lecture.duration_seconds
-                          ) %>
-                      <div class="mt-6 flex flex-wrap items-center justify-between gap-4">
-                        <span class="inline-flex items-center gap-2 font-semibold text-body">
-                          <.icon name="hero-book-open" class="h-5 w-5 text-primary" />
-                          {@course_progress.percent}% complete
+                    <%!-- The lesson names its own next move, directly under the player. The
+                    graded quiz used to be the last thing on a very long page — below the
+                    notes, the downloads and the practice questions — which made the one step
+                    that unlocks the next lesson the easiest one to scroll past. --%>
+                    <div
+                      id="lesson-next-step"
+                      class="flex flex-wrap items-center justify-between gap-5 border-y border-black/5 bg-mint px-7 py-6 sm:px-10"
+                    >
+                      <div class="flex min-w-0 items-start gap-4">
+                        <span class="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-white text-primary">
+                          <.icon
+                            name={
+                              cond do
+                                not completed? -> "hero-play-circle"
+                                quiz_pending? -> "hero-clipboard-document-check"
+                                true -> "hero-check-circle"
+                              end
+                            }
+                            class="h-6 w-6"
+                          />
+                        </span>
+                        <div class="min-w-0">
+                          <p class="text-[11px] font-bold uppercase tracking-[0.12em] text-primary">
+                            Next step
+                          </p>
+                          <p class="mt-1 text-base font-semibold text-ink">
+                            {cond do
+                              not completed? and not watched_enough? -> "Keep watching this lesson"
+                              not completed? -> "Mark this lesson complete"
+                              quiz_pending? -> "Pass the lesson quiz to unlock the next lesson"
+                              next_lesson -> "Up next — #{next_lesson.title}"
+                              true -> "You have finished the last lesson here"
+                            end}
+                          </p>
+                          <p class="mt-1 text-sm text-body">
+                            {cond do
+                              not completed? and not watched_enough? ->
+                                "Watch at least 80% of this lecture to unlock this button."
+
+                              not completed? ->
+                                "You have watched enough of it — save your progress and move on."
+
+                              quiz_pending? ->
+                                "#{length(@lecture_quiz.questions)} questions · score #{@lecture_quiz.quiz.passing_score_percent}% to pass."
+
+                              next_lesson ->
+                                "Everything for this lesson is done."
+
+                              true ->
+                                "Nothing left to do in this lesson."
+                            end}
+                          </p>
+                        </div>
+                      </div>
+                      <div class="flex flex-wrap items-center gap-3">
+                        <span
+                          :if={completed?}
+                          class="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-semibold text-primary"
+                        >
+                          <.icon name="hero-check-circle" class="h-5 w-5" /> Completed
                         </span>
                         <button
-                          :if={progress_status(@progress, @current_lecture.id) != :completed}
+                          :if={!completed?}
                           id="mark-lecture-complete"
                           type="button"
                           phx-click="complete-lecture"
@@ -840,27 +907,107 @@ defmodule WasomiWeb.CoursePlayerLive do
                         >
                           Mark complete
                         </button>
-                        <span
-                          :if={progress_status(@progress, @current_lecture.id) == :completed}
-                          class="inline-flex items-center gap-2 rounded-2xl bg-primary px-6 py-3 text-sm font-semibold text-white"
+                        <button
+                          :if={completed? && quiz_pending?}
+                          id="start-lesson-quiz"
+                          type="button"
+                          phx-click={
+                            JS.push("select-lesson-tab", value: %{tab: "quiz"})
+                            |> JS.dispatch("wasomi:scroll-into-view", to: "#lesson-tabs")
+                          }
+                          class="inline-flex items-center gap-2 rounded-2xl bg-primary px-6 py-3 text-sm font-semibold text-white transition hover:bg-ink"
                         >
-                          <.icon name="hero-check-circle" class="h-5 w-5" /> Completed
-                        </span>
+                          Take the lesson quiz
+                          <.icon name="hero-arrow-right" class="h-4 w-4" />
+                        </button>
+                        <button
+                          :if={completed? && !quiz_pending? && next_lesson}
+                          type="button"
+                          phx-click="select-lecture"
+                          phx-value-id={next_lesson.id}
+                          class="inline-flex items-center gap-2 rounded-2xl bg-primary px-6 py-3 text-sm font-semibold text-white transition hover:bg-ink"
+                        >
+                          Next lesson
+                          <.icon name="hero-arrow-right" class="h-4 w-4" />
+                        </button>
                       </div>
+                    </div>
+
+                    <div
+                      id="lesson-tabs"
+                      role="tablist"
+                      aria-label="Lesson material"
+                      class="flex gap-1 overflow-x-auto border-b border-black/5 px-7 sm:px-10"
+                    >
+                      <button
+                        :for={tab <- tabs}
+                        id={"lesson-tab-#{tab.id}"}
+                        type="button"
+                        role="tab"
+                        aria-selected={to_string(active_tab == tab.id)}
+                        phx-click={
+                          JS.push("select-lesson-tab", value: %{tab: to_string(tab.id)})
+                          |> JS.dispatch("wasomi:scroll-into-view", to: "#lesson-tabs")
+                        }
+                        class={[
+                          "-mb-px inline-flex shrink-0 items-center gap-2 border-b-2 px-3 py-4 text-sm font-semibold transition",
+                          active_tab == tab.id && "border-primary text-primary",
+                          active_tab != tab.id &&
+                            "border-transparent text-body hover:border-black/20 hover:text-ink"
+                        ]}
+                      >
+                        <.icon name={tab.icon} class="h-4 w-4 shrink-0" />
+                        <span>{tab.label}</span>
+                        <span
+                          :if={tab.count && tab.flag != :required}
+                          class="rounded-full bg-black/5 px-1.5 py-0.5 text-[11px] font-bold"
+                        >
+                          {tab.count}
+                        </span>
+                        <span
+                          :if={tab.flag == :required}
+                          class="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-primary"
+                        >
+                          <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-primary"></span>
+                          Required
+                        </span>
+                        <.icon
+                          :if={tab.flag == :passed}
+                          name="hero-check-circle"
+                          class="h-4 w-4 shrink-0 text-primary"
+                        />
+                      </button>
+                    </div>
+
+                    <div
+                      id="lesson-overview"
+                      role="tabpanel"
+                      aria-labelledby="lesson-tab-overview"
+                      class={[
+                        "space-y-8 bg-white p-7 sm:p-10",
+                        active_tab != :overview && "hidden"
+                      ]}
+                    >
+                      <p
+                        :if={@current_lecture.description not in [nil, ""]}
+                        class="max-w-2xl leading-relaxed text-body"
+                      >
+                        {@current_lecture.description}
+                      </p>
                       <p
                         :if={
-                          progress_status(@progress, @current_lecture.id) != :completed &&
-                            !watched_enough?
+                          @current_lecture.description in [nil, ""] &&
+                            !Enum.any?(@current_lecture.resources, &pdf_resource?/1)
                         }
-                        class="mt-2 text-xs text-muted"
+                        class="text-sm text-muted"
                       >
-                        Watch at least 80% of this lecture to unlock this button.
+                        This lesson is the recording above — it has no written notes.
                       </p>
 
                       <div
                         :if={Enum.any?(@current_lecture.resources, &pdf_resource?/1)}
                         id="lesson-pdfs"
-                        class="mt-8 space-y-5"
+                        class="space-y-5"
                       >
                         <div
                           :for={
@@ -896,7 +1043,9 @@ defmodule WasomiWeb.CoursePlayerLive do
                     <div
                       :if={@current_lecture.resources != []}
                       id="lecture-resources"
-                      class="border-t border-black/5 bg-white p-8 lg:p-10"
+                      role="tabpanel"
+                      aria-labelledby="lesson-tab-materials"
+                      class={["bg-white p-8 lg:p-10", active_tab != :materials && "hidden"]}
                     >
                       <h3 class="text-xs font-medium uppercase tracking-widest text-muted">
                         Resources
@@ -929,13 +1078,16 @@ defmodule WasomiWeb.CoursePlayerLive do
                     <div
                       :if={@current_lecture.questions != []}
                       id="lecture-faq"
-                      class="border-t border-black/5 bg-white p-8 lg:p-10"
+                      role="tabpanel"
+                      aria-labelledby="lesson-tab-practice"
+                      class={["bg-white p-8 lg:p-10", active_tab != :practice && "hidden"]}
                     >
                       <h3 class="text-xs font-medium uppercase tracking-widest text-muted">
                         Practice questions
                       </h3>
                       <p class="mt-1 text-xs text-muted">
-                        Type your answer and submit — you'll get instant feedback.
+                        Type your answer and submit — you'll get instant feedback. These are not
+                        graded.
                       </p>
                       <div class="mt-4 space-y-4">
                         <%= for question <- @current_lecture.questions do %>
@@ -983,7 +1135,9 @@ defmodule WasomiWeb.CoursePlayerLive do
                     <div
                       :if={@lecture_quiz}
                       id="lesson-quiz"
-                      class="border-t border-black/5 bg-white p-8 lg:p-10"
+                      role="tabpanel"
+                      aria-labelledby="lesson-tab-quiz"
+                      class={["bg-white p-8 lg:p-10", active_tab != :quiz && "hidden"]}
                     >
                       <% total = length(@lecture_quiz.questions) %>
                       <div class="flex flex-wrap items-start justify-between gap-4">
@@ -1108,22 +1262,25 @@ defmodule WasomiWeb.CoursePlayerLive do
               </section>
 
               <aside class="flex max-h-[calc(100vh-2rem)] flex-col overflow-hidden rounded-[2rem] bg-white xl:sticky xl:top-4">
-                <div class="border-b border-black/80 p-7 lg:p-8">
+                <div class="border-b border-black/10 p-7 lg:p-8">
                   <h2 class="text-xl font-semibold text-dark">Course outline</h2>
                   <p class="mt-2 text-sm">
                     {length(@course.modules)} modules · {@course_progress.total} lessons
                   </p>
                 </div>
-                <div class="overflow-y-auto">
-                  <section :for={module <- @course.modules}>
-                    <div class="border-b border-black/80 bg-[#f5f5f5] px-7 py-6">
+                <%!-- Separators are drawn with divide-y rather than a border-b per row: the
+                last row in the list then has no trailing line to collide with the card's
+                rounded bottom corners. --%>
+                <div class="divide-y divide-black/10 overflow-y-auto">
+                  <section :for={module <- @course.modules} class="divide-y divide-black/10">
+                    <div class="bg-[#f5f5f5] px-7 py-6">
                       <p class="text-sm font-bold uppercase tracking-wider text-primary">
                         Module {module.position}
                       </p>
                       <h3 class="mt-2 text-lg font-medium text-body">{module.title}</h3>
                       <p class="mt-2 text-sm leading-relaxed">{module.description}</p>
                     </div>
-                    <div>
+                    <div class="divide-y divide-black/10">
                       <button
                         :for={lecture <- module.lectures}
                         type="button"
@@ -1137,9 +1294,9 @@ defmodule WasomiWeb.CoursePlayerLive do
                             else: "true"
                         }
                         class={[
-                          "flex w-full items-center gap-4 border-b border-black/80 px-7 py-5 text-left text-sm transition",
+                          "flex w-full items-center gap-4 px-7 py-5 text-left text-sm transition",
                           @current_lecture && @current_lecture.id == lecture.id &&
-                            "border-l-4 border-l-primary bg-[#f5f5f5] font-semibold text-body",
+                            "border-l-4 border-l-primary bg-[#f5f5f5] pl-6 font-semibold text-body",
                           (!@current_lecture || @current_lecture.id != lecture.id) &&
                             lecture_unlocked?(@unlocked_lecture_ids, lecture.id) &&
                             "text-body hover:bg-[#f5f5f5]",
@@ -1150,20 +1307,26 @@ defmodule WasomiWeb.CoursePlayerLive do
                         <span class={[
                           "grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs font-semibold",
                           progress_status(@progress, lecture.id) == :completed &&
+                            lecture_unlocked?(@unlocked_lecture_ids, lecture.id) &&
                             "bg-primary text-white",
                           progress_status(@progress, lecture.id) != :completed &&
                             lecture_unlocked?(@unlocked_lecture_ids, lecture.id) &&
                             "bg-mint text-primary",
                           !lecture_unlocked?(@unlocked_lecture_ids, lecture.id) && "text-muted/60"
                         ]}>
-                          <.icon
-                            :if={progress_status(@progress, lecture.id) == :completed}
-                            name="hero-check"
-                            class="h-3.5 w-3.5"
-                          />
+                          <%!-- One glyph only: a locked lecture reads as locked even if an
+                          earlier pass completed it, so the padlock wins over the tick. --%>
                           <.icon
                             :if={!lecture_unlocked?(@unlocked_lecture_ids, lecture.id)}
                             name="hero-lock-closed"
+                            class="h-3.5 w-3.5"
+                          />
+                          <.icon
+                            :if={
+                              lecture_unlocked?(@unlocked_lecture_ids, lecture.id) &&
+                                progress_status(@progress, lecture.id) == :completed
+                            }
+                            name="hero-check"
                             class="h-3.5 w-3.5"
                           />
                           <span :if={
@@ -1207,12 +1370,12 @@ defmodule WasomiWeb.CoursePlayerLive do
                         disabled={!quiz_unlocked?}
                         data-locked={if quiz_unlocked?, do: "false", else: "true"}
                         class={[
-                          "mt-1 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition",
+                          "flex w-full items-center gap-4 px-7 py-5 text-left text-sm transition",
                           @current_quiz && @current_quiz.quiz.id == module_quiz.id &&
-                            "bg-mint font-medium text-primary",
+                            "border-l-4 border-l-primary bg-[#f5f5f5] pl-6 font-semibold text-primary",
                           (!@current_quiz || @current_quiz.quiz.id != module_quiz.id) &&
                             quiz_unlocked? &&
-                            "text-body hover:bg-soft hover:text-ink",
+                            "text-body hover:bg-[#f5f5f5]",
                           !quiz_unlocked? && "cursor-not-allowed text-muted"
                         ]}
                       >
@@ -1625,6 +1788,68 @@ defmodule WasomiWeb.CoursePlayerLive do
     |> assign(:lecture_quiz, nil)
     |> assign(:lecture_quiz_answers, %{})
     |> assign(:lecture_quiz_result, nil)
+  end
+
+  # Finishing the video is the moment the quiz matters, so the lesson opens it
+  # rather than leaving a graded step sitting in a tab the learner never opened.
+  defp focus_pending_quiz(socket, lecture) do
+    if lecture_quiz_pending?(socket.assigns, lecture) do
+      assign(socket, :lesson_tab, :quiz)
+    else
+      socket
+    end
+  end
+
+  # The lesson's sub-navigation. A tab is only offered for material the lecture
+  # actually has, and the quiz carries its state in the strip itself — it is what
+  # unlocks the next lesson, so it has to advertise itself.
+  defp lesson_tabs(assigns) do
+    lecture = assigns.current_lecture
+
+    [
+      %{id: :overview, label: "Lesson", icon: "hero-book-open", count: nil, flag: nil},
+      lecture.resources != [] &&
+        %{
+          id: :materials,
+          label: "Materials",
+          icon: "hero-paper-clip",
+          count: length(lecture.resources),
+          flag: nil
+        },
+      lecture.questions != [] &&
+        %{
+          id: :practice,
+          label: "Practice",
+          icon: "hero-pencil-square",
+          count: length(lecture.questions),
+          flag: nil
+        },
+      assigns.lecture_quiz &&
+        %{
+          id: :quiz,
+          label: "Lesson quiz",
+          icon: "hero-clipboard-document-check",
+          count: length(assigns.lecture_quiz.questions),
+          flag: if(lesson_quiz_passed?(assigns, lecture), do: :passed, else: :required)
+        }
+    ]
+    |> Enum.filter(& &1)
+  end
+
+  # Persisted passes and the just-submitted attempt both count — the latter is
+  # all preview mode has, since nothing is written there.
+  defp lesson_quiz_passed?(assigns, lecture) do
+    lecture_quiz_passed?(assigns, lecture) or
+      match?(%{passed: true}, assigns.lecture_quiz_result)
+  end
+
+  defp next_lecture(course, lecture) do
+    lectures = course_lectures(course)
+
+    case Enum.find_index(lectures, &(&1.id == lecture.id)) do
+      nil -> nil
+      index -> Enum.at(lectures, index + 1)
+    end
   end
 
   # Completing a lecture no longer unlocks the next one on its own when the

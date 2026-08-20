@@ -34,6 +34,20 @@ config :wasomi,
   cloudflare_api_url: "https://api.cloudflare.com",
   cloudflare_stream_origin: "http://localhost:4000"
 
+# Organisation details printed down the left rail of every certificate. The
+# logo is read from priv/static and inlined as a data URI at render time.
+# Contact details are intentionally left unset: an unset key renders nothing,
+# which is the right default for a document nobody should be able to
+# accidentally issue with a placeholder address on it. Fill these in with the
+# institution's real details to switch the contact block on.
+config :wasomi, :certificate_branding,
+  logo_path: "images/logo.png",
+  address_lines: [],
+  phone: nil,
+  email: nil,
+  website: nil,
+  socials: []
+
 # ExAws defaults to :hackney; reuse the app's Finch pool instead so hackney
 # (and its `quic` dependency) stays out of the dependency tree.
 config :ex_aws, http_client: Wasomi.ExAws.HttpClient

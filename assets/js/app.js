@@ -322,12 +322,90 @@ Hooks.CaptureGuard = {
   },
 };
 
+// The lesson player draws its own controls instead of handing the learner the
+// browser's. Two reasons: native chrome offers a scrub bar that invites
+// skipping ahead, which the seek clamp then silently undoes — reading as a
+// broken player — and it has nowhere to say *why* the un-watched stretch is out
+// of reach. These controls paint that stretch as locked and explain themselves
+// when someone reaches for it.
+const SEEK_TOLERANCE = 0.5;
+const SKIP_LOCKED_MESSAGE =
+  "No skipping ahead — keep watching to unlock the rest of this lesson.";
+const SPEED_LOCKED_MESSAGE =
+  "Playback speed unlocks once you have watched this lesson through.";
+const CONTROL_BUTTON_CLASS =
+  "grid h-9 w-9 shrink-0 place-items-center rounded-full text-white/90 outline-none transition hover:bg-white/15 hover:text-white focus-visible:ring-2 focus-visible:ring-primary";
+const CONTROL_SELECT_CLASS =
+  "cursor-pointer rounded-lg border border-white/20 bg-black/60 px-2 py-1 text-[11px] font-semibold text-white outline-none transition hover:border-white/40 focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-40";
+
+const PLAYER_ICONS = {
+  play: {
+    filled: true,
+    body: `<path d="M8.25 4.94v14.12c0 .81.88 1.31 1.57.89l11.02-6.94a1.05 1.05 0 0 0 0-1.78L9.82 4.05a1.05 1.05 0 0 0-1.57.89Z"/>`,
+  },
+  pause: {
+    filled: true,
+    body: `<rect x="7" y="4.5" width="3.4" height="15" rx="1.3"/><rect x="13.6" y="4.5" width="3.4" height="15" rx="1.3"/>`,
+  },
+  rewind: { body: `<path d="M9 15 3 9m0 0 6-6M3 9h12a6 6 0 0 1 0 12h-3"/>` },
+  forward: { body: `<path d="m15 15 6-6m0 0-6-6m6 6H9a6 6 0 0 0 0 12h3"/>` },
+  lock: {
+    body: `<path d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75M6.75 21.75h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z"/>`,
+  },
+  volume: {
+    body: `<path d="M19.114 5.636a9 9 0 0 1 0 12.728M16.463 8.288a5.25 5.25 0 0 1 0 7.424M6.75 8.25l4.72-4.72a.75.75 0 0 1 1.28.53v15.88a.75.75 0 0 1-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 0 1 2.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75Z"/>`,
+  },
+  muted: {
+    body: `<path d="M17.25 9.75 19.5 12m0 0 2.25 2.25M19.5 12l2.25-2.25M19.5 12l-2.25 2.25M6.75 8.25l4.72-4.72a.75.75 0 0 1 1.28.53v15.88a.75.75 0 0 1-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 0 1 2.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75Z"/>`,
+  },
+  fullscreen: {
+    body: `<path d="M3.75 8.25v-4.5h4.5M3.75 3.75 9 9M3.75 15.75v4.5h4.5M3.75 20.25 9 15M20.25 8.25v-4.5h-4.5M20.25 3.75 15 9M20.25 15.75v4.5h-4.5M20.25 20.25 15 15"/>`,
+  },
+  exitFullscreen: {
+    body: `<path d="M9 9V4.5M9 9H4.5M9 9 3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5 5.25 5.25"/>`,
+  },
+};
+
+function playerIcon(name, sizeClass = "h-5 w-5") {
+  const icon = PLAYER_ICONS[name];
+  const paint = icon.filled
+    ? `fill="currentColor"`
+    : `fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"`;
+
+  return `<svg viewBox="0 0 24 24" ${paint} aria-hidden="true" class="${sizeClass}">${icon.body}</svg>`;
+}
+
+function formatMediaTime(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
+
+  const whole = Math.floor(seconds);
+  const hours = Math.floor(whole / 3600);
+  const minutes = Math.floor(whole / 60) % 60;
+  const secs = String(whole % 60).padStart(2, "0");
+
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${secs}`
+    : `${minutes}:${secs}`;
+}
+
 Hooks.ProtectedVideo = {
   mounted() {
     this.playerHost = this.el.querySelector("[data-role='player']");
     this.watermark = this.el.querySelector("[data-role='watermark']");
     this.abortController = new AbortController();
     this.veil = this.buildVeil();
+    this.buffering = false;
+    // Shortcuts are scoped to the player rather than the document: the lesson
+    // page also hosts quiz inputs and a transcript, and space/arrow keys belong
+    // to whatever the learner is actually focused on.
+    this.el.tabIndex = 0;
+    this.el.classList.add("outline-none");
+    this.onKeydown = (event) => this.handleKeydown(event);
+    this.el.addEventListener("keydown", this.onKeydown);
+    // Fullscreen is taken on the whole container, not the <video>, so the
+    // identity watermark and these controls travel with the frame.
+    this.onFullscreenChange = () => this.handleFullscreenChange();
+    document.addEventListener("fullscreenchange", this.onFullscreenChange);
 
     this.el.addEventListener("contextmenu", (event) => event.preventDefault());
     // Resize is applied once real metadata loads (see applyAspectRatio); transition
@@ -357,7 +435,11 @@ Hooks.ProtectedVideo = {
     this.hls?.destroy();
     window.clearInterval(this.watermarkTimer);
     window.clearInterval(this.stampTimer);
+    window.clearTimeout(this.hideChromeTimer);
+    window.clearTimeout(this.noticeTimer);
     document.removeEventListener("visibilitychange", this.onVisibility);
+    document.removeEventListener("fullscreenchange", this.onFullscreenChange);
+    this.el.removeEventListener("keydown", this.onKeydown);
   },
 
   buildVeil() {
@@ -399,18 +481,20 @@ Hooks.ProtectedVideo = {
 
       const { url } = await response.json();
       const player = document.createElement("video");
-      player.controls = true;
+      // Native controls stay off: buildChrome() below replaces them with a bar
+      // that can express the no-skipping rule instead of fighting it.
+      player.controls = false;
       player.playsInline = true;
       player.preload = "metadata";
-      // Drop the native download button, and refuse picture-in-picture and
-      // AirPlay/Cast: each of them renders the frame outside our watermarked
-      // container, where the identity stamp no longer travels with the pixels.
+      // Refuse picture-in-picture and AirPlay/Cast: each renders the frame
+      // outside our watermarked container, where the identity stamp no longer
+      // travels with the pixels. controlslist still matters for the iOS native
+      // fullscreen player, which we cannot skin.
       player.setAttribute("controlslist", "nodownload noplaybackrate");
       player.disablePictureInPicture = true;
       player.disableRemotePlayback = true;
       const playerFrame = document.createElement("div");
       playerFrame.className = "relative h-full w-full";
-      const settings = this.buildPlaybackSettings();
 
       // Only an HLS manifest needs hls.js; a progressive file (e.g. the
       // seeded .mp4 samples) plays natively everywhere and would break
@@ -451,10 +535,14 @@ Hooks.ProtectedVideo = {
       player.style.width = "100%";
       player.style.height = "100%";
       // Letterbox non-16:9 sources instead of stretching them to fill the frame.
-      player.style.setProperty("--media-object-fit", "contain");
+      player.style.objectFit = "contain";
 
       this.player = player;
       this.preview = this.el.dataset.preview === "true";
+      // An admin previewing a course is reviewing content, not consuming a
+      // lesson, so the no-skipping rule does not apply to them. Same for a
+      // lecture the learner has already completed: a review pass scrubs freely.
+      this.freeSeek = this.preview || this.el.dataset.seekUnlocked === "true";
       this.previewPositionKey = `wasomi-preview-position:${this.el.dataset.viewerId}:${this.el.dataset.lectureId}`;
       const serverPosition = Number(this.el.dataset.startPosition || 0);
       const localPreviewPosition = this.preview
@@ -467,6 +555,9 @@ Hooks.ProtectedVideo = {
       // Furthest position actually played, updated every tick (unthrottled).
       this.furthestWatched = resumePosition;
 
+      const chrome = this.buildChrome();
+      this.applyStoredVolume();
+
       player.addEventListener("loadedmetadata", () => {
         if (resumePosition > 0 && resumePosition < player.duration) {
           player.currentTime = resumePosition;
@@ -474,6 +565,7 @@ Hooks.ProtectedVideo = {
 
         this.applyAspectRatio(player.videoWidth, player.videoHeight);
         if (!this.hls) this.updateNativeCaptionOptions();
+        this.syncChrome();
       });
 
       player.addEventListener("timeupdate", () => {
@@ -497,16 +589,46 @@ Hooks.ProtectedVideo = {
         ) {
           this.saveProgress();
         }
+
+        this.syncChrome();
       });
 
       // A pause often means the learner is about to navigate away. Save the
       // exact checkpoint instead of waiting for the next periodic timeupdate.
       player.addEventListener("pause", () => this.saveProgress());
 
-      // Snap back seeks past furthestWatched; tolerance absorbs rounding only.
+      ["play", "pause", "volumechange", "progress", "durationchange"].forEach(
+        (event) => player.addEventListener(event, () => this.syncChrome()),
+      );
+      player.addEventListener("play", () => this.scheduleHideChrome());
+      player.addEventListener("waiting", () => this.setBuffering(true));
+      ["playing", "canplay", "seeked", "pause"].forEach((event) =>
+        player.addEventListener(event, () => this.setBuffering(false)),
+      );
+
+      // Speeding a lecture up is skipping ahead by another name, so the rate is
+      // pinned to 1x until the lesson has been watched through. This is the
+      // backstop for the console as much as for the speed menu.
+      player.addEventListener("ratechange", () => {
+        if (this.skipLocked() && player.playbackRate > 1) {
+          player.playbackRate = 1;
+          this.flashNotice(SPEED_LOCKED_MESSAGE);
+        }
+
+        if (this.speedSelect) {
+          this.speedSelect.select.value = String(player.playbackRate);
+        }
+      });
+
+      // Backstop for the clamp the controls already enforce: catches a seek that
+      // never went through them at all — the iOS native fullscreen scrubber, a
+      // media-key gesture, or a console poke. Tolerance absorbs rounding only.
       player.addEventListener("seeking", () => {
-        if (player.currentTime > this.furthestWatched + 0.5) {
-          player.currentTime = this.furthestWatched;
+        const limit = this.seekLimit();
+
+        if (player.currentTime > limit + SEEK_TOLERANCE) {
+          player.currentTime = limit;
+          this.flashNotice();
         }
       });
 
@@ -515,6 +637,10 @@ Hooks.ProtectedVideo = {
           window.localStorage.removeItem(this.previewPositionKey);
         }
 
+        // The lesson has been watched end to end, so scrubbing opens up for the
+        // rewatch that usually follows.
+        this.freeSeek = true;
+        this.showChrome();
         // Flush final position so mark_complete's watch-threshold check sees it.
         this.saveProgress();
         this.pushEvent("complete-lecture", {
@@ -522,8 +648,9 @@ Hooks.ProtectedVideo = {
         });
       });
 
-      playerFrame.append(player, settings);
+      playerFrame.append(player, chrome);
       this.playerHost.replaceChildren(playerFrame);
+      this.syncChrome();
     } catch (error) {
       if (error.name === "AbortError") return;
       this.playerHost.textContent =
@@ -532,52 +659,594 @@ Hooks.ProtectedVideo = {
     }
   },
 
-  buildPlaybackSettings() {
-    const settings = document.createElement("div");
-    settings.className =
-      "absolute right-3 top-3 z-30 flex items-center gap-2 rounded-lg bg-black/75 p-2 text-xs text-white shadow-lg backdrop-blur-sm";
-    settings.setAttribute("aria-label", "Playback settings");
+  // ── Seek gating ──────────────────────────────────────────────────────────
+  // Everything that can move the playhead goes through requestSeek, and
+  // seekLimit is the single answer to "how far ahead may this learner jump".
+
+  duration() {
+    const duration = this.player?.duration;
+    return Number.isFinite(duration) && duration > 0 ? duration : 0;
+  },
+
+  // Never past the furthest point actually played, so the only way through a
+  // lecture is to watch it. Rewinding stays free — re-listening to a passage is
+  // the opposite of the problem this guards.
+  seekLimit() {
+    const duration = this.duration();
+    if (!duration) return 0;
+    if (this.freeSeek || this.furthestWatched >= duration - 1.5)
+      return duration;
+
+    return this.furthestWatched;
+  },
+
+  skipLocked() {
+    const duration = this.duration();
+    return duration > 0 && this.seekLimit() < duration - SEEK_TOLERANCE;
+  },
+
+  requestSeek(time) {
+    if (!this.player || !this.duration()) return;
+
+    const limit = this.seekLimit();
+    const target = Math.max(0, Math.min(time, limit));
+    // A clamped forward jump still lands where the learner has earned — the
+    // notice explains why it stopped short of where they clicked.
+    if (time > limit + SEEK_TOLERANCE) this.flashNotice();
+
+    this.player.currentTime = target;
+    this.syncChrome();
+  },
+
+  nudge(delta) {
+    if (!this.player) return;
+    this.requestSeek(this.player.currentTime + delta);
+    this.showChrome();
+  },
+
+  togglePlay() {
+    if (!this.player) return;
+
+    if (this.player.paused || this.player.ended) {
+      this.player.play().catch(() => {});
+    } else {
+      this.player.pause();
+    }
+
+    this.showChrome();
+  },
+
+  toggleMute() {
+    if (!this.player) return;
+    // Unmuting a player left at zero volume would stay silent and read as
+    // broken, so it comes back at a usable level.
+    if (this.player.muted && this.player.volume === 0) this.setVolume(0.6);
+    this.player.muted = !this.player.muted;
+    this.persistVolume();
+    this.showChrome();
+  },
+
+  setVolume(value) {
+    if (!this.player) return;
+
+    const volume = Math.min(1, Math.max(0, value));
+    this.player.volume = volume;
+    this.player.muted = volume === 0;
+    this.persistVolume();
+    this.showChrome();
+  },
+
+  persistVolume() {
+    window.localStorage.setItem(
+      "wasomi-video-volume",
+      String(this.player.volume),
+    );
+    window.localStorage.setItem(
+      "wasomi-video-muted",
+      String(this.player.muted),
+    );
+  },
+
+  applyStoredVolume() {
+    const stored = Number(
+      window.localStorage.getItem("wasomi-video-volume") ?? 1,
+    );
+    this.player.volume = Number.isFinite(stored)
+      ? Math.min(1, Math.max(0, stored))
+      : 1;
+    this.player.muted =
+      window.localStorage.getItem("wasomi-video-muted") === "true";
+  },
+
+  toggleFullscreen() {
+    if (document.fullscreenElement === this.el) {
+      document.exitFullscreen?.();
+    } else if (this.el.requestFullscreen) {
+      this.el.requestFullscreen().catch(() => {});
+    } else if (this.player?.webkitEnterFullscreen) {
+      // iOS Safari only fullscreens the media element itself, so the learner
+      // gets Apple's controls there. The seeking backstop above still holds.
+      this.player.webkitEnterFullscreen();
+    }
+  },
+
+  handleFullscreenChange() {
+    // applyAspectRatio's sizing is for the in-page frame; fullscreen wants the
+    // whole viewport, with the video letterboxed inside it.
+    if (document.fullscreenElement === this.el) {
+      this.el.style.aspectRatio = "auto";
+      this.el.style.width = "100%";
+      this.el.style.maxWidth = "none";
+      this.el.style.height = "100%";
+    } else if (this.player) {
+      this.applyAspectRatio(this.player.videoWidth, this.player.videoHeight);
+    }
+
+    this.showChrome();
+  },
+
+  handleKeydown(event) {
+    if (!this.player) return;
+    // Let the caption/quality/speed menus and the volume slider keep their own
+    // arrow-key behaviour.
+    if (
+      event.target instanceof HTMLSelectElement ||
+      event.target instanceof HTMLInputElement
+    ) {
+      return;
+    }
+
+    switch (event.key.toLowerCase()) {
+      case " ":
+      case "k":
+        this.togglePlay();
+        break;
+      case "arrowleft":
+      case "j":
+        this.nudge(-10);
+        break;
+      case "arrowright":
+      case "l":
+        this.nudge(10);
+        break;
+      case "arrowup":
+        this.setVolume(this.player.volume + 0.1);
+        break;
+      case "arrowdown":
+        this.setVolume(this.player.volume - 0.1);
+        break;
+      case "m":
+        this.toggleMute();
+        break;
+      case "f":
+        this.toggleFullscreen();
+        break;
+      default:
+        return;
+    }
+
+    event.preventDefault();
+  },
+
+  // ── Controls ─────────────────────────────────────────────────────────────
+
+  buildChrome() {
+    const chrome = document.createElement("div");
+    chrome.dataset.role = "chrome";
+    chrome.className = "absolute inset-0 z-30";
+    // Clicking the picture toggles playback and double-click goes fullscreen,
+    // matching what every learner already expects from a video. Guarded on
+    // target so a click on a button is not also a play/pause.
+    chrome.addEventListener("click", (event) => {
+      if (event.target === chrome) this.togglePlay();
+    });
+    chrome.addEventListener("dblclick", (event) => {
+      if (event.target === chrome) this.toggleFullscreen();
+    });
+    chrome.addEventListener("pointermove", () => this.showChrome());
+    chrome.addEventListener("pointerleave", () => this.scheduleHideChrome());
+
+    this.centerButton = this.buildIconButton("play", "Play", () =>
+      this.togglePlay(),
+    );
+    this.centerButton.className =
+      "absolute left-1/2 top-1/2 grid h-16 w-16 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-black/55 text-white shadow-xl outline-none backdrop-blur-sm transition hover:scale-105 hover:bg-black/70 focus-visible:ring-2 focus-visible:ring-primary";
+    this.centerButton.innerHTML = playerIcon("play", "h-7 w-7 translate-x-0.5");
+
+    this.spinner = document.createElement("div");
+    this.spinner.className =
+      "pointer-events-none absolute left-1/2 top-1/2 hidden h-12 w-12 -translate-x-1/2 -translate-y-1/2 animate-spin rounded-full border-2 border-white/25 border-t-primary";
+
+    this.controlBar = document.createElement("div");
+    this.controlBar.className =
+      "absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent px-3 pb-2.5 pt-12 transition-opacity duration-200 sm:px-4";
+    this.controlBar.addEventListener("pointerenter", () => {
+      this.pointerOnBar = true;
+      this.showChrome();
+    });
+    this.controlBar.addEventListener("pointerleave", () => {
+      this.pointerOnBar = false;
+      this.scheduleHideChrome();
+    });
+
+    this.notice = document.createElement("p");
+    this.notice.dataset.role = "notice";
+    this.notice.setAttribute("role", "status");
+    // Sits in the bar's transparent gradient band, above the scrubber: close to
+    // the control that was just refused, and never clipped by the frame edge.
+    this.notice.className =
+      "pointer-events-none absolute left-1/2 top-1 w-max max-w-[min(22rem,90%)] -translate-x-1/2 rounded-xl bg-dark/95 px-3.5 py-2 text-center text-xs font-semibold text-white opacity-0 shadow-lg transition-opacity duration-200";
+
+    this.controlBar.append(this.notice, this.buildScrubber(), this.buildRow());
+    chrome.append(this.centerButton, this.spinner, this.controlBar);
+    this.chrome = chrome;
+
+    return chrome;
+  },
+
+  buildRow() {
+    const row = document.createElement("div");
+    row.className = "mt-0.5 flex items-center gap-1 sm:gap-1.5";
+
+    this.playButton = this.buildIconButton("play", "Play", () =>
+      this.togglePlay(),
+    );
+    this.rewindButton = this.buildIconButton("rewind", "Back 10 seconds", () =>
+      this.nudge(-10),
+    );
+    this.forwardButton = this.buildIconButton(
+      "forward",
+      "Forward 10 seconds",
+      () => this.nudge(10),
+    );
+
+    const volume = document.createElement("div");
+    volume.className = "flex items-center";
+    this.muteButton = this.buildIconButton("volume", "Mute", () =>
+      this.toggleMute(),
+    );
+    this.volumeSlider = document.createElement("input");
+    this.volumeSlider.type = "range";
+    this.volumeSlider.min = "0";
+    this.volumeSlider.max = "1";
+    this.volumeSlider.step = "0.05";
+    this.volumeSlider.setAttribute("aria-label", "Volume");
+    // Hidden on phones, where the bar is tight and the OS volume keys are the
+    // control people actually reach for.
+    this.volumeSlider.className =
+      "ml-1 hidden h-1 w-16 cursor-pointer accent-primary sm:block";
+    this.volumeSlider.addEventListener("input", (event) =>
+      this.setVolume(Number(event.target.value)),
+    );
+    volume.append(this.muteButton, this.volumeSlider);
+
+    this.timeLabel = document.createElement("span");
+    this.timeLabel.className =
+      "ml-1.5 text-xs font-semibold tabular-nums text-white/90";
+    this.timeLabel.textContent = "0:00 / 0:00";
+
+    this.lockChip = document.createElement("span");
+    this.lockChip.className =
+      "hidden items-center gap-1 rounded-full bg-white/10 px-2 py-1 text-[11px] font-semibold text-white/75";
+    this.lockChip.title = SKIP_LOCKED_MESSAGE;
+    this.lockChip.innerHTML = `${playerIcon("lock", "h-3 w-3")}<span class="hidden sm:inline">No skipping</span>`;
 
     this.captionSelect = this.buildPlaybackSelect(
       "Captions",
       "captions",
-      (event) => {
-        this.setCaptionTrack(event.target.value);
-      },
+      [["CC Off", "off"]],
+      (event) => this.setCaptionTrack(event.target.value),
     );
     this.qualitySelect = this.buildPlaybackSelect(
       "Quality",
       "quality",
+      [["Auto", "auto"]],
+      (event) => this.setQualityLevel(event.target.value),
+    );
+    this.speedSelect = this.buildPlaybackSelect(
+      "Playback speed",
+      "speed",
+      [1, 1.25, 1.5, 1.75, 2].map((rate) => [`${rate}x`, String(rate)]),
       (event) => {
-        this.setQualityLevel(event.target.value);
+        this.player.playbackRate = Number(event.target.value);
       },
     );
+    this.fullscreenButton = this.buildIconButton(
+      "fullscreen",
+      "Full screen",
+      () => this.toggleFullscreen(),
+    );
 
-    settings.append(this.captionSelect.label, this.qualitySelect.label);
-    return settings;
+    const spacer = document.createElement("div");
+    spacer.className = "flex-1";
+
+    row.append(
+      this.playButton,
+      this.rewindButton,
+      this.forwardButton,
+      volume,
+      this.timeLabel,
+      spacer,
+      this.lockChip,
+      this.captionSelect.label,
+      this.qualitySelect.label,
+      this.speedSelect.label,
+      this.fullscreenButton,
+    );
+
+    return row;
   },
 
-  buildPlaybackSelect(labelText, kind, onChange) {
+  // Three stacked fills tell the whole story at a glance: orange is where the
+  // learner is, translucent white is how far they have earned the right to jump,
+  // and the hatched tail is the part still locked behind watching it.
+  buildScrubber() {
+    const scrubber = document.createElement("div");
+    scrubber.className = "group/scrub relative cursor-pointer py-2.5";
+    scrubber.setAttribute("role", "slider");
+    scrubber.setAttribute("aria-label", "Lesson progress");
+    scrubber.setAttribute("aria-valuemin", "0");
+
+    const track = document.createElement("div");
+    track.className =
+      "relative h-1.5 w-full overflow-hidden rounded-full bg-white/20 transition-all duration-150 group-hover/scrub:h-2.5";
+
+    const fill = (className) => {
+      const bar = document.createElement("div");
+      bar.className = className;
+      bar.style.width = "0%";
+      return bar;
+    };
+
+    this.bufferedBar = fill("absolute inset-y-0 left-0 bg-white/20");
+    this.watchedBar = fill("absolute inset-y-0 left-0 bg-white/40");
+    this.lockedBar = fill(
+      "player-locked-region absolute inset-y-0 right-0 bg-white/5",
+    );
+    this.playedBar = fill("absolute inset-y-0 left-0 bg-primary");
+    track.append(
+      this.bufferedBar,
+      this.watchedBar,
+      this.lockedBar,
+      this.playedBar,
+    );
+
+    this.thumb = document.createElement("div");
+    this.thumb.className =
+      "pointer-events-none absolute top-1/2 z-10 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary opacity-0 shadow-md transition-opacity group-hover/scrub:opacity-100";
+    this.thumb.style.left = "0%";
+
+    this.hoverLabel = document.createElement("div");
+    this.hoverLabel.className =
+      "pointer-events-none absolute bottom-full z-10 mb-1 flex -translate-x-1/2 items-center gap-1 rounded-md bg-dark/95 px-2 py-1 text-[11px] font-semibold text-white opacity-0 transition-opacity group-hover/scrub:opacity-100";
+
+    scrubber.append(track, this.thumb, this.hoverLabel);
+
+    const timeAt = (event) => {
+      const rect = track.getBoundingClientRect();
+      const ratio = Math.min(
+        1,
+        Math.max(0, (event.clientX - rect.left) / rect.width),
+      );
+      return ratio * this.duration();
+    };
+
+    scrubber.addEventListener("pointerdown", (event) => {
+      if (!this.duration()) return;
+
+      event.preventDefault();
+      this.scrubbing = true;
+      scrubber.setPointerCapture(event.pointerId);
+      this.requestSeek(timeAt(event));
+    });
+    scrubber.addEventListener("pointermove", (event) => {
+      if (!this.duration()) return;
+
+      const time = timeAt(event);
+      const rect = track.getBoundingClientRect();
+      const locked = time > this.seekLimit() + SEEK_TOLERANCE;
+      this.hoverLabel.style.left = `${Math.min(Math.max(event.clientX - rect.left, 24), rect.width - 24)}px`;
+      this.hoverLabel.innerHTML = locked
+        ? `${playerIcon("lock", "h-3 w-3")}Locked`
+        : formatMediaTime(time);
+
+      if (this.scrubbing) this.requestSeek(time);
+    });
+    const endScrub = (event) => {
+      if (!this.scrubbing) return;
+
+      this.scrubbing = false;
+      if (scrubber.hasPointerCapture(event.pointerId)) {
+        scrubber.releasePointerCapture(event.pointerId);
+      }
+      this.scheduleHideChrome();
+    };
+    scrubber.addEventListener("pointerup", endScrub);
+    scrubber.addEventListener("pointercancel", endScrub);
+
+    this.scrubber = scrubber;
+    return scrubber;
+  },
+
+  buildIconButton(icon, label, onClick) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = CONTROL_BUTTON_CLASS;
+    button.innerHTML = playerIcon(icon);
+    button.title = label;
+    button.setAttribute("aria-label", label);
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      onClick();
+    });
+    return button;
+  },
+
+  setButtonIcon(button, icon, label) {
+    if (button.dataset.icon !== icon) {
+      button.dataset.icon = icon;
+      button.innerHTML = playerIcon(icon);
+    }
+
+    button.title = label;
+    button.setAttribute("aria-label", label);
+  },
+
+  buildPlaybackSelect(labelText, kind, options, onChange) {
     const label = document.createElement("label");
-    label.className = "flex items-center gap-1.5";
+    label.className = "flex items-center";
+    label.title = labelText;
     const text = document.createElement("span");
     text.textContent = labelText;
-    text.className = "sr-only sm:not-sr-only";
+    text.className = "sr-only";
     const select = document.createElement("select");
-    select.className =
-      "rounded border border-white/30 bg-black/70 px-2 py-1 text-xs font-semibold text-white outline-none focus:border-primary";
+    select.className = CONTROL_SELECT_CLASS;
     select.setAttribute("aria-label", labelText);
     select.dataset.setting = kind;
-    select.add(
-      new Option(
-        kind === "captions" ? "CC Off" : "Auto",
-        kind === "captions" ? "off" : "auto",
-      ),
+    options.forEach(([optionText, value]) =>
+      select.add(new Option(optionText, value)),
     );
     select.disabled = true;
     select.addEventListener("change", onChange);
     label.append(text, select);
     return { label, select };
+  },
+
+  // Single place the controls are redrawn from, so playback state and the
+  // rendered bar can never disagree.
+  syncChrome() {
+    const player = this.player;
+    if (!player || !this.chrome) return;
+
+    const duration = this.duration();
+    const percent = (value) =>
+      `${duration ? Math.min(100, Math.max(0, (value / duration) * 100)) : 0}%`;
+    const limit = this.seekLimit();
+    const locked = this.skipLocked();
+
+    this.playedBar.style.width = percent(player.currentTime);
+    this.watchedBar.style.width = percent(limit);
+    this.bufferedBar.style.width = percent(this.bufferedEnd());
+    this.lockedBar.style.width = duration
+      ? `${Math.max(0, 100 - (limit / duration) * 100)}%`
+      : "0%";
+    this.thumb.style.left = percent(player.currentTime);
+    this.timeLabel.textContent = `${formatMediaTime(player.currentTime)} / ${formatMediaTime(duration)}`;
+    this.scrubber.setAttribute("aria-valuemax", String(Math.round(duration)));
+    this.scrubber.setAttribute(
+      "aria-valuenow",
+      String(Math.round(player.currentTime)),
+    );
+    this.scrubber.setAttribute(
+      "aria-valuetext",
+      `${formatMediaTime(player.currentTime)} of ${formatMediaTime(duration)}`,
+    );
+
+    const playing = !player.paused && !player.ended;
+    this.setButtonIcon(
+      this.playButton,
+      playing ? "pause" : "play",
+      playing ? "Pause" : "Play",
+    );
+    this.centerButton.classList.toggle(
+      "hidden",
+      Boolean(playing || this.buffering),
+    );
+
+    const muted = player.muted || player.volume === 0;
+    this.setButtonIcon(
+      this.muteButton,
+      muted ? "muted" : "volume",
+      muted ? "Unmute" : "Mute",
+    );
+    if (document.activeElement !== this.volumeSlider) {
+      this.volumeSlider.value = String(muted ? 0 : player.volume);
+    }
+
+    const fullscreen = document.fullscreenElement === this.el;
+    this.setButtonIcon(
+      this.fullscreenButton,
+      fullscreen ? "exitFullscreen" : "fullscreen",
+      fullscreen ? "Exit full screen" : "Full screen",
+    );
+
+    this.forwardButton.classList.toggle("text-white/40", locked);
+    this.forwardButton.title = locked
+      ? SKIP_LOCKED_MESSAGE
+      : "Forward 10 seconds";
+    this.lockChip.classList.toggle("hidden", !locked);
+    this.lockChip.classList.toggle("inline-flex", locked);
+    this.speedSelect.select.disabled = locked;
+    this.speedSelect.label.title = locked
+      ? SPEED_LOCKED_MESSAGE
+      : "Playback speed";
+  },
+
+  bufferedEnd() {
+    const buffered = this.player?.buffered;
+    if (!buffered || buffered.length === 0) return 0;
+
+    for (let index = 0; index < buffered.length; index += 1) {
+      if (
+        buffered.start(index) <= this.player.currentTime &&
+        buffered.end(index) >= this.player.currentTime
+      ) {
+        return buffered.end(index);
+      }
+    }
+
+    return buffered.end(buffered.length - 1);
+  },
+
+  setBuffering(buffering) {
+    this.buffering = buffering;
+    this.spinner?.classList.toggle("hidden", !buffering);
+    this.syncChrome();
+  },
+
+  showChrome() {
+    if (!this.controlBar) return;
+
+    this.controlBar.classList.remove("opacity-0", "pointer-events-none");
+    this.chrome.classList.remove("cursor-none");
+    this.scheduleHideChrome();
+  },
+
+  scheduleHideChrome() {
+    window.clearTimeout(this.hideChromeTimer);
+    this.hideChromeTimer = window.setTimeout(() => this.hideChrome(), 2800);
+  },
+
+  // A paused player keeps its controls: the learner is looking at them, not at
+  // the picture. So does one being scrubbed, hovered, or focused. A faded bar
+  // also stops taking clicks, so the bottom of the picture stays clickable.
+  hideChrome() {
+    if (
+      !this.controlBar ||
+      !this.player ||
+      this.player.paused ||
+      this.scrubbing ||
+      this.pointerOnBar ||
+      this.controlBar.contains(document.activeElement)
+    ) {
+      return;
+    }
+
+    this.controlBar.classList.add("opacity-0", "pointer-events-none");
+    this.chrome.classList.add("cursor-none");
+  },
+
+  flashNotice(message = SKIP_LOCKED_MESSAGE) {
+    if (!this.notice) return;
+
+    this.notice.textContent = message;
+    this.notice.classList.remove("opacity-0");
+    this.showChrome();
+    window.clearTimeout(this.noticeTimer);
+    this.noticeTimer = window.setTimeout(
+      () => this.notice.classList.add("opacity-0"),
+      2600,
+    );
   },
 
   updateQualityOptions() {
@@ -737,12 +1406,14 @@ Hooks.ProtectedVideo = {
   moveWatermark() {
     if (!this.watermark) return;
 
+    // Kept clear of the bottom band the control bar occupies, so the identity
+    // stamp is never parked behind the controls where a capture would miss it.
     const positions = [
       ["6%", "8%"],
       ["58%", "12%"],
-      ["10%", "78%"],
-      ["54%", "74%"],
-      ["34%", "42%"],
+      ["10%", "60%"],
+      ["54%", "56%"],
+      ["34%", "36%"],
     ];
     const [left, top] = positions[Math.floor(Math.random() * positions.length)];
     this.watermark.style.left = left;
@@ -1523,6 +2194,13 @@ let liveSocket = new LiveSocket("/live", Socket, {
 topbar.config({ barColors: { 0: "#29d" }, shadowColor: "rgba(0, 0, 0, .3)" });
 window.addEventListener("phx:page-loading-start", (_info) => topbar.show(300));
 window.addEventListener("phx:page-loading-stop", (_info) => topbar.hide());
+
+// Paired with JS.dispatch on the lesson tabs: a panel that opens below the fold
+// — the lesson quiz under a tall player — has to bring itself into view, or the
+// click reads as having done nothing at all.
+window.addEventListener("wasomi:scroll-into-view", (event) => {
+  event.target.scrollIntoView({ behavior: "smooth", block: "start" });
+});
 
 // connect if there are any LiveViews on the page
 liveSocket.connect();

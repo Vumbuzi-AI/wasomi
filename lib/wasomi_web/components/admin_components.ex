@@ -22,6 +22,7 @@ defmodule WasomiWeb.AdminComponents do
   @nav_items [
     %{key: :overview, label: "Overview", icon: "hero-chart-pie", path: "/admin"},
     %{key: :courses, label: "Courses", icon: "hero-academic-cap", path: "/admin/courses"},
+    %{key: :mentors, label: "Mentors", icon: "hero-user-group", path: "/admin/mentors"},
     %{key: :students, label: "Students", icon: "hero-users", path: "/admin/students"},
     %{key: :payments, label: "Payments", icon: "hero-banknotes", path: "/admin/payments"},
     %{key: :analytics, label: "Analytics", icon: "hero-chart-bar", path: "/admin/analytics"}

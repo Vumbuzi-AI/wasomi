@@ -1143,6 +1143,100 @@ defmodule Wasomi.CatalogTest do
 
       assert changeset.valid?
     end
+
+    test "change_course_certificate/2 leaves the second signatory optional" do
+      course = course_fixture()
+
+      changeset =
+        Catalog.change_course_certificate(course, %{
+          "certificate_enabled" => "true",
+          "certificate_issuer_name" => "GS1 Kenya",
+          "certificate_signatory_name" => "Jane Doe",
+          "certificate_signatory_title" => "Country Manager"
+        })
+
+      assert changeset.valid?
+    end
+
+    test "change_course_certificate/2 requires the second signatory's name and title together" do
+      course = course_fixture()
+
+      base = %{
+        "certificate_enabled" => "true",
+        "certificate_issuer_name" => "GS1 Kenya",
+        "certificate_signatory_name" => "Jane Doe",
+        "certificate_signatory_title" => "Country Manager"
+      }
+
+      title_only =
+        Catalog.change_course_certificate(
+          course,
+          Map.put(base, "certificate_signatory_two_title", "Chief Executive Officer")
+        )
+
+      refute title_only.valid?
+      assert %{certificate_signatory_two_name: ["can't be blank"]} = errors_on(title_only)
+
+      name_only =
+        Catalog.change_course_certificate(
+          course,
+          Map.put(base, "certificate_signatory_two_name", "Peter Otieno")
+        )
+
+      refute name_only.valid?
+      assert %{certificate_signatory_two_title: ["can't be blank"]} = errors_on(name_only)
+
+      both =
+        Catalog.change_course_certificate(
+          course,
+          base
+          |> Map.put("certificate_signatory_two_name", "Peter Otieno")
+          |> Map.put("certificate_signatory_two_title", "Chief Executive Officer")
+        )
+
+      assert both.valid?
+    end
+
+    test "change_course_certificate/2 validates the second signatory's signature URL host" do
+      previous = Application.get_env(:wasomi, :r2_public_url)
+      on_exit(fn -> Application.put_env(:wasomi, :r2_public_url, previous) end)
+      Application.put_env(:wasomi, :r2_public_url, "https://cdn.example.test")
+
+      course = course_fixture()
+
+      changeset =
+        Catalog.change_course_certificate(course, %{
+          "certificate_signatory_two_signature_key" => "http://169.254.169.254/latest/meta-data/"
+        })
+
+      refute changeset.valid?
+
+      assert %{certificate_signatory_two_signature_key: ["must be a valid http(s) URL"]} =
+               errors_on(changeset)
+    end
+
+    test "update_course_certificate/2 persists a second signatory" do
+      previous = Application.get_env(:wasomi, :r2_public_url)
+      on_exit(fn -> Application.put_env(:wasomi, :r2_public_url, previous) end)
+      Application.put_env(:wasomi, :r2_public_url, "https://example.com")
+
+      course = course_fixture()
+
+      assert {:ok, updated} =
+               Catalog.update_course_certificate(course, %{
+                 "certificate_enabled" => "true",
+                 "certificate_issuer_name" => "GS1 Kenya",
+                 "certificate_signatory_name" => "Jane Doe",
+                 "certificate_signatory_title" => "Country Manager",
+                 "certificate_signatory_two_name" => "Peter Otieno",
+                 "certificate_signatory_two_title" => "Chief Executive Officer",
+                 "certificate_signatory_two_signature_key" => "https://example.com/ceo.png"
+               })
+
+      assert updated.certificate_signatory_two_name == "Peter Otieno"
+      assert updated.certificate_signatory_two_title == "Chief Executive Officer"
+      assert updated.certificate_signatory_two_signature_key == "https://example.com/ceo.png"
+    end
   end
 
   describe "lecture transcripts" do

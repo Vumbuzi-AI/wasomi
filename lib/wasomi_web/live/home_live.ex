@@ -4,6 +4,7 @@ defmodule WasomiWeb.HomeLive do
   import WasomiWeb.HomeComponents
   alias Wasomi.Accounts
   alias Wasomi.Catalog
+  alias Wasomi.Mentors
 
   @impl true
   def mount(_params, session, socket) do
@@ -18,7 +19,8 @@ defmodule WasomiWeb.HomeLive do
      |> assign(:meta_robots, "index, follow")
      |> assign(:canonical_url, url(~p"/"))
      |> assign(:current_user, current_user(session))
-     |> assign(:courses, Catalog.list_published_courses())}
+     |> assign(:courses, Catalog.list_published_courses())
+     |> assign(:mentors, Mentors.list_active_mentors())}
   end
 
   @impl true
@@ -34,7 +36,7 @@ defmodule WasomiWeb.HomeLive do
         <.top_courses_section courses={@courses} />
         <.gs1_in_workplaces />
         <.how_it_works />
-        <.mentors />
+        <.mentors mentors={@mentors} />
         <.certificates />
         <.faqs />
       </main>

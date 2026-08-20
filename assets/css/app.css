@@ -54,6 +54,17 @@ body {
   -webkit-touch-callout: none;
 }
 
+/* The tail of the lesson scrub bar that the learner has not watched yet. The
+   hatching reads as "not available" the way a flat fill never could, so the
+   no-skipping rule is visible before it is bumped into. */
+.player-locked-region {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgb(255 255 255 / 0.22) 0 2px,
+    transparent 2px 6px
+  );
+}
+
 /* Analytics is intentionally roomier than the other admin tools: it is a
    report surface designed to remain legible when projected or exported. */
 .analytics-page {

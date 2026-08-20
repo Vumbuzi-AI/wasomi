@@ -2,7 +2,7 @@ defmodule WasomiWeb.AdminLive.CourseCertificate do
   use WasomiWeb, :live_view
 
   alias Wasomi.{Catalog, Storage}
-  alias Wasomi.Certificates.Template
+  alias Wasomi.Certificates.{Branding, Template}
 
   @max_signature_bytes 2_000_000
   @sample_serial_number "SAMPLE-0000"
@@ -18,6 +18,14 @@ defmodule WasomiWeb.AdminLive.CourseCertificate do
      |> assign(:form, to_form(Catalog.change_course_certificate(course)))
      |> assign(:generating_pdf?, false)
      |> allow_upload(:signature,
+       accept: ~w(.png),
+       max_entries: 1,
+       max_file_size: @max_signature_bytes,
+       auto_upload: true,
+       external: fn entry, socket -> presign_entry(entry, socket, course.id) end,
+       progress: &handle_progress/3
+     )
+     |> allow_upload(:signature_two,
        accept: ~w(.png),
        max_entries: 1,
        max_file_size: @max_signature_bytes,
@@ -42,13 +50,17 @@ defmodule WasomiWeb.AdminLive.CourseCertificate do
   end
 
   def handle_event("save", %{"course" => params}, socket) do
-    case consume_signature_upload(socket) do
-      {:ok, url} ->
-        save_certificate(socket, Map.put(params, "certificate_signature_key", url))
-
-      :no_upload ->
-        save_certificate(socket, params)
-
+    with {:ok, params} <-
+           merge_signature_upload(socket, params, :signature, "certificate_signature_key"),
+         {:ok, params} <-
+           merge_signature_upload(
+             socket,
+             params,
+             :signature_two,
+             "certificate_signatory_two_signature_key"
+           ) do
+      save_certificate(socket, params)
+    else
       {:error, :missing_public_url} ->
         {:noreply,
          put_flash(
@@ -60,8 +72,8 @@ defmodule WasomiWeb.AdminLive.CourseCertificate do
     end
   end
 
-  def handle_event("cancel-upload", %{"ref" => ref}, socket) do
-    {:noreply, socket |> cancel_upload(:signature, ref) |> assign_preview()}
+  def handle_event("cancel-upload", %{"ref" => ref, "upload" => upload}, socket) do
+    {:noreply, socket |> cancel_upload(upload_name(upload), ref) |> assign_preview()}
   end
 
   def handle_event("test_pdf", _params, socket) do
@@ -77,7 +89,7 @@ defmodule WasomiWeb.AdminLive.CourseCertificate do
     end
   end
 
-  def handle_progress(:signature, entry, socket) do
+  def handle_progress(_upload_name, entry, socket) do
     if entry.done?, do: {:noreply, assign_preview(socket)}, else: {:noreply, socket}
   end
 
@@ -154,50 +166,40 @@ defmodule WasomiWeb.AdminLive.CourseCertificate do
                 <.input field={@form[:certificate_signature_key]} type="text" />
               </div>
 
-              <div class="space-y-3">
-                <span class="block text-sm font-semibold leading-6 text-zinc-800">
-                  Signature image
-                </span>
+              <.signature_upload
+                upload={@uploads.signature}
+                name="signature"
+                label="Signature image"
+                current_url={@signature_url}
+              />
 
-                <img
-                  :if={@signature_url}
-                  src={@signature_url}
-                  alt=""
-                  class="h-16 rounded-lg border border-zinc-200 bg-white object-contain p-2"
+              <div class="space-y-4 rounded-2xl border border-dashed border-zinc-200 p-4">
+                <p class="text-sm font-semibold text-ink">Second signatory (optional)</p>
+                <p class="-mt-3 text-xs text-zinc-500">
+                  Fill both fields to add a second signature block to the certificate.
+                </p>
+
+                <.input
+                  field={@form[:certificate_signatory_two_name]}
+                  type="text"
+                  label="Signatory name"
+                />
+                <.input
+                  field={@form[:certificate_signatory_two_title]}
+                  type="text"
+                  label="Signatory title"
                 />
 
-                <.live_file_input
-                  upload={@uploads.signature}
-                  class="block w-full text-sm text-zinc-700"
-                />
-                <p class="text-xs text-zinc-500">Transparent PNG, up to 2 MB.</p>
-
-                <div :for={entry <- @uploads.signature.entries} class="space-y-1">
-                  <div class="flex items-center justify-between gap-3 text-sm text-zinc-700">
-                    <span>{entry.client_name}</span>
-                    <button
-                      type="button"
-                      phx-click="cancel-upload"
-                      phx-value-ref={entry.ref}
-                      class="font-medium text-rose-600 hover:text-rose-700"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                  <div class="h-2 overflow-hidden rounded-full bg-zinc-100">
-                    <div
-                      class="h-full rounded-full bg-emerald-500 transition-all"
-                      style={"width: #{entry.progress}%"}
-                    >
-                    </div>
-                  </div>
-                  <p
-                    :for={err <- upload_errors(@uploads.signature, entry)}
-                    class="text-sm text-rose-600"
-                  >
-                    {upload_error_to_string(err)}
-                  </p>
+                <div class="hidden">
+                  <.input field={@form[:certificate_signatory_two_signature_key]} type="text" />
                 </div>
+
+                <.signature_upload
+                  upload={@uploads.signature_two}
+                  name="signature_two"
+                  label="Signature image"
+                  current_url={@signature_two_url}
+                />
               </div>
 
               <:actions>
@@ -221,7 +223,7 @@ defmodule WasomiWeb.AdminLive.CourseCertificate do
             <iframe
               srcdoc={@preview_html}
               title="Certificate preview"
-              class="aspect-video w-full rounded-xl border border-black/5"
+              class="aspect-[1.414] w-full rounded-xl border border-black/5"
             >
             </iframe>
           </section>
@@ -231,25 +233,81 @@ defmodule WasomiWeb.AdminLive.CourseCertificate do
     """
   end
 
+  attr :upload, :map, required: true
+  attr :name, :string, required: true
+  attr :label, :string, required: true
+  attr :current_url, :string, default: nil
+
+  defp signature_upload(assigns) do
+    ~H"""
+    <div class="space-y-3">
+      <span class="block text-sm font-semibold leading-6 text-zinc-800">{@label}</span>
+
+      <img
+        :if={@current_url}
+        src={@current_url}
+        alt=""
+        class="h-16 rounded-lg border border-zinc-200 bg-white object-contain p-2"
+      />
+
+      <.live_file_input upload={@upload} class="block w-full text-sm text-zinc-700" />
+      <p class="text-xs text-zinc-500">Transparent PNG, up to 2 MB.</p>
+
+      <div :for={entry <- @upload.entries} class="space-y-1">
+        <div class="flex items-center justify-between gap-3 text-sm text-zinc-700">
+          <span>{entry.client_name}</span>
+          <button
+            type="button"
+            phx-click="cancel-upload"
+            phx-value-ref={entry.ref}
+            phx-value-upload={@name}
+            class="font-medium text-rose-600 hover:text-rose-700"
+          >
+            Remove
+          </button>
+        </div>
+        <div class="h-2 overflow-hidden rounded-full bg-zinc-100">
+          <div
+            class="h-full rounded-full bg-emerald-500 transition-all"
+            style={"width: #{entry.progress}%"}
+          >
+          </div>
+        </div>
+        <p :for={err <- upload_errors(@upload, entry)} class="text-sm text-rose-600">
+          {upload_error_to_string(err)}
+        </p>
+      </div>
+    </div>
+    """
+  end
+
   defp assign_preview(socket) do
     changeset = socket.assigns.form.source
     signature_url = current_signature_url(socket, changeset)
+    signature_two_url = current_signature_two_url(socket, changeset)
 
     socket
     |> assign(:signature_url, signature_url)
+    |> assign(:signature_two_url, signature_two_url)
     |> assign(
       :preview_html,
-      Template.render_html(sample_assigns(socket, changeset, signature_url))
+      Template.render_html(sample_assigns(socket, changeset, signature_url, signature_two_url))
     )
   end
 
   defp sample_assigns(socket) do
     changeset = socket.assigns.form.source
-    sample_assigns(socket, changeset, current_signature_url(socket, changeset))
+
+    sample_assigns(
+      socket,
+      changeset,
+      current_signature_url(socket, changeset),
+      current_signature_two_url(socket, changeset)
+    )
   end
 
-  defp sample_assigns(socket, changeset, signature_url) do
-    %{
+  defp sample_assigns(socket, changeset, signature_url, signature_two_url) do
+    Map.merge(Branding.assigns(), %{
       learner_name: "Jane Sample",
       title: socket.assigns.course.title,
       type_label: "Course Achievement",
@@ -258,16 +316,24 @@ defmodule WasomiWeb.AdminLive.CourseCertificate do
       issuer_name: get_field(changeset, :certificate_issuer_name) || "Wasomi Business Institute",
       signatory_name: get_field(changeset, :certificate_signatory_name),
       signatory_title: get_field(changeset, :certificate_signatory_title),
-      signature_url: signature_url
-    }
+      signature_url: signature_url,
+      signatory_two_name: get_field(changeset, :certificate_signatory_two_name),
+      signatory_two_title: get_field(changeset, :certificate_signatory_two_title),
+      signatory_two_signature_url: signature_two_url
+    })
   end
 
   defp current_signature_url(socket, changeset) do
-    pending_signature_url(socket) || get_field(changeset, :certificate_signature_key)
+    pending_signature_url(socket, :signature) || get_field(changeset, :certificate_signature_key)
   end
 
-  defp pending_signature_url(socket) do
-    uploads = socket.assigns.uploads.signature
+  defp current_signature_two_url(socket, changeset) do
+    pending_signature_url(socket, :signature_two) ||
+      get_field(changeset, :certificate_signatory_two_signature_key)
+  end
+
+  defp pending_signature_url(socket, upload_name) do
+    uploads = Map.fetch!(socket.assigns.uploads, upload_name)
 
     uploads.entries
     |> Enum.find(& &1.done?)
@@ -279,8 +345,16 @@ defmodule WasomiWeb.AdminLive.CourseCertificate do
 
   defp get_field(changeset, field), do: Ecto.Changeset.get_field(changeset, field)
 
-  defp consume_signature_upload(socket) do
-    case consume_uploaded_entries(socket, :signature, fn meta, _entry ->
+  defp merge_signature_upload(socket, params, upload_name, field) do
+    case consume_signature_upload(socket, upload_name) do
+      {:ok, url} -> {:ok, Map.put(params, field, url)}
+      :no_upload -> {:ok, params}
+      {:error, :missing_public_url} = error -> error
+    end
+  end
+
+  defp consume_signature_upload(socket, upload_name) do
+    case consume_uploaded_entries(socket, upload_name, fn meta, _entry ->
            {:ok, meta.public_url}
          end) do
       [url] when is_binary(url) -> {:ok, url}
@@ -291,6 +365,11 @@ defmodule WasomiWeb.AdminLive.CourseCertificate do
       [] -> :no_upload
     end
   end
+
+  # Only the two known uploads are addressable, so a crafted phx-value-upload
+  # can't reach an arbitrary atom.
+  defp upload_name("signature_two"), do: :signature_two
+  defp upload_name(_other), do: :signature
 
   defp presign_entry(entry, socket, course_id) do
     attrs = %{

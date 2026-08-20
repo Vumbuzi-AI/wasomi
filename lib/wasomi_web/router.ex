@@ -113,6 +113,10 @@ defmodule WasomiWeb.Router do
       live "/students", AdminLive.Students, :index
       live "/students/:id", AdminLive.StudentShow, :show
 
+      live "/mentors", AdminLive.Mentors, :index
+      live "/mentors/new", AdminLive.Mentors, :new
+      live "/mentors/:id/edit", AdminLive.Mentors, :edit
+
       live "/payments", AdminLive.Payments, :index
 
       live "/analytics", AdminLive.Analytics, :index

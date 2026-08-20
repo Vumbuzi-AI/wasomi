@@ -18,6 +18,11 @@ defmodule Wasomi.Catalog.Course do
     field :certificate_signatory_name, :string
     field :certificate_signatory_title, :string
     field :certificate_signature_key, :string
+    # A second signatory is optional: fill it in and the certificate grows a
+    # second signature block, leave it blank and the first one stands alone.
+    field :certificate_signatory_two_name, :string
+    field :certificate_signatory_two_title, :string
+    field :certificate_signatory_two_signature_key, :string
 
     has_many :modules, Wasomi.Catalog.CourseModule,
       foreign_key: :course_id,
@@ -116,7 +121,10 @@ defmodule Wasomi.Catalog.Course do
       :certificate_issuer_name,
       :certificate_signatory_name,
       :certificate_signatory_title,
-      :certificate_signature_key
+      :certificate_signature_key,
+      :certificate_signatory_two_name,
+      :certificate_signatory_two_title,
+      :certificate_signatory_two_signature_key
     ])
     |> then(fn changeset ->
       if get_field(changeset, :certificate_enabled) do
@@ -129,12 +137,45 @@ defmodule Wasomi.Catalog.Course do
         changeset
       end
     end)
-    |> validate_change(:certificate_signature_key, fn field, value ->
-      if valid_signature_url?(value) do
-        []
-      else
-        [{field, "must be a valid http(s) URL"}]
-      end
+    |> validate_signatory_two()
+    |> validate_signature_url(:certificate_signature_key)
+    |> validate_signature_url(:certificate_signatory_two_signature_key)
+  end
+
+  # The second signatory is opt-in, but half of one is a rendering bug waiting
+  # to happen: a title with no name would print an orphaned caption under a
+  # blank signature line. Require the pair, or neither.
+  defp validate_signatory_two(changeset) do
+    name = presence(get_field(changeset, :certificate_signatory_two_name))
+    title = presence(get_field(changeset, :certificate_signatory_two_title))
+
+    cond do
+      is_nil(name) and is_nil(title) ->
+        changeset
+
+      is_nil(name) ->
+        add_error(changeset, :certificate_signatory_two_name, "can't be blank")
+
+      is_nil(title) ->
+        add_error(changeset, :certificate_signatory_two_title, "can't be blank")
+
+      true ->
+        changeset
+    end
+  end
+
+  defp presence(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp presence(_value), do: nil
+
+  defp validate_signature_url(changeset, field) do
+    validate_change(changeset, field, fn field, value ->
+      if valid_signature_url?(value), do: [], else: [{field, "must be a valid http(s) URL"}]
     end)
   end
 

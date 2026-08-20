@@ -2,7 +2,7 @@ defmodule WasomiWeb.HomeComponents do
   use Phoenix.Component
   use Gettext, backend: WasomiWeb.Gettext
 
-  import WasomiWeb.CoreComponents, only: [show: 2, hide: 2]
+  import WasomiWeb.CoreComponents, only: [show: 2, hide: 2, icon: 1]
 
   alias Phoenix.LiveView.JS
   alias Wasomi.Catalog
@@ -1079,68 +1079,23 @@ defmodule WasomiWeb.HomeComponents do
   defp lecture_label(1), do: "1 lecture"
   defp lecture_label(count), do: "#{count} lectures"
 
-  def mentors(assigns) do
-    assigns =
-      assign(assigns, :mentors, [
-        %{
-          name: "Matthew Ryan",
-          role: "Product Designer",
-          image:
-            "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=600&q=80",
-          class: ""
-        },
-        %{
-          name: "James Michael",
-          role: "Digital Marketer",
-          image:
-            "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=600&q=80",
-          class: "sm:mt-12"
-        },
-        %{
-          name: "Daniel Joseph",
-          role: "Software Engineer",
-          image:
-            "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&w=600&q=80",
-          class: ""
-        },
-        %{
-          name: "Anthony Mark",
-          role: "Project Manager",
-          image:
-            "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=600&q=80",
-          class: "sm:mt-12"
-        }
-      ])
+  attr :mentors, :list, required: true
 
+  def mentors(assigns) do
     ~H"""
-    <section id="mentors" class="bg-dark py-20 lg:py-28">
+    <section :if={@mentors != []} id="mentors" class="bg-dark py-20 lg:py-28">
       <div class="mx-auto max-w-container px-5 lg:px-8">
         <div class="flex flex-col items-start justify-between gap-6 sm:flex-row sm:items-end">
           <h2 class="max-w-xl text-4xl font-semibold text-white sm:text-5xl">
             Learn from the Best in the Industry
           </h2>
-          <a
-            href="#"
-            class="group inline-flex items-center gap-2 rounded-full border border-white/30 py-1.5 pl-6 pr-1.5 font-medium text-white transition hover:bg-white hover:text-dark"
-          >
-            View All Mentors
-            <span class="grid h-9 w-9 place-items-center rounded-full bg-primary text-white transition">
-              <svg
-                class="h-4 w-4"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              >
-                <line x1="7" y1="17" x2="17" y2="7" /><polyline points="7 7 17 7 17 17" />
-              </svg>
-            </span>
-          </a>
         </div>
         <div class="mt-14 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-          <.mentor_card :for={mentor <- @mentors} mentor={mentor} />
+          <.mentor_card
+            :for={{mentor, index} <- Enum.with_index(@mentors)}
+            mentor={mentor}
+            stagger?={rem(index, 2) == 1}
+          />
         </div>
       </div>
     </section>
@@ -1148,22 +1103,39 @@ defmodule WasomiWeb.HomeComponents do
   end
 
   attr :mentor, :map, required: true
+  attr :stagger?, :boolean, default: false
 
   def mentor_card(assigns) do
     ~H"""
-    <div class={["group relative aspect-[3/4] overflow-hidden rounded-3xl", @mentor.class]}>
+    <div class={[
+      "group relative aspect-[3/4] overflow-hidden rounded-3xl bg-white/5",
+      @stagger? && "sm:mt-12"
+    ]}>
       <img
+        :if={@mentor.photo_key}
         loading="lazy"
-        src={@mentor.image}
+        src={@mentor.photo_key}
         alt={@mentor.name}
         class="h-full w-full object-cover transition duration-500 group-hover:scale-105"
       />
+      <div
+        :if={!@mentor.photo_key}
+        class="flex h-full w-full items-center justify-center text-white/40"
+      >
+        <.icon name="hero-user" class="h-12 w-12" />
+      </div>
       <div class="absolute inset-x-0 bottom-0 p-5 [text-shadow:_0_2px_14px_rgb(0_0_0_/_0.75)]">
         <h3 class="text-lg font-medium text-white">{@mentor.name}</h3>
         <p class="text-sm text-white/85">{@mentor.role}</p>
-        <div class="mt-3 flex gap-2 opacity-0 transition group-hover:opacity-100">
+        <div
+          :if={@mentor.twitter_url || @mentor.facebook_url || @mentor.linkedin_url}
+          class="mt-3 flex gap-2 opacity-0 transition group-hover:opacity-100"
+        >
           <a
-            href="#"
+            :if={@mentor.twitter_url}
+            href={@mentor.twitter_url}
+            target="_blank"
+            rel="noopener noreferrer"
             aria-label={"#{@mentor.name} on X"}
             class="grid h-8 w-8 place-items-center rounded-full bg-white/20 text-white transition hover:bg-primary"
           >
@@ -1172,7 +1144,10 @@ defmodule WasomiWeb.HomeComponents do
             </svg>
           </a>
           <a
-            href="#"
+            :if={@mentor.facebook_url}
+            href={@mentor.facebook_url}
+            target="_blank"
+            rel="noopener noreferrer"
             aria-label={"#{@mentor.name} on Facebook"}
             class="grid h-8 w-8 place-items-center rounded-full bg-white/20 text-white transition hover:bg-primary"
           >
@@ -1181,7 +1156,10 @@ defmodule WasomiWeb.HomeComponents do
             </svg>
           </a>
           <a
-            href="#"
+            :if={@mentor.linkedin_url}
+            href={@mentor.linkedin_url}
+            target="_blank"
+            rel="noopener noreferrer"
             aria-label={"#{@mentor.name} on LinkedIn"}
             class="grid h-8 w-8 place-items-center rounded-full bg-white/20 text-white transition hover:bg-primary"
           >

@@ -7,17 +7,17 @@ defmodule Wasomi.Certificates.Renderer.ChromicPdf do
 
   alias Wasomi.Certificates.Template
 
-  # 16:9 widescreen, in inches (13.333x7.5in == 1280x720px @96dpi), with no
-  # default Chrome print margins — the certificate is a full-bleed design
-  # meant for on-screen viewing/sharing, not a printed A4/Letter page.
+  # A4 landscape, in inches (11.69x8.27in), with no default Chrome print
+  # margins — the certificate design carries its own internal padding and is
+  # meant to sit full-bleed on the page.
   #
   # `landscape` is deliberately omitted: Chrome's `Page.printToPDF` swaps
   # paperWidth/paperHeight when `landscape: true` is combined with explicit
   # dimensions, which would rotate this already-wide page back to portrait.
   @print_options %{
     printBackground: true,
-    paperWidth: 13.333,
-    paperHeight: 7.5,
+    paperWidth: 11.69,
+    paperHeight: 8.27,
     marginTop: 0,
     marginBottom: 0,
     marginLeft: 0,

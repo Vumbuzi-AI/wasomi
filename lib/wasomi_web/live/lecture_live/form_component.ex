@@ -74,6 +74,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
             myself={@myself}
             course_slug={@course_slug}
             action={@action}
+            video_ready={@video_ready}
           />
         </div>
       </div>
@@ -467,11 +468,11 @@ defmodule WasomiWeb.LectureLive.FormComponent do
         {label}
       </button>
       <div class={[
-        "flex-1 rounded-full px-4 py-2 text-center text-sm font-medium",
+        "flex flex-1 items-center justify-center gap-1.5 rounded-full px-4 py-2 text-sm font-medium",
         @step == :done && "bg-ink text-white",
         @step != :done && "text-muted/50"
       ]}>
-        Done
+        <.icon :if={@step == :done} name="hero-check-circle" class="h-4 w-4" /> Done
       </div>
     </div>
     """
@@ -673,40 +674,73 @@ defmodule WasomiWeb.LectureLive.FormComponent do
   attr :myself, :any, required: true
   attr :course_slug, :string, required: true
   attr :action, :atom, default: :new
+  attr :video_ready, :boolean, default: false
 
   defp done_step(assigns) do
+    assigns =
+      assign(assigns,
+        resource_count: Catalog.lecture_resource_count(assigns.lecture),
+        question_count: Catalog.lecture_question_count(assigns.lecture)
+      )
+
     ~H"""
     <div class="space-y-6 py-4 text-center">
-      <span class="mx-auto grid h-14 w-14 place-items-center rounded-full bg-mint text-primary">
-        <.icon name="hero-check-circle" class="h-8 w-8" />
+      <span class="relative mx-auto grid h-16 w-16 place-items-center rounded-full bg-mint text-primary ring-8 ring-mint/40">
+        <.icon name="hero-check-circle-solid" class="h-9 w-9" />
       </span>
+
       <div>
-        <h3 class="text-lg font-semibold text-ink">"{@lecture.title}" is saved</h3>
+        <p class="text-xs font-semibold uppercase tracking-wide text-primary">Lecture saved</p>
+        <h3 class="mt-1 text-xl font-semibold text-ink">"{@lecture.title}"</h3>
         <p class="mt-1 text-sm text-muted">
           You can keep editing it any time from the course curriculum.
         </p>
       </div>
-      <div class="flex items-center justify-center gap-3">
-        <.link
-          navigate={~p"/admin/courses/#{@course_slug}/lectures/#{@lecture.id}/quiz"}
-          class="inline-flex items-center gap-1.5 rounded-full border border-primary px-5 py-2.5 text-sm font-medium text-primary hover:bg-mint"
-        >
-          <.icon name="hero-clipboard-document-check" class="h-4 w-4" /> Generate a quiz
-        </.link>
+
+      <div class="mx-auto flex w-fit items-center gap-2 rounded-full border border-black/10 bg-soft px-4 py-2 text-xs font-medium text-body">
+        <span class="inline-flex items-center gap-1.5">
+          <.icon name="hero-play-circle" class={["h-4 w-4", @video_ready && "text-primary"]} />
+          {if @video_ready, do: "Video added", else: "No video"}
+        </span>
+        <span class="h-3 w-px bg-black/10" />
+        <span class="inline-flex items-center gap-1.5">
+          <.icon name="hero-paper-clip" class="h-4 w-4" />
+          {@resource_count} {ngettext("resource", "resources", @resource_count)}
+        </span>
+        <span class="h-3 w-px bg-black/10" />
+        <span class="inline-flex items-center gap-1.5">
+          <.icon name="hero-question-mark-circle" class="h-4 w-4" />
+          {@question_count} {ngettext("question", "questions", @question_count)}
+        </span>
+      </div>
+
+      <div class="flex flex-wrap items-center justify-center gap-3">
         <button
           :if={@action == :new}
           type="button"
           phx-target={@myself}
           phx-click="add-another-lecture"
-          class="rounded-full border border-primary px-5 py-2.5 text-sm font-medium text-primary hover:bg-mint"
+          class="inline-flex items-center gap-1.5 rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-white transition hover:bg-primary"
         >
-          Add another lecture
+          <.icon name="hero-plus" class="h-4 w-4" /> Add another lecture
         </button>
+        <.link
+          navigate={~p"/admin/courses/#{@course_slug}/lectures/#{@lecture.id}/quiz"}
+          class={[
+            "inline-flex items-center gap-1.5 rounded-full px-5 py-2.5 text-sm font-medium transition",
+            if(@action == :new,
+              do: "border border-primary text-primary hover:bg-mint",
+              else: "bg-ink text-white hover:bg-primary"
+            )
+          ]}
+        >
+          <.icon name="hero-clipboard-document-check" class="h-4 w-4" /> Generate a quiz
+        </.link>
         <button
           type="button"
           phx-target={@myself}
           phx-click="finish"
-          class="rounded-full bg-ink px-5 py-2.5 text-sm font-medium text-white hover:bg-primary"
+          class="rounded-full px-5 py-2.5 text-sm font-medium text-muted transition hover:text-ink"
         >
           Close
         </button>

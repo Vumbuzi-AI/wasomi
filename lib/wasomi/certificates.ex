@@ -11,6 +11,7 @@ defmodule Wasomi.Certificates do
 
   alias Wasomi.Accounts.User
   alias Wasomi.Catalog.{Course, CourseModule}
+  alias Wasomi.Certificates.Branding
   alias Wasomi.Certificates.Certificate
   alias Wasomi.Certificates.Workers.IssueCertificate
   alias Wasomi.Learning
@@ -168,17 +169,21 @@ defmodule Wasomi.Certificates do
     file_key = file_key(user.id, type, scope_id)
     course = course_for(type, scope)
 
-    assigns = %{
-      learner_name: user.name,
-      title: scope.title,
-      type_label: if(type == :module, do: "Module Achievement", else: "Course Achievement"),
-      issued_on: Calendar.strftime(issued_at, "%B %-d, %Y"),
-      serial_number: serial_number,
-      issuer_name: course.certificate_issuer_name || "Wasomi Business Institute",
-      signatory_name: course.certificate_signatory_name,
-      signatory_title: course.certificate_signatory_title,
-      signature_url: course.certificate_signature_key
-    }
+    assigns =
+      Map.merge(Branding.assigns(), %{
+        learner_name: user.name,
+        title: scope.title,
+        type_label: if(type == :module, do: "Module Achievement", else: "Course Achievement"),
+        issued_on: Calendar.strftime(issued_at, "%B %-d, %Y"),
+        serial_number: serial_number,
+        issuer_name: course.certificate_issuer_name || "Wasomi Business Institute",
+        signatory_name: course.certificate_signatory_name,
+        signatory_title: course.certificate_signatory_title,
+        signature_url: course.certificate_signature_key,
+        signatory_two_name: course.certificate_signatory_two_name,
+        signatory_two_title: course.certificate_signatory_two_title,
+        signatory_two_signature_url: course.certificate_signatory_two_signature_key
+      })
 
     with {:ok, pdf} <- renderer().render(assigns),
          :ok <- storage().upload(file_key, pdf),

@@ -441,4 +441,3 @@ defmodule WasomiWeb.CourseLive.FormComponent do
 
   defp notify_parent(msg), do: send(self(), {__MODULE__, msg})
 end
-

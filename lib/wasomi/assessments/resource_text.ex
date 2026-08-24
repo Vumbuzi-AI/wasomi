@@ -119,4 +119,3 @@ defmodule Wasomi.Assessments.ResourceText do
         Wasomi.Assessments.LectureResourceReader.Storage
       )
 end
-

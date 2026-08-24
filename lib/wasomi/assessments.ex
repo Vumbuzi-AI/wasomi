@@ -2109,4 +2109,3 @@ defmodule Wasomi.Assessments do
 
   defp study_guide_topic(id), do: "study_guide:#{id}"
 end
-

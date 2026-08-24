@@ -154,4 +154,3 @@ defmodule Wasomi.Assessments.StudyGuide do
     end
   end
 end
-

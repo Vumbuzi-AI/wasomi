@@ -94,4 +94,3 @@ defmodule Wasomi.Assessments.Workers.GenerateStudyGuideWorker do
         Wasomi.Assessments.StudyGuideGenerator.OpenAI
       )
 end
-

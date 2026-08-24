@@ -1070,8 +1070,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                           }
                           class="inline-flex items-center gap-2 rounded-2xl bg-primary px-6 py-3 text-sm font-semibold text-white transition hover:bg-ink"
                         >
-                          Go to the reading
-                          <.icon name="hero-arrow-down" class="h-4 w-4" />
+                          Go to the reading <.icon name="hero-arrow-down" class="h-4 w-4" />
                         </button>
                         <%!-- The manual button survives only for a lesson with neither a
                         video nor a PDF (a links-only or questions-only lesson): nothing
@@ -1096,8 +1095,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                           }
                           class="inline-flex items-center gap-2 rounded-2xl bg-primary px-6 py-3 text-sm font-semibold text-white transition hover:bg-ink"
                         >
-                          Take the lesson quiz
-                          <.icon name="hero-arrow-right" class="h-4 w-4" />
+                          Take the lesson quiz <.icon name="hero-arrow-right" class="h-4 w-4" />
                         </button>
                         <button
                           :if={completed? && !quiz_pending? && next_lesson}
@@ -1106,8 +1104,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                           phx-value-id={next_lesson.id}
                           class="inline-flex items-center gap-2 rounded-2xl bg-primary px-6 py-3 text-sm font-semibold text-white transition hover:bg-ink"
                         >
-                          Next lesson
-                          <.icon name="hero-arrow-right" class="h-4 w-4" />
+                          Next lesson <.icon name="hero-arrow-right" class="h-4 w-4" />
                         </button>
                       </div>
                     </div>
@@ -1238,8 +1235,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                                 phx-value-resource_id={resource.id}
                                 class="inline-flex items-center gap-1.5 rounded-full bg-primary px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-ink"
                               >
-                                <.icon name="hero-check" class="h-3.5 w-3.5" />
-                                Mark as read
+                                <.icon name="hero-check" class="h-3.5 w-3.5" /> Mark as read
                               </button>
                               <button
                                 :if={read?}
@@ -1250,8 +1246,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                                 title="Undo this read mark. Your lesson completion is kept."
                                 class="inline-flex items-center gap-1.5 rounded-full bg-mint px-3.5 py-1.5 text-xs font-semibold text-primary transition hover:bg-primary hover:text-white"
                               >
-                                <.icon name="hero-check-circle" class="h-3.5 w-3.5" />
-                                Read
+                                <.icon name="hero-check-circle" class="h-3.5 w-3.5" /> Read
                               </button>
                             </div>
                           </div>
@@ -1297,13 +1292,17 @@ defmodule WasomiWeb.CoursePlayerLive do
                             {resource.name}
                           </.link>
                           <span
-                            :if={pdf_resource?(resource) && resource_read?(@read_resource_ids, resource)}
+                            :if={
+                              pdf_resource?(resource) && resource_read?(@read_resource_ids, resource)
+                            }
                             class="inline-flex shrink-0 items-center gap-1 rounded-full bg-mint px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-primary"
                           >
                             <.icon name="hero-check-circle" class="h-3.5 w-3.5" /> Read
                           </span>
                           <button
-                            :if={pdf_resource?(resource) && !resource_read?(@read_resource_ids, resource)}
+                            :if={
+                              pdf_resource?(resource) && !resource_read?(@read_resource_ids, resource)
+                            }
                             type="button"
                             phx-click="mark-resource-read"
                             phx-value-resource_id={resource.id}
@@ -1548,10 +1547,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                       one outstanding thing, whether that's watching, reading, or sitting the
                       lesson quiz. `title` carries it for screen readers and for the disabled
                       (locked) rows, where a CSS-only hover panel is unreliable. --%>
-                      <div
-                        :for={lecture <- module.lectures}
-                        class="group/lesson relative"
-                      >
+                      <div :for={lecture <- module.lectures} class="group/lesson relative">
                         <button
                           type="button"
                           phx-click="select-lecture"
@@ -2372,4 +2368,3 @@ defmodule WasomiWeb.CoursePlayerLive do
     end
   end
 end
-

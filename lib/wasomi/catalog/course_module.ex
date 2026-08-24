@@ -44,4 +44,3 @@ defmodule Wasomi.Catalog.CourseModule do
     |> check_constraint(:estimated_minutes, name: :modules_estimated_minutes_must_be_positive)
   end
 end
-

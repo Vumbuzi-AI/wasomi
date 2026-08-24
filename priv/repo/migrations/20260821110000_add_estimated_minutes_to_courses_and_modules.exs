@@ -24,4 +24,3 @@ defmodule Wasomi.Repo.Migrations.AddEstimatedMinutesToCoursesAndModules do
            )
   end
 end
-

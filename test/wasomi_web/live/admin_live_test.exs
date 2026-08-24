@@ -1051,4 +1051,3 @@ defmodule WasomiWeb.AdminLiveTest.StorageMock do
     :ok
   end
 end
-

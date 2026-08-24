@@ -646,4 +646,3 @@ defmodule Wasomi.Learning do
   defp id_for(%{id: id}), do: id
   defp id_for(id), do: id
 end
-

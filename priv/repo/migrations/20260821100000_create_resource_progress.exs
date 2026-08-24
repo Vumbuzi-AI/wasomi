@@ -23,4 +23,3 @@ defmodule Wasomi.Repo.Migrations.CreateResourceProgress do
     create index(:resource_progress, [:lecture_resource_id])
   end
 end
-

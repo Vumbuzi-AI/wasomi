@@ -76,6 +76,35 @@ defmodule WasomiWeb.AdminLive.CourseCertificate do
     {:noreply, socket |> cancel_upload(upload_name(upload), ref) |> assign_preview()}
   end
 
+  # Clears a saved signature back to empty, preserving any other unsaved
+  # edits already staged in the form — the admin still has to click "Save"
+  # for this to persist, same as every other field on this form. Also drops
+  # a not-yet-saved upload for this same slot, since current_signature_url/2
+  # would otherwise keep showing it (pending uploads take priority over the
+  # saved field there).
+  def handle_event("remove-signature", %{"field" => field}, socket) do
+    attrs =
+      socket.assigns.form.source
+      |> Ecto.Changeset.apply_changes()
+      |> Map.from_struct()
+      |> Map.put(signature_field(field), nil)
+
+    changeset =
+      socket.assigns.course
+      |> Catalog.change_course_certificate(attrs)
+      |> Map.put(:action, :validate)
+
+    socket =
+      Enum.reduce(socket.assigns.uploads[upload_name(field)].entries, socket, fn entry, socket ->
+        cancel_upload(socket, upload_name(field), entry.ref)
+      end)
+
+    {:noreply,
+     socket
+     |> assign(:form, to_form(changeset))
+     |> assign_preview()}
+  end
+
   def handle_event("test_pdf", _params, socket) do
     if socket.assigns.generating_pdf? do
       {:noreply, socket}
@@ -153,12 +182,6 @@ defmodule WasomiWeb.AdminLive.CourseCertificate do
                 label="Issue certificates for this course"
               />
 
-              <.input
-                field={@form[:certificate_issuer_name]}
-                type="text"
-                label="Issuer name"
-                placeholder="e.g. GS1 Kenya"
-              />
               <.input field={@form[:certificate_signatory_name]} type="text" label="Signatory name" />
               <.input field={@form[:certificate_signatory_title]} type="text" label="Signatory title" />
 
@@ -243,12 +266,21 @@ defmodule WasomiWeb.AdminLive.CourseCertificate do
     <div class="space-y-3">
       <span class="block text-sm font-semibold leading-6 text-zinc-800">{@label}</span>
 
-      <img
-        :if={@current_url}
-        src={@current_url}
-        alt=""
-        class="h-16 rounded-lg border border-zinc-200 bg-white object-contain p-2"
-      />
+      <div :if={@current_url} class="flex items-center gap-3">
+        <img
+          src={@current_url}
+          alt=""
+          class="h-16 rounded-lg border border-zinc-200 bg-white object-contain p-2"
+        />
+        <button
+          type="button"
+          phx-click="remove-signature"
+          phx-value-field={@name}
+          class="text-sm font-medium text-rose-600 hover:text-rose-700"
+        >
+          Remove
+        </button>
+      </div>
 
       <.live_file_input upload={@upload} class="block w-full text-sm text-zinc-700" />
       <p class="text-xs text-zinc-500">Transparent PNG, up to 2 MB.</p>
@@ -310,10 +342,8 @@ defmodule WasomiWeb.AdminLive.CourseCertificate do
     Map.merge(Branding.assigns(), %{
       learner_name: "Jane Sample",
       title: socket.assigns.course.title,
-      type_label: "Course Achievement",
       issued_on: Calendar.strftime(Date.utc_today(), "%B %-d, %Y"),
       serial_number: @sample_serial_number,
-      issuer_name: get_field(changeset, :certificate_issuer_name) || "Wasomi Business Institute",
       signatory_name: get_field(changeset, :certificate_signatory_name),
       signatory_title: get_field(changeset, :certificate_signatory_title),
       signature_url: signature_url,
@@ -370,6 +400,9 @@ defmodule WasomiWeb.AdminLive.CourseCertificate do
   # can't reach an arbitrary atom.
   defp upload_name("signature_two"), do: :signature_two
   defp upload_name(_other), do: :signature
+
+  defp signature_field("signature_two"), do: :certificate_signatory_two_signature_key
+  defp signature_field(_other), do: :certificate_signature_key
 
   defp presign_entry(entry, socket, course_id) do
     attrs = %{

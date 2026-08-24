@@ -173,10 +173,8 @@ defmodule Wasomi.Certificates do
       Map.merge(Branding.assigns(), %{
         learner_name: user.name,
         title: scope.title,
-        type_label: if(type == :module, do: "Module Achievement", else: "Course Achievement"),
         issued_on: Calendar.strftime(issued_at, "%B %-d, %Y"),
         serial_number: serial_number,
-        issuer_name: course.certificate_issuer_name || "Wasomi Business Institute",
         signatory_name: course.certificate_signatory_name,
         signatory_title: course.certificate_signatory_title,
         signature_url: course.certificate_signature_key,

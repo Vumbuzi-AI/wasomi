@@ -19,7 +19,6 @@ defmodule Wasomi.Catalog.Course do
     field :estimated_minutes, :integer
 
     field :certificate_enabled, :boolean, default: true
-    field :certificate_issuer_name, :string
     field :certificate_signatory_name, :string
     field :certificate_signatory_title, :string
     field :certificate_signature_key, :string
@@ -126,7 +125,6 @@ defmodule Wasomi.Catalog.Course do
     course
     |> cast(attrs, [
       :certificate_enabled,
-      :certificate_issuer_name,
       :certificate_signatory_name,
       :certificate_signatory_title,
       :certificate_signature_key,
@@ -137,7 +135,6 @@ defmodule Wasomi.Catalog.Course do
     |> then(fn changeset ->
       if get_field(changeset, :certificate_enabled) do
         validate_required(changeset, [
-          :certificate_issuer_name,
           :certificate_signatory_name,
           :certificate_signatory_title
         ])
@@ -235,4 +232,3 @@ defmodule Wasomi.Catalog.Course do
 
   defp normalize_slug(slug), do: slug
 end
-

@@ -860,7 +860,6 @@ defmodule Wasomi.CatalogTest do
           price_minor: 150_000,
           thumbnail_key: "cover.jpg",
           certificate_enabled: true,
-          certificate_issuer_name: "Wasomi Academy",
           certificate_signatory_name: "Jane Doe",
           certificate_signatory_title: "Head of Learning"
         )
@@ -935,7 +934,7 @@ defmodule Wasomi.CatalogTest do
 
       assert {:error, issues} = PublishGuard.check(course)
 
-      assert "Add certificate issuer and signatory details, or disable certificates for this course." in issues
+      assert "Add certificate signatory details, or disable certificates for this course." in issues
     end
 
     test "PublishGuard.check/1 passes a ready course with certificates enabled and full signatory details" do
@@ -944,7 +943,6 @@ defmodule Wasomi.CatalogTest do
           price_minor: 150_000,
           thumbnail_key: "cover.jpg",
           certificate_enabled: true,
-          certificate_issuer_name: "Wasomi Academy",
           certificate_signatory_name: "Jane Doe",
           certificate_signatory_title: "Head of Learning"
         )
@@ -971,7 +969,7 @@ defmodule Wasomi.CatalogTest do
 
       assert {:error, issues} = Catalog.publish_course(course)
 
-      assert "Add certificate issuer and signatory details, or disable certificates for this course." in issues
+      assert "Add certificate signatory details, or disable certificates for this course." in issues
 
       assert Catalog.get_course!(course.id).status == :draft
     end
@@ -1085,7 +1083,7 @@ defmodule Wasomi.CatalogTest do
   describe "certificate configuration" do
     import Wasomi.CatalogFixtures
 
-    test "change_course_certificate/2 does not require issuer/signatory fields when disabled" do
+    test "change_course_certificate/2 does not require signatory fields when disabled" do
       course = course_fixture()
 
       changeset = Catalog.change_course_certificate(course, %{"certificate_enabled" => "false"})
@@ -1093,7 +1091,7 @@ defmodule Wasomi.CatalogTest do
       assert changeset.valid?
     end
 
-    test "change_course_certificate/2 requires issuer/signatory fields when enabled" do
+    test "change_course_certificate/2 requires signatory fields when enabled" do
       course = course_fixture()
 
       changeset = Catalog.change_course_certificate(course, %{"certificate_enabled" => "true"})
@@ -1101,7 +1099,6 @@ defmodule Wasomi.CatalogTest do
       refute changeset.valid?
 
       assert %{
-               certificate_issuer_name: ["can't be blank"],
                certificate_signatory_name: ["can't be blank"],
                certificate_signatory_title: ["can't be blank"]
              } = errors_on(changeset)
@@ -1120,14 +1117,12 @@ defmodule Wasomi.CatalogTest do
       assert {:ok, updated} =
                Catalog.update_course_certificate(course, %{
                  "certificate_enabled" => "true",
-                 "certificate_issuer_name" => "GS1 Kenya",
                  "certificate_signatory_name" => "Jane Doe",
                  "certificate_signatory_title" => "Country Manager",
                  "certificate_signature_key" => "https://example.com/signature.png"
                })
 
       assert updated.certificate_enabled
-      assert updated.certificate_issuer_name == "GS1 Kenya"
       assert updated.certificate_signatory_name == "Jane Doe"
       assert updated.certificate_signatory_title == "Country Manager"
       assert updated.certificate_signature_key == "https://example.com/signature.png"
@@ -1202,7 +1197,6 @@ defmodule Wasomi.CatalogTest do
       changeset =
         Catalog.change_course_certificate(course, %{
           "certificate_enabled" => "true",
-          "certificate_issuer_name" => "GS1 Kenya",
           "certificate_signatory_name" => "Jane Doe",
           "certificate_signatory_title" => "Country Manager"
         })
@@ -1215,7 +1209,6 @@ defmodule Wasomi.CatalogTest do
 
       base = %{
         "certificate_enabled" => "true",
-        "certificate_issuer_name" => "GS1 Kenya",
         "certificate_signatory_name" => "Jane Doe",
         "certificate_signatory_title" => "Country Manager"
       }
@@ -1277,7 +1270,6 @@ defmodule Wasomi.CatalogTest do
       assert {:ok, updated} =
                Catalog.update_course_certificate(course, %{
                  "certificate_enabled" => "true",
-                 "certificate_issuer_name" => "GS1 Kenya",
                  "certificate_signatory_name" => "Jane Doe",
                  "certificate_signatory_title" => "Country Manager",
                  "certificate_signatory_two_name" => "Peter Otieno",
@@ -1328,4 +1320,3 @@ defmodule Wasomi.CatalogTest do
     end
   end
 end
-

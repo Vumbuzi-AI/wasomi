@@ -130,7 +130,7 @@ defmodule Wasomi.Catalog.PublishGuard do
           []
           |> add_issue(
             course.certificate_enabled and missing_signatory_details?(course),
-            "Add certificate issuer and signatory details, or disable certificates for this course."
+            "Add certificate signatory details, or disable certificates for this course."
           )
           |> Enum.reverse()
       }
@@ -147,9 +147,7 @@ defmodule Wasomi.Catalog.PublishGuard do
   defp unpublished_quiz?(_module), do: false
 
   defp missing_signatory_details?(course) do
-    blank?(course.certificate_issuer_name) or
-      blank?(course.certificate_signatory_name) or
-      blank?(course.certificate_signatory_title)
+    blank?(course.certificate_signatory_name) or blank?(course.certificate_signatory_title)
   end
 
   defp blank?(nil), do: true

@@ -26,33 +26,31 @@ defmodule WasomiWeb.AdminLive.CourseCertificateTest do
     {:ok, course} =
       Catalog.update_course_certificate(course, %{
         "certificate_enabled" => "true",
-        "certificate_issuer_name" => "GS1 Kenya",
         "certificate_signatory_name" => "Jane Doe",
         "certificate_signatory_title" => "Country Manager"
       })
 
     {:ok, _view, html} = live(conn, ~p"/admin/courses/#{course.slug}/certificate")
 
-    assert html =~ "GS1 Kenya"
     assert html =~ "Jane Doe"
     assert html =~ "Country Manager"
   end
 
-  test "the live preview updates as issuer/signatory fields change", %{conn: conn} do
+  test "the live preview updates as signatory fields change", %{conn: conn} do
     course = course_fixture()
     {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}/certificate")
 
     html =
       view
       |> form("#certificate-form", %{
-        "course" => %{"certificate_issuer_name" => "GS1 Kenya"}
+        "course" => %{"certificate_signatory_name" => "Jane Doe"}
       })
       |> render_change()
 
-    assert html =~ "GS1 Kenya"
+    assert html =~ "Jane Doe"
   end
 
-  test "toggling issuance on requires issuer and signatory fields", %{conn: conn} do
+  test "toggling issuance on requires signatory fields", %{conn: conn} do
     course = course_fixture()
     {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}/certificate")
 
@@ -72,7 +70,6 @@ defmodule WasomiWeb.AdminLive.CourseCertificateTest do
     |> form("#certificate-form", %{
       "course" => %{
         "certificate_enabled" => "true",
-        "certificate_issuer_name" => "GS1 Kenya",
         "certificate_signatory_name" => "Jane Doe",
         "certificate_signatory_title" => "Country Manager"
       }
@@ -81,7 +78,6 @@ defmodule WasomiWeb.AdminLive.CourseCertificateTest do
 
     updated = Catalog.get_course!(course.id)
     assert updated.certificate_enabled
-    assert updated.certificate_issuer_name == "GS1 Kenya"
     assert updated.certificate_signatory_name == "Jane Doe"
     assert updated.certificate_signatory_title == "Country Manager"
   end
@@ -116,7 +112,6 @@ defmodule WasomiWeb.AdminLive.CourseCertificateTest do
     |> form("#certificate-form", %{
       "course" => %{
         "certificate_enabled" => "true",
-        "certificate_issuer_name" => "GS1 Kenya",
         "certificate_signatory_name" => "Jane Doe",
         "certificate_signatory_title" => "Country Manager"
       }
@@ -127,6 +122,45 @@ defmodule WasomiWeb.AdminLive.CourseCertificateTest do
 
     assert updated.certificate_signature_key ==
              "https://cdn.example.test/certificates/signature.png"
+  end
+
+  test "removing a saved signature clears it, but only once the form is saved", %{conn: conn} do
+    previous_public_url = Application.get_env(:wasomi, :r2_public_url)
+    on_exit(fn -> Application.put_env(:wasomi, :r2_public_url, previous_public_url) end)
+    Application.put_env(:wasomi, :r2_public_url, "https://cdn.example.test")
+
+    course =
+      course_fixture(
+        certificate_enabled: true,
+        certificate_signatory_name: "Jane Doe",
+        certificate_signatory_title: "Country Manager",
+        certificate_signature_key: "https://cdn.example.test/certificates/old.png"
+      )
+
+    {:ok, view, html} = live(conn, ~p"/admin/courses/#{course.slug}/certificate")
+    assert html =~ "https://cdn.example.test/certificates/old.png"
+
+    html =
+      view
+      |> element("button[phx-click='remove-signature'][phx-value-field='signature']")
+      |> render_click()
+
+    refute html =~ "https://cdn.example.test/certificates/old.png"
+    # Not persisted until Save is clicked, same as every other field here.
+    assert Catalog.get_course!(course.id).certificate_signature_key ==
+             "https://cdn.example.test/certificates/old.png"
+
+    view
+    |> form("#certificate-form", %{
+      "course" => %{
+        "certificate_enabled" => "true",
+        "certificate_signatory_name" => "Jane Doe",
+        "certificate_signatory_title" => "Country Manager"
+      }
+    })
+    |> render_submit()
+
+    assert Catalog.get_course!(course.id).certificate_signature_key == nil
   end
 
   test "an upload with no public URL configured flashes an error instead of silently dropping it",

@@ -42,7 +42,7 @@ defmodule Wasomi.Certificates.BrandingTest do
       phone: "+254 700 000 000",
       email: "info@example.test",
       website: "www.example.test",
-      socials: ["Facebook", "LinkedIn"]
+      socials: [{"Facebook", "https://facebook.example/gs1kenya"}, {"LinkedIn", nil}]
     )
 
     assigns = Branding.assigns()
@@ -51,7 +51,17 @@ defmodule Wasomi.Certificates.BrandingTest do
     assert assigns.phone == "+254 700 000 000"
     assert assigns.email == "info@example.test"
     assert assigns.website == "www.example.test"
-    assert assigns.socials == ["Facebook", "LinkedIn"]
+
+    assert assigns.socials == [
+             {"Facebook", "https://facebook.example/gs1kenya"},
+             {"LinkedIn", nil}
+           ]
+  end
+
+  test "drops a social entry with a blank label, but keeps one with a blank URL as plain text" do
+    put_branding(socials: [{"Facebook", ""}, {"  ", "https://example.test"}, {"LinkedIn", nil}])
+
+    assert Branding.assigns().socials == [{"Facebook", nil}, {"LinkedIn", nil}]
   end
 
   test "drops blank and nil entries so the template renders no empty rows" do
@@ -73,13 +83,29 @@ defmodule Wasomi.Certificates.BrandingTest do
   test "defaults every field when nothing is configured at all" do
     Application.delete_env(:wasomi, :certificate_branding)
 
-    assert Branding.assigns() == %{
+    assigns = Branding.assigns()
+
+    assert %{
              logo_data_uri: nil,
              address_lines: [],
              phone: nil,
              email: nil,
              website: nil,
              socials: []
-           }
+           } = assigns
+  end
+
+  test "always inlines the icon strip as a data URI, independent of branding config" do
+    put_branding([])
+
+    assert "data:image/png;base64," <> encoded = Branding.assigns().icon_strip_data_uri
+    assert {:ok, _binary} = Base.decode64(encoded)
+  end
+
+  test "always inlines the seal as a data URI, independent of branding config" do
+    put_branding([])
+
+    assert "data:image/png;base64," <> encoded = Branding.assigns().seal_data_uri
+    assert {:ok, _binary} = Base.decode64(encoded)
   end
 end

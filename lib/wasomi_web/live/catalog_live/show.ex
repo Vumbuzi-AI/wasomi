@@ -5,6 +5,7 @@ defmodule WasomiWeb.CatalogLive.Show do
 
   alias Phoenix.LiveView.JS
   alias Wasomi.{Catalog, Enrollments}
+  alias Wasomi.Certificates.Branding
 
   @impl true
   def mount(%{"slug" => slug}, _session, socket) do
@@ -230,7 +231,7 @@ defmodule WasomiWeb.CatalogLive.Show do
                       <.icon name="hero-academic-cap" class="h-6 w-6" />
                     </span>
                     <p class="mt-3 text-xs font-semibold uppercase tracking-widest text-muted">
-                      Wasomi · {@course.certificate_issuer_name || "Business Institute"}
+                      Wasomi · {Branding.issuer_name()}
                     </p>
                     <h3 class="mt-4 font-serif text-2xl font-semibold text-ink sm:text-3xl">
                       Certificate of Completion

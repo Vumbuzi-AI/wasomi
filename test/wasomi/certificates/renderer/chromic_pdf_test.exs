@@ -6,7 +6,6 @@ defmodule Wasomi.Certificates.Renderer.ChromicPdfTest do
   @assigns %{
     learner_name: "Jane Sample",
     title: "Sample Course",
-    type_label: "Course Achievement",
     issued_on: "August 4, 2026",
     serial_number: "SAMPLE-0000"
   }

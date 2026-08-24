@@ -164,6 +164,22 @@ defmodule WasomiWeb.CourseLive.FormComponent do
           </p>
         </div>
 
+        <div class="space-y-2">
+          <.input
+            field={@form[:estimated_minutes]}
+            type="number"
+            label="Estimated time to complete (minutes)"
+            min="1"
+            step="1"
+            placeholder="180"
+          />
+          <p class="text-xs text-zinc-500">
+            Shown to learners as the course's learning time. Leave blank to fall back to the
+            total length of the course's videos, which won't account for reading, practice or
+            quizzes.
+          </p>
+        </div>
+
         <.input field={@form[:currency]} type="text" label="Currency" />
         <:actions>
           <.button phx-disable-with="Saving...">Save Course</.button>
@@ -425,3 +441,4 @@ defmodule WasomiWeb.CourseLive.FormComponent do
 
   defp notify_parent(msg), do: send(self(), {__MODULE__, msg})
 end
+

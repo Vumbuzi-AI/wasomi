@@ -41,10 +41,13 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
            )
 
     assert has_element?(view, "#course-progress-percent", "0%")
-    assert has_element?(view, "#mark-lecture-complete")
+    # A recording completes itself, so there is no button here — only the
+    # watch-progress readout that stands in for one.
+    refute has_element?(view, "#mark-lecture-complete")
+    assert has_element?(view, "#lecture-watch-progress")
   end
 
-  test "a lecture with no video renders without a player and can be marked complete immediately",
+  test "a reading-only lecture is completed by marking its PDFs as read, with no video player",
        %{conn: conn, user: user} do
     course = course_fixture(status: :published)
     module = course_module_fixture(course_id: course.id, position: 1)
@@ -58,14 +61,56 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
         video_provider: nil
       )
 
-    lecture_resource_fixture(lecture_id: lecture.id, name: "Slides")
+    resource = lecture_resource_fixture(lecture_id: lecture.id, name: "Slides")
     {:ok, pending} = Enrollments.create_pending_enrollment(user, course)
     {:ok, _active} = Enrollments.activate_enrollment(pending)
 
     assert {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
 
     refute has_element?(view, "#protected-player-#{lecture.id}")
-    assert has_element?(view, "#mark-lecture-complete:not([disabled])")
+    # Nothing to watch and nothing to auto-complete: the reading is the lesson.
+    refute has_element?(view, "#mark-lecture-complete")
+    assert has_element?(view, "#mark-resource-read-#{resource.id}")
+
+    view
+    |> element("#mark-resource-read-#{resource.id}")
+    |> render_click()
+
+    assert %{status: :completed} = Learning.get_lecture_progress(user, lecture)
+    refute has_element?(view, "#mark-resource-read-#{resource.id}")
+    assert has_element?(view, "#unmark-resource-read-#{resource.id}")
+  end
+
+  test "a lecture with neither a video nor a PDF keeps the manual mark-complete button",
+       %{conn: conn, user: user} do
+    course = course_fixture(status: :published)
+    module = course_module_fixture(course_id: course.id, position: 1)
+
+    lecture =
+      lecture_fixture(
+        module_id: module.id,
+        position: 1,
+        duration_seconds: nil,
+        video_asset_id: nil,
+        video_provider: nil
+      )
+
+    lecture_resource_fixture(
+      lecture_id: lecture.id,
+      kind: :link,
+      name: "Reference",
+      url: "https://example.com/reference",
+      storage_key: nil,
+      byte_size: nil,
+      content_type: nil
+    )
+
+    {:ok, pending} = Enrollments.create_pending_enrollment(user, course)
+    {:ok, _active} = Enrollments.activate_enrollment(pending)
+
+    assert {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
+
+    assert has_element?(view, "#mark-lecture-complete")
 
     view
     |> element("#mark-lecture-complete")
@@ -261,7 +306,7 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
     refute has_element?(view, "#protected-player-#{second.id}")
   end
 
-  test "mark complete explicitly completes the lecture", %{conn: conn, user: user} do
+  test "a watched video completes itself without any button press", %{conn: conn, user: user} do
     course = course_fixture(status: :published)
     module = course_module_fixture(course_id: course.id, position: 1)
     lecture = lecture_fixture(module_id: module.id, position: 1, duration_seconds: 100)
@@ -279,21 +324,29 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
       )
     )
 
+    # 85% is past the mark-complete threshold but short of the 95% auto-complete
+    # mark: still in progress, and still no button offered.
     render_hook(view, "video-progress", %{"lecture_id" => lecture.id, "position_seconds" => 85})
-    assert has_element?(view, "#mark-lecture-complete:not([disabled])")
+    assert %{status: :in_progress} = Learning.get_lecture_progress(user, lecture)
+    refute has_element?(view, "#mark-lecture-complete")
+    assert has_element?(view, "#lecture-watch-progress")
 
-    view
-    |> element("#mark-lecture-complete")
-    |> render_click()
+    Wasomi.Repo.update!(
+      Ecto.Changeset.change(Learning.get_lecture_progress(user, lecture),
+        updated_at: DateTime.utc_now() |> DateTime.add(-30, :second) |> DateTime.truncate(:second)
+      )
+    )
+
+    render_hook(view, "video-progress", %{"lecture_id" => lecture.id, "position_seconds" => 100})
 
     assert %{status: :completed, last_position_seconds: 100} =
              Learning.get_lecture_progress(user, lecture)
 
     assert has_element?(view, "#course-progress-percent", "100%")
-    refute has_element?(view, "#mark-lecture-complete")
+    refute has_element?(view, "#lecture-watch-progress")
   end
 
-  test "the mark-complete button is disabled and explains why below the 80% watch threshold", %{
+  test "a partly watched video says it will complete on its own rather than offering a button", %{
     conn: conn,
     user: user
   } do
@@ -305,8 +358,10 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
 
     {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
 
-    assert has_element?(view, "#mark-lecture-complete[disabled]")
-    assert render(view) =~ "Watch at least 80% of this lecture to unlock this button."
+    refute has_element?(view, "#mark-lecture-complete")
+
+    assert render(view) =~
+             "This lesson completes on its own once you have watched the video"
   end
 
   test "cannot mark a lecture complete below the watch threshold by forging a client event", %{
@@ -877,7 +932,7 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
       refute has_element?(view, "#protected-player-#{first.id}")
     end
 
-    test "marking a lecture complete in preview mode does not persist progress" do
+    test "completing a lecture in preview mode does not persist progress" do
       conn = build_conn() |> log_in_user(admin_fixture())
       course = course_fixture(status: :draft)
       module = course_module_fixture(course_id: course.id, position: 1)
@@ -890,15 +945,12 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
       # gated — the second lecture is reachable from the start.
       assert has_element?(view, "button[data-lecture-id='#{second.id}'][data-locked='false']")
 
-      render_hook(view, "video-progress", %{"lecture_id" => first.id, "position_seconds" => 90})
-
-      view
-      |> element("#mark-lecture-complete")
-      |> render_click()
+      # Same auto-complete rule as a real learner's: watching past 95% is what
+      # completes the lecture, here as there. There is no button to click.
+      render_hook(view, "video-progress", %{"lecture_id" => first.id, "position_seconds" => 100})
 
       assert has_element?(view, "#course-progress-percent", "50%")
       assert has_element?(view, "button[data-lecture-id='#{second.id}'][data-locked='false']")
-      assert render(view) =~ "preview only, nothing was saved"
 
       # Nothing was written for any user — this is the whole point of preview
       # mode, not just a check against the admin's own progress row.
@@ -1077,3 +1129,4 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
     end
   end
 end
+

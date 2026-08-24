@@ -94,6 +94,25 @@ Hooks.SidebarToggle = {
   },
 };
 
+// URL patches preserve scroll position. Reset the Study Hub's scrolling main
+// only when a navigation key changes, so a long previous screen cannot leave a
+// shorter replacement clipped while ordinary form updates stay put.
+Hooks.ScrollContainerOnKeyChange = {
+  mounted() {
+    this.scrollKey = this.el.dataset.scrollKey;
+  },
+  updated() {
+    const nextKey = this.el.dataset.scrollKey;
+    if (nextKey === this.scrollKey) return;
+
+    this.scrollKey = nextKey;
+    window.requestAnimationFrame(() => {
+      const container = this.el.closest("main");
+      if (container) container.scrollTo({ top: 0, left: 0 });
+    });
+  },
+};
+
 Hooks.SortableList = {
   mounted() {
     this.draggedItem = null;

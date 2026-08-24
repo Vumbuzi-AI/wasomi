@@ -80,6 +80,8 @@ defmodule WasomiWeb.CoursePlayerLive do
          |> assign(:preview?, preview?)
          |> assign(:requested_preview_lecture_id, params["lecture_id"])
          |> assign(:preview_progress, %{})
+         |> assign(:preview_read_resource_ids, MapSet.new())
+         |> assign(:study_guide_resource_id, nil)
          |> assign(:lq_submissions, %{})
          |> assign(:lecture_quiz, nil)
          |> assign(:lecture_quiz_answers, %{})
@@ -157,7 +159,11 @@ defmodule WasomiWeb.CoursePlayerLive do
   def handle_event("select-section", %{"section" => section_str}, socket) do
     case safe_section(section_str) do
       {:ok, section} ->
-        {:noreply, socket |> assign(:active_study_tool, nil) |> enter_section(section)}
+        {:noreply,
+         socket
+         |> assign(:active_study_tool, nil)
+         |> assign(:study_guide_resource_id, nil)
+         |> enter_section(section)}
 
       :error ->
         {:noreply, socket}
@@ -167,7 +173,12 @@ defmodule WasomiWeb.CoursePlayerLive do
   @impl true
   def handle_event("select-study-tool", %{"tool" => tool}, socket)
       when tool in ["flashcards", "practice", "timed_quiz", "study_guide"] do
-    {:noreply, assign(socket, :active_study_tool, tool)}
+    # Picking a tool from the top nav is a lesson-wide ask, so it drops any
+    # single-resource scope a "Study guide" button on a PDF had set.
+    {:noreply,
+     socket
+     |> assign(:study_guide_resource_id, nil)
+     |> assign(:active_study_tool, tool)}
   end
 
   @impl true
@@ -197,6 +208,7 @@ defmodule WasomiWeb.CoursePlayerLive do
        |> assign(:quiz_result, nil)
        |> assign(:current_lecture, lecture)
        |> assign(:lesson_tab, :overview)
+       |> assign(:study_guide_resource_id, nil)
        |> assign(:lq_submissions, load_lq_submissions(socket, lecture))
        |> load_lecture_quiz()
        |> assign(:page_title, lecture_page_title(socket, lecture))}
@@ -413,9 +425,19 @@ defmodule WasomiWeb.CoursePlayerLive do
 
       lecture ->
         if socket.assigns.preview? do
+          # Mirrors `Learning.record_progress/3`'s 95% auto-complete. Now that a
+          # recording has no "Mark complete" button, this branch is the *only*
+          # way a video lecture completes — without it, preview mode could never
+          # reach a completed lecture, and the two modes would drift on exactly
+          # the unlock rules this module exists to keep identical.
+          status =
+            if preview_watched_to_completion?(lecture, position),
+              do: :completed,
+              else: :in_progress
+
           {:noreply,
            socket
-           |> put_preview_progress(lecture.id, :in_progress, position)
+           |> put_preview_progress(lecture.id, status, position)
            |> refresh_progress()}
         else
           persist_progress(socket, lecture, position, false)
@@ -439,6 +461,18 @@ defmodule WasomiWeb.CoursePlayerLive do
             {:noreply,
              put_flash(socket, :error, "Watch more of this lecture before marking it complete.")}
 
+          # A reading-only lesson is completed by its PDFs, not by this event —
+          # the UI offers no button for one. Rejected rather than trusted, since
+          # the event itself is only as trustworthy as the client sending it.
+          reading_only_lecture?(lecture) and
+              unread_pdf_count(socket.assigns.read_resource_ids, lecture) > 0 ->
+            {:noreply,
+             put_flash(
+               socket,
+               :error,
+               "Mark this lesson's PDFs as read to complete it."
+             )}
+
           socket.assigns.preview? ->
             {:noreply,
              socket
@@ -450,6 +484,71 @@ defmodule WasomiWeb.CoursePlayerLive do
           true ->
             persist_progress(socket, lecture, lecture.duration_seconds, true)
         end
+    end
+  end
+
+  @impl true
+  def handle_event("mark-resource-read", %{"resource_id" => resource_id}, socket) do
+    case find_current_resource(socket, resource_id) do
+      nil ->
+        {:noreply, socket}
+
+      resource ->
+        if socket.assigns.preview? do
+          {:noreply,
+           socket
+           |> update(:preview_read_resource_ids, &MapSet.put(&1, resource.id))
+           |> refresh_progress()
+           |> put_flash(:info, "Marked as read — preview only, nothing was saved.")}
+        else
+          case Learning.mark_resource_read(socket.assigns.current_user, resource) do
+            {:ok, _events} ->
+              {:noreply,
+               socket
+               |> refresh_progress()
+               |> focus_pending_quiz(socket.assigns.current_lecture)
+               |> put_flash(:info, resource_read_flash(socket, resource))}
+
+            {:error, :forbidden} ->
+              {:noreply, redirect_to_checkout(socket)}
+          end
+        end
+    end
+  end
+
+  @impl true
+  def handle_event("unmark-resource-read", %{"resource_id" => resource_id}, socket) do
+    case find_current_resource(socket, resource_id) do
+      nil ->
+        {:noreply, socket}
+
+      resource ->
+        if socket.assigns.preview? do
+          {:noreply,
+           socket
+           |> update(:preview_read_resource_ids, &MapSet.delete(&1, resource.id))
+           |> refresh_progress()}
+        else
+          :ok = Learning.unmark_resource_read(socket.assigns.current_user, resource)
+          {:noreply, refresh_progress(socket)}
+        end
+    end
+  end
+
+  # Opens the study-guide tool scoped to one document rather than the whole
+  # lesson — "explain this handout" is a narrower ask than "explain this lesson",
+  # and each resource keeps its own guides.
+  @impl true
+  def handle_event("resource-study-guide", %{"resource_id" => resource_id}, socket) do
+    case find_current_resource(socket, resource_id) do
+      nil ->
+        {:noreply, socket}
+
+      resource ->
+        {:noreply,
+         socket
+         |> assign(:study_guide_resource_id, resource.id)
+         |> assign(:active_study_tool, "study_guide")}
     end
   end
 
@@ -558,6 +657,19 @@ defmodule WasomiWeb.CoursePlayerLive do
         {:noreply, put_flash(socket, :error, "We couldn't save your progress.")}
     end
   end
+
+  # Mirrors `Learning`'s own 95% auto-complete ratio, for preview mode's
+  # in-memory progress — see the `video-progress` handler for why preview needs
+  # its own copy of the rule.
+  @preview_completion_ratio 0.95
+
+  defp preview_watched_to_completion?(%{duration_seconds: nil}, _position), do: false
+
+  defp preview_watched_to_completion?(%{duration_seconds: duration}, position)
+       when is_number(position),
+       do: position >= duration * @preview_completion_ratio
+
+  defp preview_watched_to_completion?(_lecture, _position), do: false
 
   defp put_preview_progress(socket, lecture_id, status, position_seconds) do
     update(socket, :preview_progress, fn preview_progress ->
@@ -735,13 +847,15 @@ defmodule WasomiWeb.CoursePlayerLive do
 
             <section :if={@active_study_tool} class="mt-8 overflow-hidden rounded-[2rem] bg-white">
               {live_render(@socket, WasomiWeb.EmbeddedStudyHubLive,
-                id: "embedded-study-tool-#{@active_study_tool}",
+                id:
+                  "embedded-study-tool-#{@active_study_tool}-#{@study_guide_resource_id || "lesson"}",
                 session:
                   embedded_study_hub_session(
                     @current_user,
                     @course,
                     current_module(assigns),
-                    @active_study_tool
+                    @active_study_tool,
+                    @study_guide_resource_id
                   )
               )}
             </section>
@@ -775,12 +889,21 @@ defmodule WasomiWeb.CoursePlayerLive do
                           <.icon name="hero-book-open" class="h-5 w-5 text-primary" />
                           Lesson {lecture_number(@course, @current_lecture)} of {@course_progress.total}
                         </span>
-                        <span
-                          :if={@current_lecture.duration_seconds}
-                          class="inline-flex items-center gap-2"
-                        >
+                        <% lesson_minutes = lecture_estimated_minutes(@current_lecture) %>
+                        <span :if={lesson_minutes} class="inline-flex items-center gap-2">
                           <.icon name="hero-clock" class="h-5 w-5 text-primary" />
-                          {lecture_minutes(@current_lecture)} min
+                          {lesson_minutes} min
+                        </span>
+                        <%!-- What this lesson is made of, before the learner scrolls: a
+                        recording, reading, practice, a graded quiz, or some mix. --%>
+                        <span class="flex flex-wrap items-center gap-2">
+                          <span
+                            :for={badge <- resource_type_badges(assigns, @current_lecture)}
+                            class="inline-flex items-center gap-1.5 rounded-full bg-mint px-2.5 py-1 text-xs font-semibold text-primary"
+                          >
+                            <.icon name={badge.icon} class="h-3.5 w-3.5" />
+                            {badge.label}
+                          </span>
                         </span>
                       </div>
                     </header>
@@ -819,12 +942,15 @@ defmodule WasomiWeb.CoursePlayerLive do
                       </div>
                     </div>
                     <% completed? = progress_status(@progress, @current_lecture.id) == :completed %>
+                    <% has_video? = not is_nil(@current_lecture.duration_seconds) %>
                     <% watched_enough? =
-                      is_nil(@current_lecture.duration_seconds) or
+                      not has_video? or
                         Learning.watched_enough?(
                           progress_position(@progress, @current_lecture.id),
                           @current_lecture.duration_seconds
                         ) %>
+                    <% reading_only? = reading_only_lecture?(@current_lecture) %>
+                    <% unread_pdfs = unread_pdf_count(@read_resource_ids, @current_lecture) %>
                     <% quiz_pending? = lecture_quiz_pending?(assigns, @current_lecture) %>
                     <% next_lesson = next_lecture(@course, @current_lecture) %>
                     <% tabs = lesson_tabs(assigns) %>
@@ -834,7 +960,13 @@ defmodule WasomiWeb.CoursePlayerLive do
                     <%!-- The lesson names its own next move, directly under the player. The
                     graded quiz used to be the last thing on a very long page — below the
                     notes, the downloads and the practice questions — which made the one step
-                    that unlocks the next lesson the easiest one to scroll past. --%>
+                    that unlocks the next lesson the easiest one to scroll past.
+
+                    There is no "Mark complete" button for a recording any more: a video
+                    reports its own position, so it completes itself once watched (see
+                    Learning.record_progress/3's auto-complete and the player's `ended`
+                    handler). Only material that can't report on itself — a PDF, which is
+                    marked read per document — still needs a click. --%>
                     <div
                       id="lesson-next-step"
                       class="flex flex-wrap items-center justify-between gap-5 border-y border-black/5 bg-mint px-7 py-6 sm:px-10"
@@ -844,6 +976,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                           <.icon
                             name={
                               cond do
+                                not completed? and reading_only? -> "hero-document-text"
                                 not completed? -> "hero-play-circle"
                                 quiz_pending? -> "hero-clipboard-document-check"
                                 true -> "hero-check-circle"
@@ -858,20 +991,44 @@ defmodule WasomiWeb.CoursePlayerLive do
                           </p>
                           <p class="mt-1 text-base font-semibold text-ink">
                             {cond do
-                              not completed? and not watched_enough? -> "Keep watching this lesson"
-                              not completed? -> "Mark this lesson complete"
-                              quiz_pending? -> "Pass the lesson quiz to unlock the next lesson"
-                              next_lesson -> "Up next — #{next_lesson.title}"
-                              true -> "You have finished the last lesson here"
+                              not completed? and reading_only? and unread_pdfs > 0 ->
+                                "Read this lesson's material"
+
+                              not completed? and has_video? and not watched_enough? ->
+                                "Keep watching this lesson"
+
+                              not completed? and has_video? ->
+                                "Finish the video to complete this lesson"
+
+                              not completed? ->
+                                "Mark this lesson complete"
+
+                              quiz_pending? ->
+                                "Pass the lesson quiz to unlock the next lesson"
+
+                              next_lesson ->
+                                "Up next — #{next_lesson.title}"
+
+                              true ->
+                                "You have finished the last lesson here"
                             end}
                           </p>
                           <p class="mt-1 text-sm text-body">
                             {cond do
-                              not completed? and not watched_enough? ->
-                                "Watch at least 80% of this lecture to unlock this button."
+                              not completed? and reading_only? and unread_pdfs == 1 ->
+                                "Mark the PDF below as read and this lesson is done."
+
+                              not completed? and reading_only? and unread_pdfs > 1 ->
+                                "#{unread_pdfs} PDFs to go — mark each one as read below."
+
+                              not completed? and has_video? and not watched_enough? ->
+                                "This lesson completes on its own once you have watched the video — no button to press."
+
+                              not completed? and has_video? ->
+                                "Almost there. Play it through to the end and it completes itself."
 
                               not completed? ->
-                                "You have watched enough of it — save your progress and move on."
+                                "There is nothing to watch or read here, so mark it complete when you are ready."
 
                               quiz_pending? ->
                                 "#{length(@lecture_quiz.questions)} questions · score #{@lecture_quiz.quiz.passing_score_percent}% to pass."
@@ -892,18 +1049,40 @@ defmodule WasomiWeb.CoursePlayerLive do
                         >
                           <.icon name="hero-check-circle" class="h-5 w-5" /> Completed
                         </span>
+                        <%!-- A recording's progress is worth showing precisely because there
+                        is no button next to it: this is the learner's only feedback that
+                        the lesson is tracking towards completing itself. --%>
+                        <span
+                          :if={!completed? && has_video?}
+                          id="lecture-watch-progress"
+                          class="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-semibold text-primary"
+                        >
+                          <.icon name="hero-play-circle" class="h-5 w-5" />
+                          {progress_percent(@progress, @current_lecture)}% watched
+                        </span>
                         <button
-                          :if={!completed?}
+                          :if={!completed? && reading_only? && unread_pdfs > 0}
+                          id="go-to-lesson-reading"
+                          type="button"
+                          phx-click={
+                            JS.push("select-lesson-tab", value: %{tab: "overview"})
+                            |> JS.dispatch("wasomi:scroll-into-view", to: "#lesson-pdfs")
+                          }
+                          class="inline-flex items-center gap-2 rounded-2xl bg-primary px-6 py-3 text-sm font-semibold text-white transition hover:bg-ink"
+                        >
+                          Go to the reading
+                          <.icon name="hero-arrow-down" class="h-4 w-4" />
+                        </button>
+                        <%!-- The manual button survives only for a lesson with neither a
+                        video nor a PDF (a links-only or questions-only lesson): nothing
+                        there can complete itself, and nothing there can be marked read. --%>
+                        <button
+                          :if={!completed? && !has_video? && !reading_only?}
                           id="mark-lecture-complete"
                           type="button"
                           phx-click="complete-lecture"
                           phx-value-lecture_id={@current_lecture.id}
-                          disabled={!watched_enough?}
-                          title={
-                            if !watched_enough?,
-                              do: "Watch at least 80% of this lecture to unlock this button."
-                          }
-                          class="rounded-2xl bg-primary px-6 py-3 text-sm font-semibold text-white transition hover:bg-ink disabled:cursor-not-allowed disabled:opacity-40"
+                          class="rounded-2xl bg-primary px-6 py-3 text-sm font-semibold text-white transition hover:bg-ink"
                         >
                           Mark complete
                         </button>
@@ -1017,17 +1196,64 @@ defmodule WasomiWeb.CoursePlayerLive do
                           id={"pdf-resource-#{resource.id}"}
                           class="overflow-hidden rounded-2xl border border-black/10 bg-neutral-50"
                         >
-                          <div class="flex items-center justify-between gap-3 border-b border-black/10 bg-white px-4 py-3">
-                            <span class="min-w-0 truncate text-sm font-semibold text-ink">
-                              {resource.name}
+                          <% read? = resource_read?(@read_resource_ids, resource) %>
+                          <div class="flex flex-wrap items-center justify-between gap-3 border-b border-black/10 bg-white px-4 py-3">
+                            <span class="flex min-w-0 items-center gap-2">
+                              <.icon
+                                :if={read?}
+                                name="hero-check-circle"
+                                class="h-4 w-4 shrink-0 text-primary"
+                              />
+                              <span class="min-w-0 truncate text-sm font-semibold text-ink">
+                                {resource.name}
+                              </span>
                             </span>
-                            <.link
-                              href={resource_download_path(resource.id, @preview?)}
-                              target="_blank"
-                              class="shrink-0 text-xs font-semibold text-primary hover:text-ink"
-                            >
-                              Open PDF
-                            </.link>
+                            <div class="flex shrink-0 flex-wrap items-center gap-2">
+                              <.link
+                                href={resource_download_path(resource.id, @preview?)}
+                                target="_blank"
+                                class="text-xs font-semibold text-primary hover:text-ink"
+                              >
+                                Open PDF
+                              </.link>
+                              <%!-- Notes on this one document, not the whole lesson — the
+                              narrowest study-guide scope, see StudyGuide.validate_scope/1. --%>
+                              <button
+                                type="button"
+                                phx-click="resource-study-guide"
+                                phx-value-resource_id={resource.id}
+                                class="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-white px-3 py-1.5 text-xs font-semibold text-ink transition hover:border-primary/40 hover:bg-mint/40 hover:text-primary"
+                              >
+                                <.icon name="hero-light-bulb" class="h-3.5 w-3.5 text-primary" />
+                                Study guide
+                              </button>
+                              <%!-- Nothing about an embedded PDF tells us it has been read, so
+                              this click is the signal. On a reading-only lesson, the last of
+                              these completes the lesson (Learning.mark_resource_read/2). --%>
+                              <button
+                                :if={!read?}
+                                id={"mark-resource-read-#{resource.id}"}
+                                type="button"
+                                phx-click="mark-resource-read"
+                                phx-value-resource_id={resource.id}
+                                class="inline-flex items-center gap-1.5 rounded-full bg-primary px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-ink"
+                              >
+                                <.icon name="hero-check" class="h-3.5 w-3.5" />
+                                Mark as read
+                              </button>
+                              <button
+                                :if={read?}
+                                id={"unmark-resource-read-#{resource.id}"}
+                                type="button"
+                                phx-click="unmark-resource-read"
+                                phx-value-resource_id={resource.id}
+                                title="Undo this read mark. Your lesson completion is kept."
+                                class="inline-flex items-center gap-1.5 rounded-full bg-mint px-3.5 py-1.5 text-xs font-semibold text-primary transition hover:bg-primary hover:text-white"
+                              >
+                                <.icon name="hero-check-circle" class="h-3.5 w-3.5" />
+                                Read
+                              </button>
+                            </div>
                           </div>
                           <iframe
                             src={resource_download_path(resource.id, @preview?)}
@@ -1050,27 +1276,56 @@ defmodule WasomiWeb.CoursePlayerLive do
                       <h3 class="text-xs font-medium uppercase tracking-widest text-muted">
                         Resources
                       </h3>
+                      <p class="mt-1 text-xs text-muted">
+                        Every uploaded resource is a PDF. Reading marks and per-document study
+                        guides live alongside each one in the reader on the Lesson tab.
+                      </p>
 
                       <ul class="mt-4 space-y-2.5">
-                        <li :for={resource <- @current_lecture.resources}>
+                        <li
+                          :for={resource <- @current_lecture.resources}
+                          class="flex flex-wrap items-center gap-2 rounded-xl border border-black/5 px-4 py-3"
+                        >
+                          <span class="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-mint text-primary">
+                            <.icon name={resource_icon(resource.kind)} class="h-4 w-4" />
+                          </span>
                           <.link
                             href={resource_download_path(resource.id, @preview?)}
                             target={if resource.kind == :link, do: "_blank"}
-                            class="flex items-center gap-3 rounded-xl border border-black/5 px-4 py-3 text-sm text-body transition hover:border-primary/40 hover:bg-mint/40 hover:text-ink"
+                            class="min-w-0 flex-1 truncate text-sm font-medium text-body transition hover:text-primary"
                           >
-                            <span class="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-mint text-primary">
-                              <.icon name={resource_icon(resource.kind)} class="h-4 w-4" />
-                            </span>
-                            <span class="min-w-0 flex-1 truncate font-medium">{resource.name}</span>
-                            <.icon
-                              name={
-                                if resource.kind == :link,
-                                  do: "hero-arrow-top-right-on-square",
-                                  else: "hero-arrow-down-tray"
-                              }
-                              class="h-4 w-4 shrink-0 text-muted"
-                            />
+                            {resource.name}
                           </.link>
+                          <span
+                            :if={pdf_resource?(resource) && resource_read?(@read_resource_ids, resource)}
+                            class="inline-flex shrink-0 items-center gap-1 rounded-full bg-mint px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-primary"
+                          >
+                            <.icon name="hero-check-circle" class="h-3.5 w-3.5" /> Read
+                          </span>
+                          <button
+                            :if={pdf_resource?(resource) && !resource_read?(@read_resource_ids, resource)}
+                            type="button"
+                            phx-click="mark-resource-read"
+                            phx-value-resource_id={resource.id}
+                            class="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-ink"
+                          >
+                            <.icon name="hero-check" class="h-3.5 w-3.5" /> Mark as read
+                          </button>
+                          <button
+                            :if={pdf_resource?(resource)}
+                            type="button"
+                            phx-click="resource-study-guide"
+                            phx-value-resource_id={resource.id}
+                            class="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-black/10 px-3 py-1.5 text-[11px] font-semibold text-ink transition hover:border-primary/40 hover:bg-mint/40 hover:text-primary"
+                          >
+                            <.icon name="hero-light-bulb" class="h-3.5 w-3.5 text-primary" />
+                            Study guide
+                          </button>
+                          <.icon
+                            :if={resource.kind == :link}
+                            name="hero-arrow-top-right-on-square"
+                            class="h-4 w-4 shrink-0 text-muted"
+                          />
                         </li>
                       </ul>
                     </div>
@@ -1265,7 +1520,9 @@ defmodule WasomiWeb.CoursePlayerLive do
                 <div class="border-b border-black/10 p-7 lg:p-8">
                   <h2 class="text-xl font-semibold text-dark">Course outline</h2>
                   <p class="mt-2 text-sm">
-                    {length(@course.modules)} modules · {@course_progress.total} lessons
+                    {length(@course.modules)} modules · {@course_progress.total} lessons · {course_minutes(
+                      @course
+                    )} min
                   </p>
                 </div>
                 <%!-- Separators are drawn with divide-y rather than a border-b per row: the
@@ -1274,92 +1531,142 @@ defmodule WasomiWeb.CoursePlayerLive do
                 <div class="divide-y divide-black/10 overflow-y-auto">
                   <section :for={module <- @course.modules} class="divide-y divide-black/10">
                     <div class="bg-[#f5f5f5] px-7 py-6">
-                      <p class="text-sm font-bold uppercase tracking-wider text-primary">
-                        Module {module.position}
-                      </p>
+                      <div class="flex flex-wrap items-center justify-between gap-2">
+                        <p class="text-sm font-bold uppercase tracking-wider text-primary">
+                          Module {module.position}
+                        </p>
+                        <p class="inline-flex items-center gap-1.5 text-xs font-semibold text-body">
+                          <.icon name="hero-clock" class="h-3.5 w-3.5 text-primary" />
+                          {module_minutes(module)} min
+                        </p>
+                      </div>
                       <h3 class="mt-2 text-lg font-medium text-body">{module.title}</h3>
                       <p class="mt-2 text-sm leading-relaxed">{module.description}</p>
                     </div>
                     <div class="divide-y divide-black/10">
-                      <button
+                      <%!-- The tooltip is the answer to "why can't I move on?" — it names the
+                      one outstanding thing, whether that's watching, reading, or sitting the
+                      lesson quiz. `title` carries it for screen readers and for the disabled
+                      (locked) rows, where a CSS-only hover panel is unreliable. --%>
+                      <div
                         :for={lecture <- module.lectures}
-                        type="button"
-                        phx-click="select-lecture"
-                        phx-value-id={lecture.id}
-                        disabled={!lecture_unlocked?(@unlocked_lecture_ids, lecture.id)}
-                        data-lecture-id={lecture.id}
-                        data-locked={
-                          if lecture_unlocked?(@unlocked_lecture_ids, lecture.id),
-                            do: "false",
-                            else: "true"
-                        }
-                        class={[
-                          "flex w-full items-center gap-4 px-7 py-5 text-left text-sm transition",
-                          @current_lecture && @current_lecture.id == lecture.id &&
-                            "border-l-4 border-l-primary bg-[#f5f5f5] pl-6 font-semibold text-body",
-                          (!@current_lecture || @current_lecture.id != lecture.id) &&
-                            lecture_unlocked?(@unlocked_lecture_ids, lecture.id) &&
-                            "text-body hover:bg-[#f5f5f5]",
-                          !lecture_unlocked?(@unlocked_lecture_ids, lecture.id) &&
-                            "cursor-not-allowed text-muted"
-                        ]}
+                        class="group/lesson relative"
                       >
-                        <span class={[
-                          "grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs font-semibold",
-                          progress_status(@progress, lecture.id) == :completed &&
-                            lecture_unlocked?(@unlocked_lecture_ids, lecture.id) &&
-                            "bg-primary text-white",
-                          progress_status(@progress, lecture.id) != :completed &&
-                            lecture_unlocked?(@unlocked_lecture_ids, lecture.id) &&
-                            "bg-mint text-primary",
-                          !lecture_unlocked?(@unlocked_lecture_ids, lecture.id) && "text-muted/60"
-                        ]}>
-                          <%!-- One glyph only: a locked lecture reads as locked even if an
-                          earlier pass completed it, so the padlock wins over the tick. --%>
-                          <.icon
-                            :if={!lecture_unlocked?(@unlocked_lecture_ids, lecture.id)}
-                            name="hero-lock-closed"
-                            class="h-3.5 w-3.5"
-                          />
-                          <.icon
-                            :if={
+                        <button
+                          type="button"
+                          phx-click="select-lecture"
+                          phx-value-id={lecture.id}
+                          disabled={!lecture_unlocked?(@unlocked_lecture_ids, lecture.id)}
+                          data-lecture-id={lecture.id}
+                          title={lecture_todo_hint(assigns, lecture)}
+                          data-locked={
+                            if lecture_unlocked?(@unlocked_lecture_ids, lecture.id),
+                              do: "false",
+                              else: "true"
+                          }
+                          class={[
+                            "flex w-full items-center gap-4 px-7 py-5 text-left text-sm transition",
+                            @current_lecture && @current_lecture.id == lecture.id &&
+                              "border-l-4 border-l-primary bg-[#f5f5f5] pl-6 font-semibold text-body",
+                            (!@current_lecture || @current_lecture.id != lecture.id) &&
                               lecture_unlocked?(@unlocked_lecture_ids, lecture.id) &&
-                                progress_status(@progress, lecture.id) == :completed
-                            }
-                            name="hero-check"
-                            class="h-3.5 w-3.5"
-                          />
-                          <span :if={
-                            lecture_unlocked?(@unlocked_lecture_ids, lecture.id) &&
-                              progress_status(@progress, lecture.id) != :completed
-                          }>
-                            {lecture.position}
+                              "text-body hover:bg-[#f5f5f5]",
+                            !lecture_unlocked?(@unlocked_lecture_ids, lecture.id) &&
+                              "cursor-not-allowed text-muted"
+                          ]}
+                        >
+                          <span class={[
+                            "grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs font-semibold",
+                            progress_status(@progress, lecture.id) == :completed &&
+                              lecture_unlocked?(@unlocked_lecture_ids, lecture.id) &&
+                              "bg-primary text-white",
+                            progress_status(@progress, lecture.id) != :completed &&
+                              lecture_unlocked?(@unlocked_lecture_ids, lecture.id) &&
+                              "bg-mint text-primary",
+                            !lecture_unlocked?(@unlocked_lecture_ids, lecture.id) && "text-muted/60"
+                          ]}>
+                            <%!-- One glyph only: a locked lecture reads as locked even if an
+                            earlier pass completed it, so the padlock wins over the tick. --%>
+                            <.icon
+                              :if={!lecture_unlocked?(@unlocked_lecture_ids, lecture.id)}
+                              name="hero-lock-closed"
+                              class="h-3.5 w-3.5"
+                            />
+                            <.icon
+                              :if={
+                                lecture_unlocked?(@unlocked_lecture_ids, lecture.id) &&
+                                  progress_status(@progress, lecture.id) == :completed
+                              }
+                              name="hero-check"
+                              class="h-3.5 w-3.5"
+                            />
+                            <span :if={
+                              lecture_unlocked?(@unlocked_lecture_ids, lecture.id) &&
+                                progress_status(@progress, lecture.id) != :completed
+                            }>
+                              {lecture.position}
+                            </span>
                           </span>
+                          <span class="min-w-0 flex-1">
+                            <span class="block truncate">{lecture.title}</span>
+                            <%!-- How long this lesson takes, and what it is made of, without
+                            opening it. --%>
+                            <span class="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted">
+                              <% lesson_minutes = lecture_estimated_minutes(lecture) %>
+                              <span :if={lesson_minutes} class="inline-flex items-center gap-1">
+                                <.icon name="hero-clock" class="h-3.5 w-3.5" />
+                                {lesson_minutes} min
+                              </span>
+                              <span
+                                :for={badge <- resource_type_badges(assigns, lecture)}
+                                class="inline-flex items-center gap-1"
+                              >
+                                <.icon name={badge.icon} class="h-3.5 w-3.5" />
+                                {badge.label}
+                              </span>
+                            </span>
+                            <span
+                              :if={progress_status(@progress, lecture.id) == :in_progress}
+                              class="mt-0.5 block text-xs text-muted"
+                            >
+                              {progress_percent(@progress, lecture)}% watched
+                            </span>
+                            <span
+                              :if={
+                                reading_only_lecture?(lecture) &&
+                                  progress_status(@progress, lecture.id) != :completed
+                              }
+                              class="mt-0.5 block text-xs text-muted"
+                            >
+                              {unread_pdf_count(@read_resource_ids, lecture)} of {length(
+                                lecture_pdfs(lecture)
+                              )} PDFs left to read
+                            </span>
+                            <span
+                              :if={lecture_quiz_passed?(assigns, lecture)}
+                              class="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary"
+                            >
+                              <.icon name="hero-clipboard-document-check" class="h-3.5 w-3.5" />
+                              Quiz passed
+                            </span>
+                            <span
+                              :if={lecture_quiz_pending?(assigns, lecture)}
+                              class="mt-1 inline-flex items-center gap-1 text-xs text-muted"
+                            >
+                              <.icon name="hero-clipboard-document-check" class="h-3.5 w-3.5" />
+                              Quiz to pass
+                            </span>
+                          </span>
+                        </button>
+                        <% hint = lecture_todo_hint(assigns, lecture) %>
+                        <span
+                          :if={hint}
+                          role="tooltip"
+                          class="pointer-events-none absolute bottom-full left-6 right-6 z-20 mb-1 hidden rounded-xl bg-ink px-3 py-2 text-xs font-medium leading-snug text-white shadow-lg group-hover/lesson:block"
+                        >
+                          {hint}
                         </span>
-                        <span class="min-w-0 flex-1">
-                          <span class="block truncate">{lecture.title}</span>
-                          <span
-                            :if={progress_status(@progress, lecture.id) == :in_progress}
-                            class="mt-0.5 block text-xs text-muted"
-                          >
-                            {progress_percent(@progress, lecture)}% watched
-                          </span>
-                          <span
-                            :if={lecture_quiz_passed?(assigns, lecture)}
-                            class="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary"
-                          >
-                            <.icon name="hero-clipboard-document-check" class="h-3.5 w-3.5" />
-                            Quiz passed
-                          </span>
-                          <span
-                            :if={lecture_quiz_pending?(assigns, lecture)}
-                            class="mt-1 inline-flex items-center gap-1 text-xs text-muted"
-                          >
-                            <.icon name="hero-clipboard-document-check" class="h-3.5 w-3.5" />
-                            Quiz to pass
-                          </span>
-                        </span>
-                      </button>
+                      </div>
 
                       <% quiz_unlocked? = module_quiz_unlocked?(module, @progress, @preview?) %>
                       <button
@@ -1515,7 +1822,7 @@ defmodule WasomiWeb.CoursePlayerLive do
     Enum.find(course.modules, &(&1.id == lecture.module_id))
   end
 
-  defp embedded_study_hub_session(user, course, nil, mode) do
+  defp embedded_study_hub_session(user, course, nil, mode, _resource_id) do
     %{
       "current_user_id" => user.id,
       "course" => course.slug,
@@ -1526,11 +1833,25 @@ defmodule WasomiWeb.CoursePlayerLive do
 
   # Generative study tools always open at the scope chooser. Selecting a module
   # or lesson is an explicit learner action; generation/building follows it.
-  defp embedded_study_hub_session(user, course, module, mode) do
+  defp embedded_study_hub_session(user, course, module, mode, nil) do
     %{
       "current_user_id" => user.id,
       "course" => course.slug,
       "module" => to_string(module.id),
+      "mode" => mode,
+      "embedded" => true
+    }
+  end
+
+  # The one exception to opening at the chooser: the learner already chose, by
+  # clicking "Study guide" on a specific PDF, so the scope arrives pre-set.
+  defp embedded_study_hub_session(user, course, module, mode, resource_id) do
+    %{
+      "current_user_id" => user.id,
+      "course" => course.slug,
+      "module" => to_string(module.id),
+      "scope" => "resource",
+      "resource" => to_string(resource_id),
       "mode" => mode,
       "embedded" => true
     }
@@ -1551,6 +1872,13 @@ defmodule WasomiWeb.CoursePlayerLive do
         Learning.progress_for_course(socket.assigns.current_user, course)
       end
 
+    read_resource_ids =
+      if preview? do
+        socket.assigns.preview_read_resource_ids
+      else
+        Learning.read_resource_ids_for_course(socket.assigns.current_user, course)
+      end
+
     course_progress = Learning.summarize_progress(course, progress)
     unlocked_lecture_ids = unlocked_lecture_ids(socket, lectures, progress, preview?)
     current_lecture = pick_current_lecture(socket, lectures, progress)
@@ -1558,6 +1886,7 @@ defmodule WasomiWeb.CoursePlayerLive do
     socket
     |> assign(:course_progress, course_progress)
     |> assign(:progress, progress)
+    |> assign(:read_resource_ids, read_resource_ids)
     |> assign(:unlocked_lecture_ids, unlocked_lecture_ids)
     |> assign(:current_lecture, current_lecture)
     |> refresh_certificates()
@@ -1610,13 +1939,46 @@ defmodule WasomiWeb.CoursePlayerLive do
 
   defp course_lectures(course), do: Enum.flat_map(course.modules, & &1.lectures)
 
+  # The admin's own estimate wins when they set one: it can account for the
+  # reading, the practice questions and the quizzes, none of which a video
+  # duration knows about. Falling back to the video sum keeps the figure that
+  # existing courses (with no estimate saved) have always shown.
+  defp course_minutes(%{estimated_minutes: minutes}) when is_integer(minutes) and minutes > 0,
+    do: minutes
+
   defp course_minutes(course) do
     course
     |> course_lectures()
+    |> video_minutes()
+  end
+
+  defp module_minutes(%{estimated_minutes: minutes}) when is_integer(minutes) and minutes > 0,
+    do: minutes
+
+  defp module_minutes(module), do: video_minutes(module.lectures)
+
+  defp video_minutes(lectures) do
+    lectures
     |> Enum.reduce(0, &((&1.duration_seconds || 0) + &2))
     |> Kernel./(60)
     |> Float.ceil()
     |> trunc()
+  end
+
+  # What a lesson costs in time, as far as we can tell: the video's own length
+  # when there is one, and otherwise a flat reading allowance per PDF, since a
+  # document carries no duration. `nil` means we genuinely don't know, and the
+  # UI shows nothing rather than a made-up number.
+  @reading_minutes_per_pdf 5
+
+  defp lecture_estimated_minutes(%{duration_seconds: seconds}) when is_integer(seconds),
+    do: seconds |> Kernel./(60) |> Float.ceil() |> trunc()
+
+  defp lecture_estimated_minutes(lecture) do
+    case Enum.count(lecture.resources, &pdf_resource?/1) do
+      0 -> nil
+      count -> count * @reading_minutes_per_pdf
+    end
   end
 
   defp lecture_number(course, lecture) do
@@ -1627,10 +1989,6 @@ defmodule WasomiWeb.CoursePlayerLive do
       nil -> lecture.position
       index -> index + 1
     end
-  end
-
-  defp lecture_minutes(%{duration_seconds: seconds}) when is_integer(seconds) do
-    seconds |> Kernel./(60) |> Float.ceil() |> trunc()
   end
 
   # Admins previewing content just want to sanity-check it, not re-earn
@@ -1699,6 +2057,12 @@ defmodule WasomiWeb.CoursePlayerLive do
       nil -> 0
     end
   end
+
+  # A percentage only means something against a video's length. A lecture with
+  # no video has no watched fraction, so it reports 0 rather than dividing by
+  # nil — the reading-only lessons the outline now renders would otherwise
+  # crash here.
+  defp progress_percent(_progress, %{duration_seconds: nil}), do: 0
 
   defp progress_percent(progress, lecture) do
     progress
@@ -1903,4 +2267,109 @@ defmodule WasomiWeb.CoursePlayerLive do
 
   defp lq_feedback_band(_score),
     do: %{label: "Needs work — see the model answer below.", class: "bg-red-50 text-red-700"}
+
+  # ── Resources ──────────────────────────────────────────────────────────────
+
+  # Scoped to the lecture on screen rather than the whole course: the only
+  # resources a learner can act on are the ones they can currently see, so a
+  # forged resource_id for a locked lesson finds nothing here.
+  defp find_current_resource(socket, resource_id) do
+    case socket.assigns.current_lecture do
+      nil -> nil
+      lecture -> Enum.find(lecture.resources, &(to_string(&1.id) == to_string(resource_id)))
+    end
+  end
+
+  defp resource_read?(read_resource_ids, resource),
+    do: MapSet.member?(read_resource_ids, resource.id)
+
+  # Reading the last outstanding PDF on a lecture with no video completes it, so
+  # say so rather than leaving the learner to notice the outline changed.
+  defp resource_read_flash(socket, _resource) do
+    lecture = socket.assigns.current_lecture
+
+    if is_nil(lecture.duration_seconds) and
+         all_pdfs_read?(socket.assigns.read_resource_ids, lecture) do
+      "Marked as read — that was the last one, so this lesson is complete."
+    else
+      "Marked as read."
+    end
+  end
+
+  defp lecture_pdfs(lecture), do: Enum.filter(lecture.resources, &pdf_resource?/1)
+
+  defp all_pdfs_read?(read_resource_ids, lecture) do
+    pdfs = lecture_pdfs(lecture)
+    pdfs != [] and Enum.all?(pdfs, &resource_read?(read_resource_ids, &1))
+  end
+
+  defp unread_pdf_count(read_resource_ids, lecture) do
+    lecture
+    |> lecture_pdfs()
+    |> Enum.count(&(not resource_read?(read_resource_ids, &1)))
+  end
+
+  # A lesson whose only material is reading: nothing to watch, so its PDFs are
+  # what completes it.
+  defp reading_only_lecture?(lecture),
+    do: is_nil(lecture.duration_seconds) and lecture_pdfs(lecture) != []
+
+  # The distinct kinds of material a lesson carries, for the outline's badges —
+  # so a learner can see at a glance whether a lesson is a video, a reading, or
+  # both, before they open it.
+  defp resource_type_badges(assigns, lecture) do
+    pdf_count = length(lecture_pdfs(lecture))
+    link_count = Enum.count(lecture.resources, &(&1.kind == :link))
+
+    [
+      lecture.duration_seconds && %{icon: "hero-play-circle", label: "Video"},
+      pdf_count > 0 &&
+        %{
+          icon: "hero-document-text",
+          label: if(pdf_count == 1, do: "PDF", else: "#{pdf_count} PDFs")
+        },
+      link_count > 0 && %{icon: "hero-link", label: "Link"},
+      lecture.questions != [] && %{icon: "hero-pencil-square", label: "Practice"},
+      Map.has_key?(assigns.ready_lecture_quizzes, lecture.id) &&
+        %{icon: "hero-clipboard-document-check", label: "Quiz"}
+    ]
+    |> Enum.filter(& &1)
+  end
+
+  # What is still outstanding on a lesson, in one sentence, for the outline's
+  # hover tooltip. `nil` for a lesson with nothing left to do — there is then no
+  # tooltip to show.
+  defp lecture_todo_hint(assigns, lecture) do
+    %{progress: progress, read_resource_ids: read_resource_ids} = assigns
+    completed? = progress_status(progress, lecture.id) == :completed
+
+    cond do
+      not lecture_unlocked?(assigns.unlocked_lecture_ids, lecture.id) ->
+        "Locked — finish the lesson before it to unlock this one."
+
+      completed? and lecture_quiz_pending?(assigns, lecture) ->
+        "Take the lesson quiz — you need to pass it to unlock the next lesson."
+
+      completed? ->
+        nil
+
+      reading_only_lecture?(lecture) ->
+        case unread_pdf_count(read_resource_ids, lecture) do
+          0 -> "Open this lesson to finish it."
+          1 -> "1 PDF left to read — mark it as read to complete this lesson."
+          count -> "#{count} PDFs left to read — mark each as read to complete this lesson."
+        end
+
+      is_nil(lecture.duration_seconds) ->
+        "Open this lesson and mark it complete."
+
+      progress_status(progress, lecture.id) == :in_progress ->
+        "#{progress_percent(progress, lecture)}% watched — it completes on its own once you " <>
+          "finish the video."
+
+      true ->
+        "Not started — watch the video and it completes on its own."
+    end
+  end
 end
+

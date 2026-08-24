@@ -365,39 +365,41 @@ defmodule WasomiWeb.HomeComponents do
           <input type="radio" name="gs1-step" id="gs1-step-3" class="peer/s3 sr-only" />
           <input type="radio" name="gs1-step" id="gs1-step-4" class="peer/s4 sr-only" />
 
-          <div class="mb-6 grid grid-cols-2 divide-x divide-black/10 border border-black/10 sm:grid-cols-4">
+          <div class={[
+            "mb-6 grid grid-cols-2 divide-x divide-black/10 border border-black/10 sm:grid-cols-4",
+            "peer-checked/s1:[&>label:nth-of-type(1)]:bg-dark peer-checked/s1:[&>label:nth-of-type(1)]:text-white",
+            "peer-checked/s2:[&>label:nth-of-type(2)]:bg-dark peer-checked/s2:[&>label:nth-of-type(2)]:text-white",
+            "peer-checked/s3:[&>label:nth-of-type(3)]:bg-dark peer-checked/s3:[&>label:nth-of-type(3)]:text-white",
+            "peer-checked/s4:[&>label:nth-of-type(4)]:bg-dark peer-checked/s4:[&>label:nth-of-type(4)]:text-white"
+          ]}>
             <label
               for="gs1-step-1"
-              class="cursor-pointer border-b border-black/10 px-5 py-4 text-center text-base font-semibold text-dark transition peer-checked/s1:border-b-0 peer-checked/s1:bg-dark peer-checked/s1:text-white sm:border-b-0"
+              class="cursor-pointer border-b border-black/10 px-5 py-4 text-center text-base font-semibold text-dark transition sm:border-b-0"
             >
-              <span class="text-primary peer-checked/s1:text-primary">01</span> Identify
+              <span class="text-primary">01</span> Identify
             </label>
             <label
               for="gs1-step-2"
-              class="cursor-pointer border-b border-black/10 px-5 py-4 text-center text-base font-semibold text-dark transition peer-checked/s2:border-b-0 peer-checked/s2:bg-dark peer-checked/s2:text-white sm:border-b-0"
+              class="cursor-pointer border-b border-black/10 px-5 py-4 text-center text-base font-semibold text-dark transition sm:border-b-0"
             >
               <span class="text-primary">02</span> Capture
             </label>
             <label
               for="gs1-step-3"
-              class="cursor-pointer px-5 py-4 text-center text-base font-semibold text-dark transition peer-checked/s3:bg-dark peer-checked/s3:text-white"
+              class="cursor-pointer px-5 py-4 text-center text-base font-semibold text-dark transition"
             >
               <span class="text-primary">03</span> Share
             </label>
             <label
               for="gs1-step-4"
-              class="cursor-pointer px-5 py-4 text-center text-base font-semibold text-dark transition peer-checked/s4:bg-dark peer-checked/s4:text-white"
+              class="cursor-pointer px-5 py-4 text-center text-base font-semibold text-dark transition"
             >
               <span class="text-primary">04</span> Verify
             </label>
           </div>
 
           <div class="hidden border border-black/10 -mx-6 sm:-mx-10 lg:grid-cols-2 peer-checked/s1:grid peer-checked/s1:animate-fade-up">
-            <.gs1_step_visual>
-              <.gs1_step_icon>
-                <path d="M7 7h.01M3 11V5a2 2 0 0 1 2-2h6l10 10-8 8L3 11Z" />
-              </.gs1_step_icon>
-            </.gs1_step_visual>
+            <.gs1_step_visual image="/images/gs1-box.png" alt="Product labelled with a GS1 barcode" />
             <.gs1_step_content
               eyebrow="Step 01 · Identify"
               title="Give every product a clear identity"
@@ -408,11 +410,7 @@ defmodule WasomiWeb.HomeComponents do
           </div>
 
           <div class="hidden border border-black/10 -mx-6 sm:-mx-10 lg:grid-cols-2 peer-checked/s2:grid peer-checked/s2:animate-fade-up">
-            <.gs1_step_visual>
-              <.gs1_step_icon>
-                <path d="M4 7V4h3M20 7V4h-3M4 17v3h3M20 17v3h-3M9 8v8M12 8v8M15 8v8" />
-              </.gs1_step_icon>
-            </.gs1_step_visual>
+            <.gs1_step_visual image="/images/hero-home.png" alt="Scanning a barcode to capture product data" />
             <.gs1_step_content
               eyebrow="Step 02 · Capture"
               title="Capture product data accurately"
@@ -423,15 +421,7 @@ defmodule WasomiWeb.HomeComponents do
           </div>
 
           <div class="hidden border border-black/10 -mx-6 sm:-mx-10 lg:grid-cols-2 peer-checked/s3:grid peer-checked/s3:animate-fade-up">
-            <.gs1_step_visual>
-              <.gs1_step_icon>
-                <circle cx="6" cy="12" r="2.5" /><circle cx="18" cy="6" r="2.5" /><circle
-                  cx="18"
-                  cy="18"
-                  r="2.5"
-                /><path d="M8.2 10.8 15.8 7.2M8.2 13.2l7.6 3.6" />
-              </.gs1_step_icon>
-            </.gs1_step_visual>
+            <.gs1_step_visual image="/images/hero_image.jpg" alt="Trading partners sharing product data" />
             <.gs1_step_content
               eyebrow="Step 03 · Share"
               title="Share trusted data with partners"
@@ -442,11 +432,10 @@ defmodule WasomiWeb.HomeComponents do
           </div>
 
           <div class="hidden border border-black/10 -mx-6 sm:-mx-10 lg:grid-cols-2 peer-checked/s4:grid peer-checked/s4:animate-fade-up">
-            <.gs1_step_visual>
-              <.gs1_step_icon>
-                <path d="M21 8 12 3 3 8l9 5 9-5Z" /><path d="M3 8v8l9 5 9-5V8" /><path d="m9 15 2 2 4-4" />
-              </.gs1_step_icon>
-            </.gs1_step_visual>
+            <.gs1_step_visual
+              image="/images/auth-learning-bg.jpg"
+              alt="Verifying a product along its journey"
+            />
             <.gs1_step_content
               eyebrow="Step 04 · Verify"
               title="Verify products across the journey"
@@ -461,19 +450,21 @@ defmodule WasomiWeb.HomeComponents do
     """
   end
 
-  slot :inner_block, required: true
+  attr :image, :string, required: true
+  attr :alt, :string, required: true
 
   defp gs1_step_visual(assigns) do
     ~H"""
-    <div class="flex flex-col justify-center gap-5 bg-dark px-8 py-12 lg:py-0">
-      <span class="grid h-14 w-14 place-items-center rounded-xl border-2 border-white/40 text-white">
-        {render_slot(@inner_block)}
-      </span>
-      <div>
-        <p class="text-lg font-semibold text-white">Sample product</p>
-        <p class="mt-1 text-base text-white/60">GTIN 0614141000015</p>
+    <div class="relative min-h-[320px] overflow-hidden bg-dark lg:min-h-[420px]">
+      <img src={@image} alt={@alt} class="absolute inset-0 h-full w-full object-cover" />
+      <div class="absolute inset-0 bg-dark/70"></div>
+      <div class="relative flex h-full flex-col justify-end gap-5 px-8 py-12">
+        <div>
+          <p class="text-lg font-semibold text-white">Sample product</p>
+          <p class="mt-1 text-base text-white/60">GTIN 0614141000015</p>
+        </div>
+        <.gs1_barcode />
       </div>
-      <.gs1_barcode />
     </div>
     """
   end
@@ -553,24 +544,6 @@ defmodule WasomiWeb.HomeComponents do
         </svg>
       </label>
     </div>
-    """
-  end
-
-  slot :inner_block, required: true
-
-  defp gs1_step_icon(assigns) do
-    ~H"""
-    <svg
-      class="h-7 w-7"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-    >
-      {render_slot(@inner_block)}
-    </svg>
     """
   end
 
@@ -1353,3 +1326,4 @@ defmodule WasomiWeb.HomeComponents do
     """
   end
 end
+

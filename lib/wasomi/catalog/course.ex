@@ -12,6 +12,11 @@ defmodule Wasomi.Catalog.Course do
     field :thumbnail_key, :string
     field :price_minor, :integer
     field :is_free, :boolean, default: false
+    # The admin's own estimate of how long the whole course takes, in minutes.
+    # Optional: left blank, the learner side falls back to summing video
+    # durations, which is all it ever had. Set, it wins — because it can account
+    # for the reading, practice and quizzes that no video duration includes.
+    field :estimated_minutes, :integer
 
     field :certificate_enabled, :boolean, default: true
     field :certificate_issuer_name, :string
@@ -43,7 +48,8 @@ defmodule Wasomi.Catalog.Course do
       :currency,
       :status,
       :position,
-      :is_free
+      :is_free,
+      :estimated_minutes
     ])
     |> validate_required([
       :slug,
@@ -62,11 +68,13 @@ defmodule Wasomi.Catalog.Course do
     )
     |> validate_length(:title, min: 3, max: 160)
     |> validate_number(:position, greater_than: 0)
+    |> validate_number(:estimated_minutes, greater_than: 0)
     |> validate_format(:currency, ~r/^[A-Z]{3}$/, message: "must be a 3-letter currency code")
     |> unique_constraint(:slug)
     |> check_constraint(:price_minor, name: :courses_price_must_be_non_negative)
     |> check_constraint(:position, name: :courses_position_must_be_positive)
     |> check_constraint(:status, name: :courses_status_must_be_valid)
+    |> check_constraint(:estimated_minutes, name: :courses_estimated_minutes_must_be_positive)
   end
 
   defp validate_price(changeset) do
@@ -227,3 +235,4 @@ defmodule Wasomi.Catalog.Course do
 
   defp normalize_slug(slug), do: slug
 end
+

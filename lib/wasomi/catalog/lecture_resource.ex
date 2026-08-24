@@ -40,6 +40,7 @@ defmodule Wasomi.Catalog.LectureResource do
     |> validate_byte_size()
     |> validate_number(:position, greater_than: 0)
     |> validate_resource_target()
+    |> validate_document_is_pdf()
     |> assoc_constraint(:lecture)
     |> unique_constraint([:lecture_id, :position],
       name: :lecture_resources_lecture_id_position_index
@@ -81,4 +82,32 @@ defmodule Wasomi.Catalog.LectureResource do
   end
 
   def valid_url?(_), do: false
+
+  # Uploaded lecture resources are PDF only. The learner's reader renders them
+  # inline and `Wasomi.Assessments.LectureResourceReader` extracts their text to
+  # drive study guides and generated quizzes — neither works for an image, a
+  # slide deck or an archive. Enforced here as well as in the uploader's
+  # `accept:` list so a resource row can't be written past the UI.
+  defp validate_document_is_pdf(changeset) do
+    if get_field(changeset, :kind) == :document and not pdf?(changeset) do
+      add_error(changeset, :content_type, "must be a PDF — lecture resources only accept PDFs")
+    else
+      changeset
+    end
+  end
+
+  defp pdf?(changeset) do
+    content_type = get_field(changeset, :content_type)
+    name = get_field(changeset, :name) || ""
+    pdf_name? = String.downcase(Path.extname(name)) == ".pdf"
+
+    case content_type do
+      "application/pdf" -> true
+      # The browser doesn't always send a type; fall back to the filename,
+      # which is the same leniency the uploader's own check applies.
+      type when type in [nil, "", "application/octet-stream"] -> pdf_name?
+      _ -> false
+    end
+  end
 end
+

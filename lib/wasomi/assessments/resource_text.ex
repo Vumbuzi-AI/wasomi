@@ -1,8 +1,8 @@
 defmodule Wasomi.Assessments.ResourceText do
   @moduledoc """
   Gathers extractable text for the learner-triggered Flashcards/Extra-
-  questions generators, scoped to either a whole module or a single
-  lecture.
+  questions/Study-guide generators, scoped to a whole module, a single
+  lecture, or one individual document resource.
 
   Unlike `Wasomi.Assessments.Workers.GenerateQuizFromPDFWorker`'s
   admin-picked `resource_selection`, self-study generation has no admin in
@@ -31,6 +31,13 @@ defmodule Wasomi.Assessments.ResourceText do
     |> Catalog.get_lecture!()
     |> lecture_source_keys()
     |> gather_text()
+  end
+
+  # The narrowest scope: one document, on its own. A learner asking for notes on
+  # a single PDF gets notes on that PDF — the rest of the lesson's material is
+  # deliberately not folded in, which is the whole point of the scope.
+  def gather({:resource, resource_id}) do
+    gather_text(["doc:#{resource_id}"])
   end
 
   defp module_source_keys(module_id) do
@@ -112,3 +119,4 @@ defmodule Wasomi.Assessments.ResourceText do
         Wasomi.Assessments.LectureResourceReader.Storage
       )
 end
+

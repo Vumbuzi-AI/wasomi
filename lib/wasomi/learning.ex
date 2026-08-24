@@ -11,11 +11,11 @@ defmodule Wasomi.Learning do
 
   alias Wasomi.Accounts.User
   alias Wasomi.Assessments
-  alias Wasomi.Catalog.{Course, CourseModule, Lecture}
+  alias Wasomi.Catalog.{Course, CourseModule, Lecture, LectureResource}
   alias Wasomi.Certificates
   alias Wasomi.Enrollments
   alias Wasomi.Enrollments.Enrollment
-  alias Wasomi.Learning.LectureProgress
+  alias Wasomi.Learning.{LectureProgress, ResourceProgress}
 
   @completion_ratio 0.95
   @mark_complete_ratio 0.80
@@ -90,6 +90,112 @@ defmodule Wasomi.Learning do
       when is_number(position_seconds) and is_number(duration_seconds) do
     position_seconds >= mark_complete_threshold(duration_seconds)
   end
+
+  @doc """
+  Records that a learner has read one lecture resource.
+
+  A PDF gives the server no honest signal that it has been read — scroll
+  position in an embedded viewer is neither reliable nor meaningful — so
+  reading is an explicit click rather than something inferred. Idempotent: a
+  second click on an already-read resource is a no-op, not a duplicate row or
+  an error.
+
+  Reading the last outstanding PDF on a lecture that has no video completes the
+  lecture, and so can emit the same module/course completion events (and
+  certificates) as finishing a recording would. On a lecture that *does* have a
+  video, the video still governs completion and these marks are supplementary —
+  a learner cannot skip the recording by ticking off its handouts.
+  """
+  def mark_resource_read(%User{} = user, %LectureResource{} = resource) do
+    lecture = Repo.get!(Lecture, resource.lecture_id)
+
+    if Enrollments.can_access_lecture?(user, lecture) do
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      {:ok, _} =
+        %ResourceProgress{}
+        |> ResourceProgress.changeset(%{
+          user_id: user.id,
+          lecture_resource_id: resource.id,
+          completed_at: now
+        })
+        |> Repo.insert(
+          on_conflict: :nothing,
+          conflict_target: [:user_id, :lecture_resource_id]
+        )
+
+      {:ok, maybe_complete_reading_only_lecture(user, lecture)}
+    else
+      {:error, :forbidden}
+    end
+  end
+
+  @doc """
+  Removes a learner's read mark for one resource.
+
+  Deliberately does *not* un-complete the lecture: completion is sticky
+  everywhere else in this module (see `progress_attrs/3`), and an accidental
+  click on "Mark as read" should be correctable without silently revoking a
+  certificate that has already been issued off the back of it.
+  """
+  def unmark_resource_read(%User{} = user, %LectureResource{} = resource) do
+    ResourceProgress
+    |> where([rp], rp.user_id == ^user.id and rp.lecture_resource_id == ^resource.id)
+    |> Repo.delete_all()
+
+    :ok
+  end
+
+  @doc """
+  The set of lecture-resource ids this learner has marked read, across one
+  whole course.
+
+  A `MapSet` for the course rather than a lookup per resource: the player
+  renders a read/unread state for every resource in the outline, which would
+  otherwise be an N+1.
+  """
+  def read_resource_ids_for_course(user_or_id, %Course{id: course_id}) do
+    ResourceProgress
+    |> join(:inner, [rp], resource in LectureResource, on: resource.id == rp.lecture_resource_id)
+    |> join(:inner, [_rp, resource], lecture in Lecture, on: lecture.id == resource.lecture_id)
+    |> join(:inner, [_rp, _resource, lecture], course_module in CourseModule,
+      on: course_module.id == lecture.module_id
+    )
+    |> where(
+      [rp, _resource, _lecture, course_module],
+      rp.user_id == ^id_for(user_or_id) and course_module.course_id == ^course_id
+    )
+    |> select([rp], rp.lecture_resource_id)
+    |> Repo.all()
+    |> MapSet.new()
+  end
+
+  # A lecture with a video is completed by watching it; only a reading-only
+  # lecture is completed by finishing its reading. Returns the completion
+  # events, so callers can react exactly as they do to a finished video.
+  defp maybe_complete_reading_only_lecture(user, %Lecture{duration_seconds: nil} = lecture) do
+    document_ids =
+      LectureResource
+      |> where([r], r.lecture_id == ^lecture.id and r.kind == :document)
+      |> select([r], r.id)
+      |> Repo.all()
+
+    read_count =
+      ResourceProgress
+      |> where([rp], rp.user_id == ^user.id and rp.lecture_resource_id in ^document_ids)
+      |> Repo.aggregate(:count)
+
+    if document_ids != [] and read_count == length(document_ids) do
+      case persist_progress(user, lecture, 0, true) do
+        {:ok, _progress, events} -> events
+        {:error, _reason} -> []
+      end
+    else
+      []
+    end
+  end
+
+  defp maybe_complete_reading_only_lecture(_user, _lecture), do: []
 
   @doc """
   Returns one learner's progress row for a lecture, if it exists.
@@ -540,3 +646,4 @@ defmodule Wasomi.Learning do
   defp id_for(%{id: id}), do: id
   defp id_for(id), do: id
 end
+

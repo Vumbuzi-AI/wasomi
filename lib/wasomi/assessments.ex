@@ -44,6 +44,7 @@ defmodule Wasomi.Assessments do
   alias Wasomi.Assessments.Workers.GenerateLectureQuizWorker
   alias Wasomi.Catalog.CourseModule
   alias Wasomi.Catalog.Lecture
+  alias Wasomi.Catalog.LectureResource
   alias Wasomi.Repo
 
   ## Quizzes
@@ -1928,10 +1929,11 @@ defmodule Wasomi.Assessments do
   # generation status.
 
   @doc """
-  Creates a `:pending` study guide for `user` over `scope` (a `CourseModule` or
-  a `Lecture`) with the style/depth/reading-level/focus they chose. Generation
-  itself is the caller's job — enqueue
-  `Wasomi.Assessments.Workers.GenerateStudyGuideWorker` with the returned id.
+  Creates a `:pending` study guide for `user` over `scope` (a `CourseModule`, a
+  `Lecture`, or a single `LectureResource`) with the
+  style/depth/reading-level/focus they chose. Generation itself is the caller's
+  job — enqueue `Wasomi.Assessments.Workers.GenerateStudyGuideWorker` with the
+  returned id.
   """
   def create_study_guide(%User{id: user_id}, scope, attrs) do
     %StudyGuide{}
@@ -1944,8 +1946,17 @@ defmodule Wasomi.Assessments do
     |> Repo.insert()
   end
 
-  defp study_guide_scope_attrs(%CourseModule{id: id}), do: %{module_id: id, lecture_id: nil}
-  defp study_guide_scope_attrs(%Lecture{id: id}), do: %{lecture_id: id, module_id: nil}
+  # Every scope key is written on every insert, the unused ones as nil, so a
+  # struct reused across scopes can't carry a stale id past the DB's
+  # exactly-one-scope constraint.
+  defp study_guide_scope_attrs(%CourseModule{id: id}),
+    do: %{module_id: id, lecture_id: nil, lecture_resource_id: nil}
+
+  defp study_guide_scope_attrs(%Lecture{id: id}),
+    do: %{lecture_id: id, module_id: nil, lecture_resource_id: nil}
+
+  defp study_guide_scope_attrs(%LectureResource{id: id}),
+    do: %{lecture_resource_id: id, module_id: nil, lecture_id: nil}
 
   @doc """
   Every study guide `user` has generated for `scope`, most recent first — the
@@ -1973,6 +1984,9 @@ defmodule Wasomi.Assessments do
 
   defp study_guide_scope_filter(%CourseModule{id: id}), do: dynamic([g], g.module_id == ^id)
   defp study_guide_scope_filter(%Lecture{id: id}), do: dynamic([g], g.lecture_id == ^id)
+
+  defp study_guide_scope_filter(%LectureResource{id: id}),
+    do: dynamic([g], g.lecture_resource_id == ^id)
 
   def get_study_guide!(id), do: Repo.get!(StudyGuide, id)
 
@@ -2095,3 +2109,4 @@ defmodule Wasomi.Assessments do
 
   defp study_guide_topic(id), do: "study_guide:#{id}"
 end
+

@@ -231,6 +231,17 @@ defmodule WasomiWeb.AdminLive.Courses do
                   class="group relative flex flex-col overflow-hidden rounded-3xl border border-black/5 bg-white shadow-sm transition duration-300 hover:-translate-y-1 hover:shadow-xl"
                 >
                   <div class={["relative aspect-[16/10] overflow-hidden", card_header_class(index)]}>
+                    <img
+                      :if={thumbnail(row.course)}
+                      loading="lazy"
+                      src={thumbnail(row.course)}
+                      alt=""
+                      class="absolute inset-0 h-full w-full object-cover transition duration-500 group-hover:scale-105"
+                    />
+                    <div
+                      :if={thumbnail(row.course)}
+                      class="absolute inset-0 bg-linear-to-t from-ink/60 via-ink/10 to-ink/25"
+                    />
                     <span class="absolute left-4 top-4 z-10">
                       <.status_badge status={row.course.status} />
                     </span>
@@ -262,16 +273,19 @@ defmodule WasomiWeb.AdminLive.Courses do
                       </button>
                     </div>
 
-                    <span class={[
-                      "absolute bottom-5 left-5 grid h-14 w-14 place-items-center rounded-2xl border",
-                      card_icon_wrap_class(index)
-                    ]}>
+                    <span
+                      :if={is_nil(thumbnail(row.course))}
+                      class={[
+                        "absolute bottom-5 left-5 grid h-14 w-14 place-items-center rounded-2xl border",
+                        card_icon_wrap_class(index)
+                      ]}
+                    >
                       <.icon name="hero-academic-cap" class="h-7 w-7" />
                     </span>
 
                     <div class={[
                       "absolute bottom-3 right-4 flex items-end gap-2",
-                      card_number_class(index)
+                      if(thumbnail(row.course), do: "text-white", else: card_number_class(index))
                     ]}>
                       <.icon name="hero-chart-bar" class="h-6 w-6 opacity-70" />
                       <span class="text-5xl font-black leading-none opacity-15">
@@ -426,6 +440,9 @@ defmodule WasomiWeb.AdminLive.Courses do
       )
     ]
   end
+
+  defp thumbnail(%{thumbnail_key: key}) when is_binary(key) and key != "", do: key
+  defp thumbnail(_course), do: nil
 
   defp card_header_class(index) do
     case rem(index - 1, 3) do

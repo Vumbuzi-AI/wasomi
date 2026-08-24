@@ -3,7 +3,13 @@ defmodule WasomiWeb.AdminLive.Components.ResourceUploader do
 
   alias Wasomi.Storage
 
-  @accepted_extensions ~w(.pdf .zip .pptx .docx)
+  # Lecture resources are PDF only. A PDF renders inline in the learner's
+  # reader (see CoursePlayerLive's `pdf_resource?/1`), can be read for text by
+  # `Wasomi.Assessments.LectureResourceReader` to drive study guides and quiz
+  # generation, and carries no per-format viewer to maintain. Images, slide
+  # decks, archives and Word documents satisfy none of those, so they are
+  # rejected here rather than accepted and then half-supported downstream.
+  @accepted_extensions ~w(.pdf)
   @max_file_size 50 * 1_000_000
 
   def configure_upload(socket, lecture_id) do
@@ -33,7 +39,7 @@ defmodule WasomiWeb.AdminLive.Components.ResourceUploader do
         <.icon name="hero-cloud-arrow-up" class="mx-auto h-9 w-9 text-primary" />
         <h3 class="mt-3 font-semibold text-ink">{@title}</h3>
         <p class="mt-1 text-sm text-muted">{@description}</p>
-        <p class="mt-2 text-xs text-muted">PDF, ZIP, PPTX or DOCX · up to 50 MB each</p>
+        <p class="mt-2 text-xs text-muted">PDF only · up to 50 MB each</p>
         <label class="mt-4 inline-flex cursor-pointer items-center gap-2 rounded-full bg-ink px-4 py-2.5 text-sm font-medium text-white transition hover:bg-primary">
           <.icon name="hero-folder-open" class="h-4 w-4" /> Choose files
           <.live_file_input upload={@upload_config} class="sr-only" />
@@ -136,9 +142,6 @@ defmodule WasomiWeb.AdminLive.Components.ResourceUploader do
     expected =
       case Path.extname(filename) |> String.downcase() do
         ".pdf" -> ["application/pdf"]
-        ".zip" -> ["application/zip", "application/x-zip-compressed"]
-        ".pptx" -> ["application/vnd.openxmlformats-officedocument.presentationml.presentation"]
-        ".docx" -> ["application/vnd.openxmlformats-officedocument.wordprocessingml.document"]
         _ -> []
       end
 
@@ -153,9 +156,6 @@ defmodule WasomiWeb.AdminLive.Components.ResourceUploader do
   defp file_icon(filename) do
     case Path.extname(filename) |> String.downcase() do
       ".pdf" -> "hero-document-text"
-      ".zip" -> "hero-archive-box"
-      ".pptx" -> "hero-presentation-chart-bar"
-      ".docx" -> "hero-document"
       _ -> "hero-paper-clip"
     end
   end
@@ -163,9 +163,11 @@ defmodule WasomiWeb.AdminLive.Components.ResourceUploader do
   defp upload_error_to_string(:too_large), do: "Files must be 50 MB or smaller."
 
   defp upload_error_to_string(:not_accepted),
-    do: "Only PDF, ZIP, PPTX and DOCX files are accepted."
+    do: "Only PDF files are accepted — images, slides, archives and Word documents are not."
 
-  defp upload_error_to_string(:unsupported_content_type), do: "That file type is not supported."
+  defp upload_error_to_string(:unsupported_content_type),
+    do: "That file is not a PDF. Lecture resources must be PDFs."
+
   defp upload_error_to_string(:document_too_large), do: "Files must be 50 MB or smaller."
   defp upload_error_to_string(:forbidden), do: "You are not allowed to upload resources."
 
@@ -179,3 +181,4 @@ defmodule WasomiWeb.AdminLive.Components.ResourceUploader do
   defp upload_error_to_string(message) when is_binary(message), do: message
   defp upload_error_to_string(_), do: "Could not prepare this upload."
 end
+

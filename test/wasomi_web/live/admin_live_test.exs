@@ -812,6 +812,29 @@ defmodule WasomiWeb.AdminLiveTest do
         ])
 
       assert {:error, [[_, %{reason: :not_accepted}]]} = render_upload(resources_no_ext, "lesson")
+
+      # 3. An image. Lecture resources are PDF only: an image can't be read for
+      # text by the study-guide/quiz generators and has no inline reader.
+      resources_image =
+        file_input(view, "#lecture-resources-form", :resources, [
+          %{name: "diagram.png", content: "fake-png-bytes", type: "image/png"}
+        ])
+
+      assert {:error, [[_, %{reason: :not_accepted}]]} =
+               render_upload(resources_image, "diagram.png")
+
+      # 4. A Word document — accepted before this became PDF-only.
+      resources_docx =
+        file_input(view, "#lecture-resources-form", :resources, [
+          %{
+            name: "handout.docx",
+            content: "fake-docx-bytes",
+            type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          }
+        ])
+
+      assert {:error, [[_, %{reason: :not_accepted}]]} =
+               render_upload(resources_docx, "handout.docx")
     end
 
     test "cancelling a resource upload triggers delete_upload/2 path", %{conn: conn} do
@@ -1028,3 +1051,4 @@ defmodule WasomiWeb.AdminLiveTest.StorageMock do
     :ok
   end
 end
+

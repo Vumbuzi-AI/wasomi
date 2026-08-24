@@ -51,6 +51,9 @@ defmodule Wasomi.Assessments.StudyGuide do
     belongs_to :module, Wasomi.Catalog.CourseModule, foreign_key: :module_id
     belongs_to :lecture, Wasomi.Catalog.Lecture, foreign_key: :lecture_id
 
+    belongs_to :lecture_resource, Wasomi.Catalog.LectureResource,
+      foreign_key: :lecture_resource_id
+
     has_many :study_guide_sections, Wasomi.Assessments.StudyGuideSection,
       preload_order: [asc: :position]
 
@@ -80,7 +83,8 @@ defmodule Wasomi.Assessments.StudyGuide do
       :generated_at,
       :user_id,
       :module_id,
-      :lecture_id
+      :lecture_id,
+      :lecture_resource_id
     ])
     |> cast_embed(:key_terms, with: &term_changeset/2)
     |> update_change(:focus, &trim_focus/1)
@@ -92,6 +96,7 @@ defmodule Wasomi.Assessments.StudyGuide do
     |> assoc_constraint(:user)
     |> assoc_constraint(:module)
     |> assoc_constraint(:lecture)
+    |> assoc_constraint(:lecture_resource)
     |> check_constraint(:module_id, name: :study_guides_scope_must_be_exclusive)
     |> check_constraint(:status, name: :study_guides_status_must_be_valid)
     |> check_constraint(:style, name: :study_guides_style_must_be_valid)
@@ -122,18 +127,31 @@ defmodule Wasomi.Assessments.StudyGuide do
 
   defp trim_focus(focus), do: focus
 
-  # Mirrors `Wasomi.Assessments.SmartTest.validate_scope/1` — exactly one of
-  # module_id/lecture_id, never both, never neither.
+  # Mirrors `Wasomi.Assessments.SmartTest.validate_scope/1` in spirit, widened to
+  # three mutually exclusive scopes: exactly one of module_id / lecture_id /
+  # lecture_resource_id. A guide over one specific PDF is a different document
+  # from a guide over the lesson that PDF belongs to, so the narrowest scope a
+  # learner picks is the one stored — never both.
   defp validate_scope(changeset) do
-    case {get_field(changeset, :module_id), get_field(changeset, :lecture_id)} do
-      {nil, nil} ->
-        add_error(changeset, :module_id, "must set either a module or a lecture")
+    scopes = [:module_id, :lecture_id, :lecture_resource_id]
+    set = Enum.filter(scopes, &(not is_nil(get_field(changeset, &1))))
 
-      {module_id, lecture_id} when not is_nil(module_id) and not is_nil(lecture_id) ->
-        add_error(changeset, :lecture_id, "cannot be set together with a module")
-
-      _ ->
+    case set do
+      [_one] ->
         changeset
+
+      [] ->
+        add_error(
+          changeset,
+          :module_id,
+          "must set exactly one of a module, a lecture, or a lecture resource"
+        )
+
+      [_first | rest] ->
+        Enum.reduce(rest, changeset, fn field, changeset ->
+          add_error(changeset, field, "cannot be set together with another scope")
+        end)
     end
   end
 end
+

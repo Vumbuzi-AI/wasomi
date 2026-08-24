@@ -485,6 +485,58 @@ defmodule Wasomi.CatalogTest do
       assert Enum.map(module.lectures, & &1.position) == [1, 2, 3]
     end
 
+    test "an uploaded resource that is not a PDF is rejected" do
+      lecture = lecture_fixture()
+
+      base = %{
+        kind: :document,
+        position: 1,
+        lecture_id: lecture.id,
+        storage_key: "lectures/diagram.png",
+        byte_size: 100
+      }
+
+      image =
+        Wasomi.Catalog.LectureResource.changeset(
+          %Wasomi.Catalog.LectureResource{},
+          Map.merge(base, %{name: "diagram.png", content_type: "image/png"})
+        )
+
+      refute image.valid?
+
+      assert "must be a PDF — lecture resources only accept PDFs" in errors_on(image).content_type
+
+      # No content type from the browser: the filename decides, so a .pdf still
+      # gets through and anything else does not.
+      no_type_pdf =
+        Wasomi.Catalog.LectureResource.changeset(
+          %Wasomi.Catalog.LectureResource{},
+          Map.merge(base, %{name: "notes.pdf", content_type: nil})
+        )
+
+      assert no_type_pdf.valid?
+
+      no_type_other =
+        Wasomi.Catalog.LectureResource.changeset(
+          %Wasomi.Catalog.LectureResource{},
+          Map.merge(base, %{name: "handout.docx", content_type: nil})
+        )
+
+      refute no_type_other.valid?
+
+      # A link is not an upload, so the PDF rule doesn't apply to it.
+      link =
+        Wasomi.Catalog.LectureResource.changeset(%Wasomi.Catalog.LectureResource{}, %{
+          kind: :link,
+          name: "Further reading",
+          url: "https://example.com/reading",
+          position: 1,
+          lecture_id: lecture.id
+        })
+
+      assert link.valid?
+    end
+
     test "replaces lecture resources and questions atomically" do
       lecture = lecture_fixture()
       old_resource = lecture_resource_fixture(lecture_id: lecture.id)
@@ -1276,3 +1328,4 @@ defmodule Wasomi.CatalogTest do
     end
   end
 end
+

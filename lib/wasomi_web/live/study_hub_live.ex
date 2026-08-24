@@ -28,8 +28,10 @@ defmodule WasomiWeb.StudyHubLive do
   alias Wasomi.Assessments.Workers.GenerateSmartTestWorker
   alias Wasomi.Assessments.Workers.GenerateStudyGuideWorker
   alias Wasomi.Accounts
+  alias Wasomi.Catalog
   alias Wasomi.Catalog.CourseModule
   alias Wasomi.Catalog.Lecture
+  alias Wasomi.Catalog.LectureResource
   alias Wasomi.Enrollments
 
   require Logger
@@ -71,7 +73,7 @@ defmodule WasomiWeb.StudyHubLive do
 
     initial_params =
       if session["embedded"] == true,
-        do: Map.take(session, ["course", "module", "mode"]),
+        do: Map.take(session, ["course", "module", "mode", "scope", "lecture", "resource"]),
         else: params
 
     socket =
@@ -136,8 +138,29 @@ defmodule WasomiWeb.StudyHubLive do
     Enum.find(module.lectures, &(to_string(&1.id) == id))
   end
 
+  # A single resource within the module. Fetched by id rather than found in an
+  # already-loaded list (resources aren't preloaded on the enrollment's course),
+  # so the id is confirmed against this module's own lectures before it is
+  # trusted — otherwise the query param would read any course's resource.
+  defp resolve_scope_selection(module, %{"scope" => "resource", "resource" => id}) do
+    lecture_ids = MapSet.new(module.lectures, & &1.id)
+
+    with {resource_id, ""} <- Integer.parse(to_string(id)),
+         %LectureResource{} = resource <- Catalog.get_lecture_resource(resource_id),
+         true <- MapSet.member?(lecture_ids, resource.lecture_id) do
+      resource
+    else
+      _ -> nil
+    end
+  end
+
   defp resolve_scope_selection(_module, _params), do: nil
 
+  # A single resource only has study-guide material to offer: flashcard and
+  # practice sets are keyed to a module or lecture, and a Smart Test over one
+  # handout isn't a test. Any other mode requested against a resource scope
+  # falls back to the guide rather than crashing in `load_content/1`.
+  defp resolve_mode(%LectureResource{}, _params), do: :study_guide
   defp resolve_mode(_scope, %{"mode" => "timed_quiz"}), do: :timed_quiz
   defp resolve_mode(_scope, %{"mode" => "flashcards"}), do: :flashcards
   defp resolve_mode(_scope, %{"mode" => "practice"}), do: :practice
@@ -170,6 +193,7 @@ defmodule WasomiWeb.StudyHubLive do
 
   defp scope_key(%CourseModule{id: id}), do: {:module, id}
   defp scope_key(%Lecture{id: id}), do: {:lecture, id}
+  defp scope_key(%LectureResource{id: id}), do: {:resource, id}
   defp scope_key(nil), do: nil
 
   # Flashcards are *not* generated on arrival: a `:pending` set renders the
@@ -294,6 +318,28 @@ defmodule WasomiWeb.StudyHubLive do
         %{course: course.slug, module: module.id, scope: "lecture", lecture: lecture_id},
         socket.assigns.mode
       )
+
+    {:noreply, navigate_study(socket, params)}
+  end
+
+  # A resource scope always lands on the study guide — see `resolve_mode/2` for
+  # why it is the only mode a single document supports — so the mode is set here
+  # rather than carried over from whatever the learner was last doing.
+  @impl true
+  def handle_event(
+        "select-scope",
+        %{"scope" => "resource", "resource_id" => resource_id},
+        socket
+      ) do
+    %{selected_course: course, selected_module: module} = socket.assigns
+
+    params = %{
+      course: course.slug,
+      module: module.id,
+      scope: "resource",
+      resource: resource_id,
+      mode: "study_guide"
+    }
 
     {:noreply, navigate_study(socket, params)}
   end
@@ -719,6 +765,14 @@ defmodule WasomiWeb.StudyHubLive do
 
   defp navigate_study(socket, params), do: push_patch(socket, to: ~p"/learn/study?#{params}")
 
+  defp scope_params(%{
+         selected_course: course,
+         selected_module: module,
+         scope: %LectureResource{} = resource
+       }) do
+    %{course: course.slug, module: module.id, scope: "resource", resource: resource.id}
+  end
+
   defp scope_params(%{selected_course: course, selected_module: module, scope: %Lecture{} = l}) do
     %{course: course.slug, module: module.id, scope: "lecture", lecture: l.id}
   end
@@ -1027,7 +1081,12 @@ defmodule WasomiWeb.StudyHubLive do
       {capture_guard_attrs(@current_user)}
     >
       <.student_layout active={:study} current_user={@current_user} embedded={@embedded?}>
-        <div class={if @embedded?, do: "w-full p-5 lg:p-8", else: "w-full px-5 py-8 lg:px-8"}>
+        <div
+          id="study-hub-scroll-boundary"
+          phx-hook="ScrollContainerOnKeyChange"
+          data-scroll-key={study_hub_scroll_key(assigns)}
+          class={if @embedded?, do: "w-full p-5 lg:p-8", else: "w-full px-5 py-8 lg:px-8"}
+        >
           <h1 :if={!@embedded?} class="text-3xl font-semibold tracking-tight text-ink sm:text-4xl">
             Study
           </h1>
@@ -1098,6 +1157,17 @@ defmodule WasomiWeb.StudyHubLive do
       </.student_layout>
     </div>
     """
+  end
+
+  defp study_hub_scroll_key(assigns) do
+    [
+      assigns.step,
+      assigns.selected_course && assigns.selected_course.id,
+      assigns.selected_module && assigns.selected_module.id,
+      scope_key(assigns.scope),
+      assigns.mode
+    ]
+    |> Enum.map_join(":", &inspect/1)
   end
 
   attr :enrollments, :list, required: true
@@ -1345,14 +1415,17 @@ defmodule WasomiWeb.StudyHubLive do
 
   defp scope_label(%CourseModule{}), do: "Whole module"
   defp scope_label(%Lecture{title: title}), do: title
+  defp scope_label(%LectureResource{name: name}), do: name
 
   # The Smart Test and Study guide headers name the material itself rather than
   # "Whole module", since each reads as the test's (or the document's) title.
   defp material_label(%CourseModule{title: title}), do: title
   defp material_label(%Lecture{title: title}), do: title
+  defp material_label(%LectureResource{name: name}), do: name
 
   defp mode_label(:flashcards), do: "Flashcards"
   defp mode_label(:practice), do: "Extra practice"
   defp mode_label(:study_guide), do: "Study guide"
   defp mode_label(:timed_quiz), do: "Smart Test"
 end
+

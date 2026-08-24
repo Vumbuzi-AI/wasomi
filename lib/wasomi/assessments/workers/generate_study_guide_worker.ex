@@ -72,13 +72,19 @@ defmodule Wasomi.Assessments.Workers.GenerateStudyGuideWorker do
   defp scope(%{module_id: module_id}) when not is_nil(module_id), do: {:module, module_id}
   defp scope(%{lecture_id: lecture_id}) when not is_nil(lecture_id), do: {:lecture, lecture_id}
 
+  defp scope(%{lecture_resource_id: resource_id}) when not is_nil(resource_id),
+    do: {:resource, resource_id}
+
   # Only used to title the document. Safe to fetch unguarded: the scope rows
   # cascade-delete their guides, so a guide that loaded still has its scope.
   defp scope_label(%{module_id: module_id}) when not is_nil(module_id),
     do: Catalog.get_course_module!(module_id).title
 
-  defp scope_label(%{lecture_id: lecture_id}),
+  defp scope_label(%{lecture_id: lecture_id}) when not is_nil(lecture_id),
     do: Catalog.get_lecture!(lecture_id).title
+
+  defp scope_label(%{lecture_resource_id: resource_id}),
+    do: Catalog.get_lecture_resource(resource_id).name
 
   defp study_guide_generator,
     do:
@@ -88,3 +94,4 @@ defmodule Wasomi.Assessments.Workers.GenerateStudyGuideWorker do
         Wasomi.Assessments.StudyGuideGenerator.OpenAI
       )
 end
+

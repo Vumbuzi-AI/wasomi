@@ -50,6 +50,91 @@ defmodule Wasomi.LearningTest do
     end
   end
 
+  describe "resource reading marks" do
+    setup do
+      user = user_fixture()
+      course = course_fixture(status: :published)
+      module = course_module_fixture(course_id: course.id, position: 1)
+      enrollment_fixture(user_id: user.id, course_id: course.id, status: :active)
+
+      reading_lecture =
+        lecture_fixture(
+          module_id: module.id,
+          position: 1,
+          duration_seconds: nil,
+          video_asset_id: nil,
+          video_provider: nil
+        )
+
+      %{user: user, course: course, module: module, reading_lecture: reading_lecture}
+    end
+
+    test "reading every PDF completes a reading-only lecture", context do
+      first = lecture_resource_fixture(lecture_id: context.reading_lecture.id, position: 1)
+      second = lecture_resource_fixture(lecture_id: context.reading_lecture.id, position: 2)
+
+      assert {:ok, []} = Learning.mark_resource_read(context.user, first)
+
+      # One still outstanding, so the lecture is untouched.
+      assert is_nil(Learning.get_lecture_progress(context.user, context.reading_lecture))
+
+      assert {:ok, events} = Learning.mark_resource_read(context.user, second)
+      assert Enum.any?(events, &match?({:lecture_completed, _}, &1))
+
+      assert %{status: :completed} =
+               Learning.get_lecture_progress(context.user, context.reading_lecture)
+    end
+
+    test "marking the same resource read twice is a no-op, not an error", context do
+      resource = lecture_resource_fixture(lecture_id: context.reading_lecture.id)
+
+      assert {:ok, _events} = Learning.mark_resource_read(context.user, resource)
+      assert {:ok, _events} = Learning.mark_resource_read(context.user, resource)
+
+      assert Learning.read_resource_ids_for_course(context.user, context.course) ==
+               MapSet.new([resource.id])
+    end
+
+    test "reading the handouts does not complete a lecture that has a video", context do
+      video_lecture =
+        lecture_fixture(module_id: context.module.id, position: 2, duration_seconds: 100)
+
+      resource = lecture_resource_fixture(lecture_id: video_lecture.id)
+
+      assert {:ok, []} = Learning.mark_resource_read(context.user, resource)
+      assert is_nil(Learning.get_lecture_progress(context.user, video_lecture))
+    end
+
+    test "un-marking removes the read mark but keeps the lecture completed", context do
+      resource = lecture_resource_fixture(lecture_id: context.reading_lecture.id)
+
+      assert {:ok, _events} = Learning.mark_resource_read(context.user, resource)
+      assert :ok = Learning.unmark_resource_read(context.user, resource)
+
+      assert Learning.read_resource_ids_for_course(context.user, context.course) ==
+               MapSet.new()
+
+      assert %{status: :completed} =
+               Learning.get_lecture_progress(context.user, context.reading_lecture)
+    end
+
+    test "a learner without an active enrollment cannot mark a resource read", context do
+      outsider = user_fixture()
+      resource = lecture_resource_fixture(lecture_id: context.reading_lecture.id)
+
+      assert {:error, :forbidden} = Learning.mark_resource_read(outsider, resource)
+    end
+
+    test "read_resource_ids_for_course/2 is scoped to the course asked about", context do
+      resource = lecture_resource_fixture(lecture_id: context.reading_lecture.id)
+      assert {:ok, _events} = Learning.mark_resource_read(context.user, resource)
+
+      other_course = course_fixture(status: :published)
+
+      assert Learning.read_resource_ids_for_course(context.user, other_course) == MapSet.new()
+    end
+  end
+
   describe "record_progress/3" do
     setup do
       user = user_fixture()
@@ -439,3 +524,4 @@ defmodule Wasomi.LearningTest do
     quiz
   end
 end
+

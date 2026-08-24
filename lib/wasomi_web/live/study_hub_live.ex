@@ -1428,4 +1428,3 @@ defmodule WasomiWeb.StudyHubLive do
   defp mode_label(:study_guide), do: "Study guide"
   defp mode_label(:timed_quiz), do: "Smart Test"
 end
-

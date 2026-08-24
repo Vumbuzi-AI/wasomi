@@ -181,4 +181,3 @@ defmodule WasomiWeb.AdminLive.Components.ResourceUploader do
   defp upload_error_to_string(message) when is_binary(message), do: message
   defp upload_error_to_string(_), do: "Could not prepare this upload."
 end
-

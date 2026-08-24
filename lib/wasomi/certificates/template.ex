@@ -26,7 +26,6 @@ defmodule Wasomi.Certificates.Template do
 
   attr :learner_name, :string, required: true
   attr :title, :string, required: true
-  attr :type_label, :string, required: true
   attr :issued_on, :string, required: true
   attr :serial_number, :string, required: true
   attr :issuer_name, :string, default: "Wasomi Business Institute"
@@ -50,6 +49,8 @@ defmodule Wasomi.Certificates.Template do
   attr :email, :string, default: nil
   attr :website, :string, default: nil
   attr :socials, :list, default: []
+  attr :icon_strip_data_uri, :string, default: nil
+  attr :seal_data_uri, :string, default: nil
 
   # Supply a `data:image/png;base64,...` URI to print a real, scannable QR in
   # place of the CSS placeholder. Nothing else needs to change.
@@ -89,7 +90,7 @@ defmodule Wasomi.Certificates.Template do
             display: flex;
             width: 100vw;
             height: 100vh;
-            padding: 3.8vw 4.2vw;
+            padding: 4.6vw 5vw 2.4vw;
             overflow: hidden;
           }
 
@@ -98,7 +99,7 @@ defmodule Wasomi.Certificates.Template do
             display: flex;
             flex-direction: column;
             flex-shrink: 0;
-            width: 23vw;
+            width: 26vw;
           }
           .logo { width: 15vw; object-fit: contain; object-position: left top; }
           /* Wordmark fallback when no logo file is configured or readable. */
@@ -111,87 +112,23 @@ defmodule Wasomi.Certificates.Template do
             color: #002c6c;
           }
 
-          /* Embossed gold seal, drawn entirely in CSS.
-             - the rim is a repeating conic gradient, which reads as the
-               scalloped/serrated edge of a foil seal
-             - the face is an off-centre radial gradient, so the highlight sits
-               up and to the left like light falling on raised foil
-             - inset shadows supply the emboss; the outer shadow lifts it off
-               the page */
-          .seal-wrap { margin: auto 0; }
-          .seal {
-            position: relative;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            width: 12.5vw;
-            height: 12.5vw;
-            border-radius: 50%;
-            background: repeating-conic-gradient(
-              from 0deg,
-              #8a6a1c 0deg 5deg,
-              #f2d886 5deg 10deg
-            );
-            box-shadow: 0 0.12vw 0.45vw rgba(0, 0, 0, 0.28);
-          }
-          .seal::before {
-            content: "";
-            position: absolute;
-            inset: 0.75vw;
-            border-radius: 50%;
-            background: radial-gradient(
-              circle at 34% 28%,
-              #fdf3c4 0%,
-              #ecd074 34%,
-              #c9a333 68%,
-              #8f6d1d 100%
-            );
-            box-shadow:
-              inset 0 0 0.55vw rgba(255, 255, 255, 0.6),
-              inset 0 -0.22vw 0.55vw rgba(0, 0, 0, 0.3);
-          }
-          .seal::after {
-            content: "";
-            position: absolute;
-            inset: 1.65vw;
-            border: 0.1vw solid rgba(94, 71, 15, 0.45);
-            border-radius: 50%;
-          }
-          .seal-inner {
-            position: relative;
-            z-index: 1;
-            text-align: center;
-            color: #5e470f;
-          }
-          .seal-initials {
-            font-size: 3vw;
-            font-weight: 800;
-            line-height: 1;
-            letter-spacing: 0.12vw;
-            text-shadow: 0 0.05vw 0 rgba(255, 255, 255, 0.5);
-          }
-          .seal-caption {
-            margin-top: 0.25vw;
-            font-size: 0.62vw;
-            font-weight: 700;
-            letter-spacing: 0.14vw;
-            text-transform: uppercase;
-          }
-
-          .contact { font-size: 0.86vw; line-height: 1.65; color: #4a4a4a; }
+          .seal-wrap { margin: 7vw 0 4vw; }
+          .seal { display: block; width: 17vw; height: 17vw; object-fit: contain; }
+          .contact { font-size: 1.3vw; line-height: 1.7; color: #4a4a4a; }
           .contact-org {
-            margin-bottom: 0.15vw;
-            font-size: 0.92vw;
+            margin-bottom: 0.25vw;
+            font-size: 1.4vw;
             font-weight: 700;
             color: #002c6c;
           }
-          .contact-group { margin-top: 0.9vw; }
+          .contact-group { margin-top: 1.1vw; }
           .contact-key { font-weight: 700; color: #f26334; }
           .contact-socials {
-            margin-top: 0.9vw;
-            font-size: 0.86vw;
+            margin-top: 1.1vw;
+            font-size: 1.3vw;
             color: #1f5fa9;
           }
+          .contact-socials a { color: inherit; text-decoration: none; }
 
           /* ---------- Main column ---------- */
           .main {
@@ -207,7 +144,7 @@ defmodule Wasomi.Certificates.Template do
             flex-direction: column;
             align-items: flex-end;
           }
-          .qr { width: 8.6vw; height: 8.6vw; display: block; image-rendering: pixelated; }
+          .qr { width: 7.6vw; height: 7.6vw; display: block; image-rendering: pixelated; }
           /* CSS stand-in for a real QR: a fine checkerboard for the data area
              plus the three corner finder squares that make a QR legible as one
              at a glance. Swap in `qr_data_uri` for a scannable code. */
@@ -248,7 +185,7 @@ defmodule Wasomi.Certificates.Template do
           .top-rule {
             flex-shrink: 0;
             height: 0.42vw;
-            margin: 1.1vw 0 0;
+            margin: 1.1vw 0 0.4vw;
             background: #f26334;
           }
 
@@ -259,16 +196,8 @@ defmodule Wasomi.Certificates.Template do
             display: flex;
             flex: 1;
             flex-direction: column;
-            justify-content: center;
+            justify-content: flex-start;
             min-width: 0;
-          }
-          .eyebrow {
-            margin-bottom: 0.5vw;
-            font-size: 0.92vw;
-            font-weight: 700;
-            letter-spacing: 0.22em;
-            text-transform: uppercase;
-            color: #7a7a7a;
           }
           .headline {
             margin: 0;
@@ -277,7 +206,7 @@ defmodule Wasomi.Certificates.Template do
             line-height: 1.1;
             letter-spacing: -0.03vw;
             color: #f26334;
-          }          .lede { margin-top: 0.5vw; font-size: 1.55vw; font-weight: 400; color: #3d3d3d; }
+          }          .lede { margin-top: 0.5vw; font-size: 1.85vw; font-weight: 400; color: #3d3d3d; }
           .name {
             margin-top: 1.3vw;
             font-size: 3.9vw;
@@ -287,7 +216,7 @@ defmodule Wasomi.Certificates.Template do
             color: #002c6c;
             overflow-wrap: break-word;
           }
-          .citation { margin-top: 1.3vw; font-size: 1.55vw; font-weight: 400; color: #3d3d3d; }
+          .citation { margin-top: 1.3vw; font-size: 1.85vw; font-weight: 400; color: #3d3d3d; }
           .award {
             margin-top: 0.55vw;
             font-size: 2.35vw;
@@ -299,13 +228,19 @@ defmodule Wasomi.Certificates.Template do
           .issued { margin-top: 1.15vw; font-size: 1.55vw; font-weight: 400; color: #3d3d3d; }
 
           /* ---------- Signatures ---------- */
+          /* 80% (not 100%) so the second signatory's right edge lines up
+             with the end of the headline above — "Certificate of
+             Completion" is a fixed string, always this same width, so this
+             holds for every real certificate. */
           .signatures {
             display: flex;
             flex-shrink: 0;
-            gap: 4.5vw;
+            justify-content: space-between;
+            width: 80%;
+            gap: 4vw;
             margin-top: 1.6vw;
           }
-          .signatory { width: 15vw; text-align: center; }
+          .signatory { flex: 0 1 auto; min-width: 12vw; text-align: center; }
           /* Fixed-height slot so the orange rules line up across both
              signatories whether one has an uploaded image and the other falls
              back to cursive type. */
@@ -313,24 +248,43 @@ defmodule Wasomi.Certificates.Template do
             display: flex;
             align-items: flex-end;
             justify-content: center;
-            height: 3.9vw;
+            height: 3vw;
           }
-          .signature-image { max-width: 100%; max-height: 3.9vw; object-fit: contain; }
+          /* `width: 100%` (not the image's own intrinsic size) so an
+             uploaded signature always spans the same width as the printed
+             name/rule below it — otherwise a narrow scan under a long name
+             reads as a small, disconnected chip rather than a signature. */
+          .signature-image { width: 100%; height: auto; max-height: 3vw; object-fit: contain; }
           .signature-name {
             font-family: "Dancing Script", cursive;
-            font-size: 2.5vw;
+            font-size: 1.9vw;
             font-weight: 600;
             line-height: 1.1;
+            white-space: nowrap;
             color: #1a1a1a;
           }
-          .signature-rule { height: 0.16vw; margin-bottom: 0.4vw; background: #f26334; }
+          .signature-rule {
+            height: 0.16vw;
+            margin-top: 0.4vw;
+            margin-bottom: 0.4vw;
+            background: #f26334;
+          }
           .signatory-name {
             font-size: 1.3vw;
             font-weight: 700;
             line-height: 1.25;
             color: #002c6c;
           }
-          .signatory-title { font-size: 1.05vw; font-weight: 400; color: #4a4a4a; }
+          .signatory-title { font-size: 1.05vw; font-weight: 400; color: #002c6c; }
+
+          .icon-strip {
+            flex-shrink: 0;
+            width: 100%;
+            height: auto;
+            margin-top: 0.6vw;
+            object-fit: contain;
+            object-position: left;
+          }
         </style>
       </head>
       <body>
@@ -340,12 +294,7 @@ defmodule Wasomi.Certificates.Template do
             <div :if={!@logo_data_uri} class="logo-wordmark">{@issuer_name}</div>
 
             <div class="seal-wrap">
-              <div class="seal">
-                <div class="seal-inner">
-                  <div class="seal-initials">{initials(@issuer_name)}</div>
-                  <div class="seal-caption">Certified</div>
-                </div>
-              </div>
+              <img :if={@seal_data_uri} src={@seal_data_uri} alt="" class="seal" />
             </div>
 
             <div class="contact">
@@ -359,7 +308,14 @@ defmodule Wasomi.Certificates.Template do
               </div>
 
               <div :if={@socials != []} class="contact-socials">
-                {Enum.join(@socials, " | ")}
+                <span :for={{{label, url}, index} <- Enum.with_index(@socials)}>
+                  <span :if={index > 0}> | </span><a
+                    :if={url}
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >{label}</a><span :if={!url}>{label}</span>
+                </span>
               </div>
             </div>
           </aside>
@@ -378,7 +334,6 @@ defmodule Wasomi.Certificates.Template do
             <div class="top-rule"></div>
 
             <div class="content">
-              <div class="eyebrow">{@type_label}</div>
               <h1 class="headline">{@headline}</h1>
               <div class="lede">{@presented_line}</div>
               <div class="name">{@learner_name}</div>
@@ -390,17 +345,13 @@ defmodule Wasomi.Certificates.Template do
             <div :if={@signatory_name} class="signatures">
               <div class="signatory">
                 <div class="signature-slot">
-                  <img
-                    :if={@signature_url}
-                    src={@signature_url}
-                    alt=""
-                    class="signature-image"
-                  />
+                  <img :if={@signature_url} src={@signature_url} alt="" class="signature-image" />
                   <div :if={!@signature_url} class="signature-name">{@signatory_name}</div>
                 </div>
                 <div class="signature-rule"></div>
                 <div class="signatory-name">{@signatory_name}</div>
                 <div class="signatory-title">{@signatory_title || "Authorized signatory"}</div>
+                <div class="signature-rule"></div>
               </div>
 
               <div :if={@signatory_two_name} class="signatory">
@@ -420,20 +371,15 @@ defmodule Wasomi.Certificates.Template do
                 <div class="signatory-title">
                   {@signatory_two_title || "Authorized signatory"}
                 </div>
+                <div class="signature-rule"></div>
               </div>
             </div>
+
+            <img :if={@icon_strip_data_uri} src={@icon_strip_data_uri} alt="" class="icon-strip" />
           </section>
         </main>
       </body>
     </html>
     """
-  end
-
-  defp initials(issuer_name) do
-    issuer_name
-    |> to_string()
-    |> String.split(~r/\s+/, trim: true)
-    |> Enum.map_join("", &String.first/1)
-    |> String.upcase()
   end
 end

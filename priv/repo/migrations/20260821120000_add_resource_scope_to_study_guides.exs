@@ -24,4 +24,3 @@ defmodule Wasomi.Repo.Migrations.AddResourceScopeToStudyGuides do
            )
   end
 end
-

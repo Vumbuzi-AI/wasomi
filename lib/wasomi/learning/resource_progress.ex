@@ -32,4 +32,3 @@ defmodule Wasomi.Learning.ResourceProgress do
     |> unique_constraint([:user_id, :lecture_resource_id])
   end
 end
-

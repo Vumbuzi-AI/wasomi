@@ -524,4 +524,3 @@ defmodule Wasomi.LearningTest do
     quiz
   end
 end
-

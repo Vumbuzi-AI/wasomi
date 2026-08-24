@@ -15,12 +15,15 @@ config :wasomi, Wasomi.Repo,
 # Store quiz-generation source PDFs on disk locally so this works without R2.
 config :wasomi, assessments_storage: Wasomi.Assessments.Storage.Local
 
-# Skip ChromicPDF's supervision tree entry in dev. Chrome's sandbox fails to
-# start on some Linux hosts (unprivileged user namespaces disabled), and the
-# session pool then crash-loops the browser on every boot. Certificate PDF
-# rendering is unavailable while this is false; flip it to true, or delete this
-# line, once a working Chrome/Chromium is on the machine.
-config :wasomi, :start_chromic_pdf, false
+# Chrome's sandbox fails to start on some Linux dev hosts (unprivileged user
+# namespaces disabled), which crash-loops the browser on every boot unless
+# --no-sandbox is passed. That flag weakens Chrome's process isolation, which
+# is only acceptable because ChromicPDF only ever feeds it certificate HTML
+# this app itself generated — never third-party or user-supplied HTML — and
+# only in dev, never prod. If ChromicPDF still won't boot on your machine,
+# set :start_chromic_pdf back to false to skip its supervision tree entry.
+config :wasomi, :start_chromic_pdf, true
+config :wasomi, chromic_pdf_options: [no_sandbox: true]
 
 # For development, we disable any cache and enable
 # debugging and code reloading.

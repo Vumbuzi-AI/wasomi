@@ -12,7 +12,6 @@ defmodule Wasomi.CatalogFixtures do
 
   @certificate_keys [
     :certificate_enabled,
-    :certificate_issuer_name,
     :certificate_signatory_name,
     :certificate_signatory_title,
     :certificate_signature_key

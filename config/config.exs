@@ -34,19 +34,24 @@ config :wasomi,
   cloudflare_api_url: "https://api.cloudflare.com",
   cloudflare_stream_origin: "http://localhost:4000"
 
-# Organisation details printed down the left rail of every certificate. The
-# logo is read from priv/static and inlined as a data URI at render time.
-# Contact details are intentionally left unset: an unset key renders nothing,
-# which is the right default for a document nobody should be able to
-# accidentally issue with a placeholder address on it. Fill these in with the
-# institution's real details to switch the contact block on.
+# Organisation details printed down the left rail of every certificate.
 config :wasomi, :certificate_branding,
-  logo_path: "images/logo.png",
-  address_lines: [],
-  phone: nil,
-  email: nil,
-  website: nil,
-  socials: []
+  issuer_name: "GS1 Kenya",
+  logo_path: "images/gs1ke-logo.png",
+  address_lines: [
+    "5th Floor, Nextgen Mall, Mombasa Road",
+    "P.O. Box 3243-00200",
+    "Nairobi, Kenya"
+  ],
+  phone: "+254 709-226-000",
+  email: "info@gs1kenya.org",
+  website: "www.gs1kenya.org",
+  socials: [
+    {"Facebook", "https://www.facebook.com/gs1kenya.org/"},
+    {"Twitter", "https://x.com/gs1Kenya"},
+    {"LinkedIn", "https://ke.linkedin.com/company/gs1-kenya"},
+    {"YouTube", "https://m.youtube.com/channel/UChMpKZMCVfOuWWc-a-Sb2YQ"}
+  ]
 
 # ExAws defaults to :hackney; reuse the app's Finch pool instead so hackney
 # (and its `quic` dependency) stays out of the dependency tree.

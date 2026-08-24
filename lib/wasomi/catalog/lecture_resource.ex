@@ -110,4 +110,3 @@ defmodule Wasomi.Catalog.LectureResource do
     end
   end
 end
-

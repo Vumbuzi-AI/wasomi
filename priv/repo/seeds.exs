@@ -182,7 +182,6 @@ course_attrs = %{
 
 certificate_attrs = %{
   certificate_enabled: true,
-  certificate_issuer_name: "Wasomi Academy",
   certificate_signatory_name: "Alvas Mwangi",
   certificate_signatory_title: "Lead Instructor"
 }

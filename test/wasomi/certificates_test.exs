@@ -21,7 +21,6 @@ defmodule Wasomi.CertificatesTest do
       course_fixture(
         status: :published,
         certificate_enabled: true,
-        certificate_issuer_name: "Wasomi Academy",
         certificate_signatory_name: "Jane Doe",
         certificate_signatory_title: "Head of Learning"
       )
@@ -127,7 +126,7 @@ defmodule Wasomi.CertificatesTest do
              Certificates.download_url(user_fixture(), certificate)
   end
 
-  test "issue_new/3 passes the course's certificate branding into the renderer assigns",
+  test "issue_new/3 passes the course's signatory details and the fixed issuer branding into the renderer assigns",
        context do
     # A locally configured R2_PUBLIC_URL (via .env) would otherwise make this
     # test's signature host-trust check depend on the developer's machine
@@ -139,14 +138,16 @@ defmodule Wasomi.CertificatesTest do
     {:ok, _course} =
       Wasomi.Catalog.update_course_certificate(context.course, %{
         "certificate_enabled" => "true",
-        "certificate_issuer_name" => "GS1 Kenya",
         "certificate_signatory_name" => "Jane Doe",
         "certificate_signatory_title" => "Country Manager",
         "certificate_signature_key" => "https://example.com/sig.png"
       })
 
     expect(Wasomi.CertificateRendererMock, :render, fn assigns ->
-      assert assigns.issuer_name == "GS1 Kenya"
+      # issuer_name is app-wide branding (Wasomi.Certificates.Branding), not
+      # a per-course value — it's the same regardless of what this course's
+      # certificate settings are.
+      assert assigns.issuer_name == Wasomi.Certificates.Branding.issuer_name()
       assert assigns.signatory_name == "Jane Doe"
       assert assigns.signatory_title == "Country Manager"
       assert assigns.signature_url == "https://example.com/sig.png"

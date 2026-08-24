@@ -1129,4 +1129,3 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
     end
   end
 end
-

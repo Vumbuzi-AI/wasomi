@@ -410,7 +410,10 @@ defmodule WasomiWeb.HomeComponents do
           </div>
 
           <div class="hidden border border-black/10 -mx-6 sm:-mx-10 lg:grid-cols-2 peer-checked/s2:grid peer-checked/s2:animate-fade-up">
-            <.gs1_step_visual image="/images/hero-home.png" alt="Scanning a barcode to capture product data" />
+            <.gs1_step_visual
+              image="/images/hero-home.png"
+              alt="Scanning a barcode to capture product data"
+            />
             <.gs1_step_content
               eyebrow="Step 02 · Capture"
               title="Capture product data accurately"
@@ -421,7 +424,10 @@ defmodule WasomiWeb.HomeComponents do
           </div>
 
           <div class="hidden border border-black/10 -mx-6 sm:-mx-10 lg:grid-cols-2 peer-checked/s3:grid peer-checked/s3:animate-fade-up">
-            <.gs1_step_visual image="/images/hero_image.jpg" alt="Trading partners sharing product data" />
+            <.gs1_step_visual
+              image="/images/hero_image.jpg"
+              alt="Trading partners sharing product data"
+            />
             <.gs1_step_content
               eyebrow="Step 03 · Share"
               title="Share trusted data with partners"
@@ -1326,4 +1332,3 @@ defmodule WasomiWeb.HomeComponents do
     """
   end
 end
-

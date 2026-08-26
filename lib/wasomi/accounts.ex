@@ -9,6 +9,8 @@ defmodule Wasomi.Accounts do
   alias Wasomi.Accounts.{User, UserNotifier, UserToken}
   alias Wasomi.Paginate
 
+  @confirmation_resend_cooldown_minutes 15
+
   ## Database getters
 
   @doc """
@@ -125,6 +127,11 @@ defmodule Wasomi.Accounts do
     |> User.role_changeset(%{role: role})
     |> Repo.update()
   end
+
+  @doc """
+  Suggests an email typo correction if the domain closely resembles a known provider.
+  """
+  defdelegate suggest_email_typo(email), to: Wasomi.Accounts.EmailTypo, as: :suggest
 
   ## User registration
 
@@ -324,12 +331,41 @@ defmodule Wasomi.Accounts do
   """
   def deliver_user_confirmation_instructions(%User{} = user, confirmation_url_fun)
       when is_function(confirmation_url_fun, 1) do
-    if user.confirmed_at do
-      {:error, :already_confirmed}
+    cond do
+      user.confirmed_at ->
+        {:error, :already_confirmed}
+
+      recent_confirmation_token?(user) ->
+        {:error, :rate_limited}
+
+      true ->
+        {encoded_token, user_token} = UserToken.build_email_token(user, "confirm")
+        Repo.insert!(user_token)
+        UserNotifier.deliver_confirmation_instructions(user, confirmation_url_fun.(encoded_token))
+    end
+  end
+
+  defp recent_confirmation_token?(%User{} = user) do
+    UserToken.by_user_and_contexts_query(user, ["confirm"])
+    |> where([token], token.inserted_at > ago(@confirmation_resend_cooldown_minutes, "minute"))
+    |> limit(1)
+    |> Repo.exists?()
+  end
+
+  @doc """
+  Looks up the user a confirmation token belongs to, without consuming it.
+
+  Read-only — unlike `confirm_user/1`, this doesn't mark the account
+  confirmed or delete the token, so it's safe to call from a plain page
+  view (e.g. a link-preview/security scanner that pre-fetches the
+  confirmation URL before the recipient opens it).
+  """
+  def get_user_by_confirmation_token(token) do
+    with {:ok, query} <- UserToken.verify_email_token_query(token, "confirm"),
+         %User{} = user <- Repo.one(query) do
+      user
     else
-      {encoded_token, user_token} = UserToken.build_email_token(user, "confirm")
-      Repo.insert!(user_token)
-      UserNotifier.deliver_confirmation_instructions(user, confirmation_url_fun.(encoded_token))
+      _ -> nil
     end
   end
 

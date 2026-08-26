@@ -623,6 +623,8 @@ defmodule WasomiWeb.CoreComponents do
   Log in/Sign up tab toggle above the caller's form content on the right.
   """
   attr :active, :atom, required: true, values: [:login, :register]
+  attr :back_to, :string, default: "/"
+  attr :back_label, :string, default: "Back to home"
   slot :inner_block, required: true
 
   def auth_shell(assigns) do
@@ -649,8 +651,8 @@ defmodule WasomiWeb.CoreComponents do
 
       <div class="flex flex-col px-6 py-6 sm:px-12 lg:py-8">
         <div class="flex justify-end">
-          <a
-            href="/"
+          <.link
+            navigate={@back_to}
             class="inline-flex items-center gap-2 text-sm font-semibold text-dark transition hover:text-primary"
           >
             <svg
@@ -664,8 +666,8 @@ defmodule WasomiWeb.CoreComponents do
             >
               <line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" />
             </svg>
-            Back to home
-          </a>
+            {@back_label}
+          </.link>
         </div>
 
         <div class="mx-auto mt-6 w-full max-w-md flex-1">

@@ -28,6 +28,11 @@ defmodule WasomiWeb.AdminLiveTest do
       {:ok, _view, html} = live(conn, ~p"/admin")
       assert html =~ "Business overview"
     end
+
+    test "unconfirmed admins are redirected to confirmation instructions", %{conn: conn} do
+      conn = log_in_user(conn, admin_fixture(confirmed: false))
+      assert {:error, {:redirect, %{to: "/users/confirm"}}} = live(conn, ~p"/admin")
+    end
   end
 
   describe "courses" do

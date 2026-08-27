@@ -705,7 +705,7 @@ defmodule WasomiWeb.CoursePlayerLive do
   def render(assigns) do
     ~H"""
     <.student_layout active={:courses} current_user={@current_user}>
-      <div class="course-workspace min-h-screen bg-[#f4f4f4] pb-10 text-body">
+      <div class="course-workspace min-h-screen bg-surface pb-10 text-body">
         <div id="course-player" {capture_guard_attrs(@current_user)}>
           <div class="border-b border-black/70 bg-white px-5 py-5 sm:px-8 lg:px-12">
             <div class="relative flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
@@ -1191,7 +1191,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                               Enum.filter(@current_lecture.resources, &pdf_resource?/1)
                           }
                           id={"pdf-resource-#{resource.id}"}
-                          class="overflow-hidden rounded-2xl border border-black/10 bg-neutral-50"
+                          class="overflow-hidden rounded-2xl border border-black/10 bg-surface"
                         >
                           <% read? = resource_read?(@read_resource_ids, resource) %>
                           <div class="flex flex-wrap items-center justify-between gap-3 border-b border-black/10 bg-white px-4 py-3">

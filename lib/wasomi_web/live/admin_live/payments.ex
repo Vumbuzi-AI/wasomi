@@ -285,7 +285,7 @@ defmodule WasomiWeb.AdminLive.Payments do
           </:actions>
         </.page_header>
 
-        <div class="grid grid-cols-2 overflow-hidden rounded-2xl border border-black/5 bg-neutral-50 p-1">
+        <div class="grid grid-cols-2 overflow-hidden rounded-2xl border border-black/5 bg-surface p-1">
           <.link
             patch={payments_path(:payments)}
             class={[
@@ -352,7 +352,7 @@ defmodule WasomiWeb.AdminLive.Payments do
           />
         </div>
 
-        <div :if={@tab == :revenue} class="rounded-3xl border border-black/5 bg-white p-6">
+        <div :if={@tab == :revenue} class="rounded-3xl border border-black/5 bg-white p-6 shadow-card">
           <div class="flex flex-wrap items-center justify-between gap-4">
             <div>
               <h2 class="text-xl font-semibold text-ink">Revenue charts</h2>
@@ -418,7 +418,10 @@ defmodule WasomiWeb.AdminLive.Payments do
           </div>
         </div>
 
-        <div :if={@tab == :payments} class="rounded-3xl border border-black/5 bg-white p-6">
+        <div
+          :if={@tab == :payments}
+          class="rounded-3xl border border-black/5 bg-white p-6 shadow-card"
+        >
           <div class="flex flex-wrap items-center justify-between gap-4">
             <div>
               <h2 class="text-xl font-semibold text-ink">Payment transactions</h2>
@@ -479,7 +482,7 @@ defmodule WasomiWeb.AdminLive.Payments do
           >
             <div :if={@payments_page.entries != []} class="mt-6 overflow-x-auto">
               <table class="w-full text-left text-sm">
-                <thead class="border-b border-black/5 text-xs uppercase tracking-wide text-body">
+                <thead class="border-b border-black/5 bg-surface text-xs uppercase tracking-wide text-body">
                   <tr>
                     <.sortable_th
                       label="Learner"
@@ -523,7 +526,7 @@ defmodule WasomiWeb.AdminLive.Payments do
                 <tbody class="divide-y divide-black/5">
                   <tr
                     :for={payment <- @payments_page.entries}
-                    class="transition hover:bg-neutral-50/60"
+                    class="transition even:bg-surface/50 hover:bg-mint/45"
                   >
                     <td class="px-6 py-4">
                       <.link
@@ -564,21 +567,21 @@ defmodule WasomiWeb.AdminLive.Payments do
 
             <div
               :if={@payments_page.entries == [] and @total_transactions == 0}
-              class="mt-6 rounded-2xl bg-neutral-50 p-12 text-center text-body"
+              class="mt-6 rounded-2xl bg-surface p-12 text-center text-body"
             >
               No payments have been recorded yet.
             </div>
 
             <div
               :if={@payments_page.entries == [] and @total_transactions > 0}
-              class="mt-6 rounded-2xl bg-neutral-50 p-12 text-center text-body"
+              class="mt-6 rounded-2xl bg-surface p-12 text-center text-body"
             >
               No payments match the current search or status filter.
             </div>
           </.paginated_table>
         </div>
 
-        <div :if={@tab == :revenue} class="rounded-3xl border border-black/5 bg-white p-6">
+        <div :if={@tab == :revenue} class="rounded-3xl border border-black/5 bg-white p-6 shadow-card">
           <div class="flex flex-wrap items-center justify-between gap-4">
             <div>
               <h2 class="text-xl font-semibold text-ink">Course revenue</h2>
@@ -598,7 +601,7 @@ defmodule WasomiWeb.AdminLive.Payments do
           >
             <div :if={@revenue_page.entries != []} class="mt-6 overflow-x-auto">
               <table class="w-full text-left text-sm">
-                <thead class="border-b border-black/5 text-xs uppercase tracking-wide text-body">
+                <thead class="border-b border-black/5 bg-surface text-xs uppercase tracking-wide text-body">
                   <tr>
                     <th class="px-6 py-4 font-semibold">Course</th>
                     <th class="px-6 py-4 font-semibold">Enrolled</th>
@@ -608,7 +611,10 @@ defmodule WasomiWeb.AdminLive.Payments do
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-black/5">
-                  <tr :for={row <- @revenue_page.entries} class="transition hover:bg-neutral-50/60">
+                  <tr
+                    :for={row <- @revenue_page.entries}
+                    class="transition even:bg-surface/50 hover:bg-mint/45"
+                  >
                     <td class="px-6 py-4">
                       <.link
                         navigate={~p"/admin/courses/#{row.course.slug}"}
@@ -630,7 +636,7 @@ defmodule WasomiWeb.AdminLive.Payments do
 
             <div
               :if={@revenue_page.entries == []}
-              class="mt-6 rounded-2xl bg-neutral-50 p-12 text-center text-body"
+              class="mt-6 rounded-2xl bg-surface p-12 text-center text-body"
             >
               No courses match the current search.
             </div>

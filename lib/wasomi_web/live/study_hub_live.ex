@@ -1098,7 +1098,7 @@ defmodule WasomiWeb.StudyHubLive do
           <div class={
             if @embedded?,
               do: "overflow-hidden rounded-3xl border border-black/5 bg-white",
-              else: "mt-8 overflow-hidden rounded-3xl border border-black/5 bg-white"
+              else: "mt-8 overflow-hidden rounded-3xl border border-black/5 bg-white shadow-card"
           }>
             <%= case @step do %>
               <% :course -> %>

@@ -174,7 +174,7 @@ defmodule WasomiWeb.AdminLive.CourseCertificate do
         <h1 class="text-3xl font-semibold text-ink">Certificate settings</h1>
 
         <div class="grid gap-8 lg:grid-cols-2">
-          <section class="rounded-3xl border border-black/5 bg-white p-6">
+          <section class="rounded-3xl border border-black/5 bg-white p-6 shadow-card">
             <.simple_form for={@form} id="certificate-form" phx-change="validate" phx-submit="save">
               <.input
                 field={@form[:certificate_enabled]}
@@ -241,7 +241,7 @@ defmodule WasomiWeb.AdminLive.CourseCertificate do
             </button>
           </section>
 
-          <section class="rounded-3xl border border-black/5 bg-white p-3">
+          <section class="rounded-3xl border border-black/5 bg-white p-3 shadow-card">
             <p class="mb-2 px-3 pt-1 text-sm font-semibold text-ink">Live preview</p>
             <iframe
               srcdoc={@preview_html}

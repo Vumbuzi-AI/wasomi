@@ -331,17 +331,30 @@ defmodule WasomiWeb.AdminLiveTest do
 
       {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
 
-      assert has_element?(view, "#course-detail-tabs.grid.grid-cols-2")
+      assert has_element?(view, "#course-detail-tabs.grid.grid-cols-2.rounded-2xl")
       assert has_element?(view, "#curriculum-tab[aria-selected='true']")
       assert has_element?(view, "#curriculum-tab", "Curriculum")
+
+      assert has_element?(
+               view,
+               ~s{#curriculum-tab[href="/admin/courses/#{course.slug}?tab=curriculum"]}
+             )
+
       assert has_element?(view, "#students-tab[aria-selected='false']")
       assert has_element?(view, "#students-tab", "Enrolled students")
+
+      assert has_element?(
+               view,
+               ~s{#students-tab[href="/admin/courses/#{course.slug}?tab=students"]}
+             )
+
       assert has_element?(view, "#students-tab span", "1")
       assert has_element?(view, "#curriculum-panel")
       refute has_element?(view, "#students-panel")
 
       view |> element("#students-tab") |> render_click()
 
+      assert_patch(view, ~p"/admin/courses/#{course.slug}?tab=students")
       assert has_element?(view, "#curriculum-tab[aria-selected='false']")
       assert has_element?(view, "#students-tab[aria-selected='true']")
       refute has_element?(view, "#curriculum-panel")

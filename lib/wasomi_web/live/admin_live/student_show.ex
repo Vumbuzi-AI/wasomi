@@ -141,14 +141,14 @@ defmodule WasomiWeb.AdminLive.StudentShow do
 
         <div class="grid gap-6 lg:grid-cols-2">
           <%!-- Enrolled courses --%>
-          <section class="rounded-3xl border border-black/5 bg-white p-6">
+          <section class="rounded-3xl border border-black/5 bg-white p-6 shadow-card">
             <h2 class="text-xl font-semibold text-ink">Enrolled courses</h2>
 
             <div :if={@enrollments != []} class="mt-5 divide-y divide-black/5">
               <.link
                 :for={enrollment <- @enrollments}
                 navigate={~p"/admin/courses/#{enrollment.course.slug}"}
-                class="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0 transition hover:opacity-80"
+                class="flex items-center justify-between gap-4 rounded-2xl px-3 py-3 transition even:bg-surface/50 hover:bg-mint/45"
               >
                 <div class="min-w-0">
                   <p class="truncate font-medium text-ink">{enrollment.course.title}</p>
@@ -158,17 +158,20 @@ defmodule WasomiWeb.AdminLive.StudentShow do
               </.link>
             </div>
 
-            <p :if={@enrollments == []} class="mt-5 rounded-2xl bg-neutral-50 p-5 text-body">
+            <p :if={@enrollments == []} class="mt-5 rounded-2xl bg-surface p-5 text-body">
               This learner has no active enrollments.
             </p>
           </section>
 
           <%!-- Payment history --%>
-          <section class="rounded-3xl border border-black/5 bg-white p-6">
+          <section class="rounded-3xl border border-black/5 bg-white p-6 shadow-card">
             <h2 class="text-xl font-semibold text-ink">Payment history</h2>
 
             <div :if={@payments != []} class="mt-5 divide-y divide-black/5">
-              <div :for={payment <- @payments} class="py-3 first:pt-0 last:pb-0">
+              <div
+                :for={payment <- @payments}
+                class="rounded-2xl px-3 py-3 transition even:bg-surface/50 hover:bg-mint/45"
+              >
                 <div class="flex items-center justify-between gap-4">
                   <div class="min-w-0">
                     <p class="truncate font-medium text-ink">
@@ -186,7 +189,7 @@ defmodule WasomiWeb.AdminLive.StudentShow do
               </div>
             </div>
 
-            <p :if={@payments == []} class="mt-5 rounded-2xl bg-neutral-50 p-5 text-body">
+            <p :if={@payments == []} class="mt-5 rounded-2xl bg-surface p-5 text-body">
               No payments recorded for this learner.
             </p>
           </section>
@@ -215,7 +218,7 @@ defmodule WasomiWeb.AdminLive.StudentShow do
         >
           <div>
             <p class="text-sm font-medium text-ink">Learner</p>
-            <p class="mt-1 rounded-xl bg-neutral-50 px-3 py-2.5 text-sm text-body">
+            <p class="mt-1 rounded-xl bg-surface px-3 py-2.5 text-sm text-body">
               {@user.name || "Learner"} · {@user.email}
             </p>
           </div>

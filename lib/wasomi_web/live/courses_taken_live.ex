@@ -54,7 +54,7 @@ defmodule WasomiWeb.CoursesTakenLive do
         <div
           :if={@course_cards == []}
           id="courses-taken-empty"
-          class="mt-8 rounded-3xl border border-black/5 bg-white p-8 text-center sm:p-12"
+          class="mt-8 rounded-3xl border border-black/5 bg-white p-8 text-center shadow-card sm:p-12"
         >
           <span class="mx-auto grid h-14 w-14 place-items-center rounded-full bg-mint text-primary">
             <.icon name="hero-academic-cap" class="h-7 w-7" />

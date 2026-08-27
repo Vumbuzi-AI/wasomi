@@ -34,6 +34,15 @@ defmodule WasomiWeb.UserAuthTest do
       assert redirected_to(conn) == ~p"/admin"
     end
 
+    test "redirects unconfirmed users to the confirmation instructions page", %{conn: conn} do
+      user = user_fixture(confirmed: false)
+
+      conn = UserAuth.log_in_user(conn, user)
+
+      assert get_session(conn, :user_token)
+      assert redirected_to(conn) == ~p"/users/confirm"
+    end
+
     test "clears everything previously stored in the session", %{conn: conn, user: user} do
       conn = conn |> put_session(:to_be_removed, "value") |> UserAuth.log_in_user(user)
       refute get_session(conn, :to_be_removed)
@@ -167,14 +176,29 @@ defmodule WasomiWeb.UserAuthTest do
       assert updated_socket.assigns.current_user.id == user.id
     end
 
+    test "redirects unconfirmed users to confirmation instructions", %{conn: conn} do
+      user = user_fixture(confirmed: false)
+      user_token = Accounts.generate_user_session_token(user)
+      session = conn |> put_session(:user_token, user_token) |> get_session()
+
+      socket = live_socket()
+
+      assert {:halt, updated_socket} =
+               UserAuth.on_mount(:ensure_authenticated, %{}, session, socket)
+
+      assert updated_socket.assigns.current_user.id == user.id
+
+      assert {:redirect, %{to: "/users/confirm"}} = updated_socket.redirected
+
+      assert Phoenix.Flash.get(updated_socket.assigns.flash, :error) ==
+               "Please confirm your email before continuing."
+    end
+
     test "redirects to login page if there isn't a valid user_token", %{conn: conn} do
       user_token = "invalid_token"
       session = conn |> put_session(:user_token, user_token) |> get_session()
 
-      socket = %LiveView.Socket{
-        endpoint: WasomiWeb.Endpoint,
-        assigns: %{__changed__: %{}, flash: %{}}
-      }
+      socket = live_socket()
 
       {:halt, updated_socket} = UserAuth.on_mount(:ensure_authenticated, %{}, session, socket)
       assert updated_socket.assigns.current_user == nil
@@ -183,10 +207,7 @@ defmodule WasomiWeb.UserAuthTest do
     test "redirects to login page if there isn't a user_token", %{conn: conn} do
       session = conn |> get_session()
 
-      socket = %LiveView.Socket{
-        endpoint: WasomiWeb.Endpoint,
-        assigns: %{__changed__: %{}, flash: %{}}
-      }
+      socket = live_socket()
 
       {:halt, updated_socket} = UserAuth.on_mount(:ensure_authenticated, %{}, session, socket)
       assert updated_socket.assigns.current_user == nil
@@ -276,6 +297,24 @@ defmodule WasomiWeb.UserAuthTest do
       refute conn.halted
       refute conn.status
     end
+
+    test "redirects unconfirmed users to confirmation instructions", %{conn: conn} do
+      user = user_fixture(confirmed: false)
+
+      conn =
+        conn
+        |> fetch_flash()
+        |> assign(:current_user, user)
+        |> UserAuth.require_authenticated_user([])
+
+      assert conn.halted
+      assert redirected_to(conn) == ~p"/users/confirm"
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
+               "Please confirm your email before continuing."
+
+      refute get_session(conn, :user_return_to)
+    end
   end
 
   describe "administrator authorization" do
@@ -286,6 +325,25 @@ defmodule WasomiWeb.UserAuthTest do
 
       refute conn.halted
       refute conn.status
+    end
+
+    test "require_admin/2 rejects unconfirmed administrators before role authorization", %{
+      conn: conn
+    } do
+      user = user_fixture(confirmed: false)
+      {:ok, admin} = Accounts.update_user_role(user, :admin)
+
+      conn =
+        conn
+        |> fetch_flash()
+        |> assign(:current_user, admin)
+        |> UserAuth.require_admin([])
+
+      assert conn.halted
+      assert redirected_to(conn) == ~p"/users/confirm"
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
+               "Please confirm your email before continuing."
     end
 
     test "require_admin/2 rejects learners", %{conn: conn, user: user} do
@@ -314,12 +372,33 @@ defmodule WasomiWeb.UserAuthTest do
       user_token = Accounts.generate_user_session_token(user)
       session = conn |> put_session(:user_token, user_token) |> get_session()
 
-      socket = %LiveView.Socket{
-        endpoint: WasomiWeb.Endpoint,
-        assigns: %{__changed__: %{}, flash: %{}}
-      }
+      socket = live_socket()
 
       assert {:halt, _socket} = UserAuth.on_mount(:ensure_admin, %{}, session, socket)
     end
+
+    test "on_mount :ensure_admin redirects unconfirmed administrators to confirmation", %{
+      conn: conn
+    } do
+      user = user_fixture(confirmed: false)
+      {:ok, admin} = Accounts.update_user_role(user, :admin)
+      user_token = Accounts.generate_user_session_token(admin)
+      session = conn |> put_session(:user_token, user_token) |> get_session()
+
+      assert {:halt, updated_socket} =
+               UserAuth.on_mount(:ensure_admin, %{}, session, live_socket())
+
+      assert {:redirect, %{to: "/users/confirm"}} = updated_socket.redirected
+
+      assert Phoenix.Flash.get(updated_socket.assigns.flash, :error) ==
+               "Please confirm your email before continuing."
+    end
+  end
+
+  defp live_socket do
+    %LiveView.Socket{
+      endpoint: WasomiWeb.Endpoint,
+      assigns: %{__changed__: %{}, flash: %{}}
+    }
   end
 end

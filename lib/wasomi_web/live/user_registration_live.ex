@@ -16,14 +16,11 @@ defmodule WasomiWeb.UserRegistrationLive do
         id="registration_form"
         phx-submit="save"
         phx-change="validate"
-        phx-trigger-action={@trigger_submit}
         phx-hook={if @recaptcha_site_key || @recaptcha_v2_site_key, do: "Recaptcha"}
         data-site-key={@recaptcha_site_key}
         data-v2-site-key={@recaptcha_v2_site_key}
         data-show-v2={if @show_recaptcha_v2, do: "true", else: "false"}
         data-action="register"
-        action={~p"/users/log_in?_action=registered"}
-        method="post"
         class="mt-8 space-y-5"
       >
         <p
@@ -55,27 +52,62 @@ defmodule WasomiWeb.UserRegistrationLive do
           </:icon>
         </.auth_input>
 
-        <.auth_input
-          field={@form[:email]}
-          type="email"
-          label="Email address"
-          placeholder="you@example.com"
-          required
-        >
-          <:icon>
-            <svg
-              class="h-4 w-4"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
+        <div class="space-y-2">
+          <.auth_input
+            field={@form[:email]}
+            type="email"
+            label="Email address"
+            placeholder="you@example.com"
+            required
+          >
+            <:icon>
+              <svg
+                class="h-4 w-4"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <rect x="2" y="4" width="20" height="16" rx="2" /><polyline points="2 6 12 13 22 6" />
+              </svg>
+            </:icon>
+          </.auth_input>
+
+          <p :if={@email_taken?} class="text-xs text-body">
+            Already have an account?
+            <.link navigate={~p"/users/log_in"} class="font-semibold text-dark underline">
+              Log in
+            </.link>
+            or
+            <.link
+              navigate={~p"/users/confirm?#{[email: @form[:email].value || ""]}"}
+              class="font-semibold text-dark underline"
             >
-              <rect x="2" y="4" width="20" height="16" rx="2" /><polyline points="2 6 12 13 22 6" />
-            </svg>
-          </:icon>
-        </.auth_input>
+              resend the confirmation email
+            </.link>
+            .
+          </p>
+
+          <div
+            :if={@email_suggestion}
+            id="email-suggestion-box"
+            class="flex items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs text-amber-900"
+          >
+            <span>
+              Did you mean <strong class="font-semibold">{@email_suggestion}</strong>?
+            </span>
+            <button
+              type="button"
+              phx-click="apply_suggestion"
+              phx-value-suggestion={@email_suggestion}
+              class="shrink-0 rounded-full bg-amber-200/90 px-3 py-1 font-semibold text-amber-900 transition hover:bg-amber-300 active:scale-95"
+            >
+              Apply
+            </button>
+          </div>
+        </div>
 
         <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
           <.auth_input
@@ -182,15 +214,21 @@ defmodule WasomiWeb.UserRegistrationLive do
     """
   end
 
-  def mount(_params, _session, socket) do
-    changeset = Accounts.change_user_registration(%User{})
+  def mount(params, _session, socket) do
+    current_params =
+      %{}
+      |> maybe_put_param("name", params["name"])
+      |> maybe_put_param("email", params["email"])
+
+    changeset = Accounts.change_user_registration(%User{}, current_params)
 
     socket =
       socket
       |> assign(
         page_title: "Register",
-        trigger_submit: false,
         check_errors: false,
+        email_suggestion: nil,
+        current_params: current_params,
         captcha_error: nil,
         show_recaptcha_v2: false,
         recaptcha_site_key: Captcha.site_key(),
@@ -198,8 +236,12 @@ defmodule WasomiWeb.UserRegistrationLive do
       )
       |> assign_form(changeset)
 
-    {:ok, socket, temporary_assigns: [form: nil]}
+    {:ok, socket}
   end
+
+  defp maybe_put_param(map, _key, nil), do: map
+  defp maybe_put_param(map, _key, ""), do: map
+  defp maybe_put_param(map, key, value), do: Map.put(map, key, value)
 
   def handle_event("save", %{"user" => user_params} = params, socket) do
     case Captcha.verify_from_params(params, action: "register") do
@@ -212,12 +254,10 @@ defmodule WasomiWeb.UserRegistrationLive do
                 &url(~p"/users/confirm/#{&1}")
               )
 
-            changeset = Accounts.change_user_registration(user)
-
             {:noreply,
-             socket
-             |> assign(trigger_submit: true, captcha_error: nil, show_recaptcha_v2: false)
-             |> assign_form(changeset)}
+             push_navigate(socket,
+               to: ~p"/users/confirm?#{[email: user.email, name: user.name]}"
+             )}
 
           {:error, %Ecto.Changeset{} = changeset} ->
             {:noreply,
@@ -245,7 +285,35 @@ defmodule WasomiWeb.UserRegistrationLive do
 
   def handle_event("validate", %{"user" => user_params}, socket) do
     changeset = Accounts.change_user_registration(%User{}, user_params)
-    {:noreply, assign_form(socket, Map.put(changeset, :action, :validate))}
+    email = user_params["email"]
+
+    suggestion =
+      case Accounts.suggest_email_typo(email) do
+        {:ok, suggested} -> suggested
+        :none -> nil
+      end
+
+    socket =
+      socket
+      |> assign(email_suggestion: suggestion, current_params: user_params)
+      |> assign_form(Map.put(changeset, :action, :validate))
+
+    {:noreply, socket}
+  end
+
+  def handle_event("apply_suggestion", %{"suggestion" => suggestion}, socket) do
+    current_params =
+      socket.assigns.current_params
+      |> Map.put("email", suggestion)
+
+    changeset = Accounts.change_user_registration(%User{}, current_params)
+
+    socket =
+      socket
+      |> assign(email_suggestion: nil, current_params: current_params)
+      |> assign_form(Map.put(changeset, :action, :validate))
+
+    {:noreply, socket}
   end
 
   # Client gave up waiting on reCAPTCHA — same inline error as a
@@ -262,10 +330,19 @@ defmodule WasomiWeb.UserRegistrationLive do
   defp assign_form(socket, %Ecto.Changeset{} = changeset) do
     form = to_form(changeset, as: "user")
 
+    socket = assign(socket, form: form, email_taken?: email_taken?(changeset))
+
     if changeset.valid? do
-      assign(socket, form: form, check_errors: false)
+      assign(socket, check_errors: false)
     else
-      assign(socket, form: form)
+      socket
     end
+  end
+
+  defp email_taken?(changeset) do
+    Enum.any?(changeset.errors, fn
+      {:email, {"has already been taken", _}} -> true
+      _ -> false
+    end)
   end
 end

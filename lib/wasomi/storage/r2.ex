@@ -13,7 +13,9 @@ defmodule Wasomi.Storage.R2 do
     "video/mp4" => :video,
     "video/quicktime" => :video,
     "video/webm" => :video,
-    "image/png" => :image
+    "image/png" => :image,
+    "image/jpeg" => :image,
+    "image/webp" => :image
   }
 
   @max_document_bytes 50_000_000
@@ -117,6 +119,9 @@ defmodule Wasomi.Storage.R2 do
       ".mov" -> "video/quicktime"
       ".webm" -> "video/webm"
       ".png" -> "image/png"
+      ".jpg" -> "image/jpeg"
+      ".jpeg" -> "image/jpeg"
+      ".webp" -> "image/webp"
       _ -> "application/octet-stream"
     end
   end

@@ -5,7 +5,7 @@ defmodule Wasomi.AccountsTest do
 
   import Wasomi.AccountsFixtures
   import Swoosh.TestAssertions
-  alias Wasomi.Accounts.{User, UserToken}
+  alias Wasomi.Accounts.{Countries, User, UserToken}
 
   describe "get_user_by_email/1" do
     test "does not return the user if the email does not exist" do
@@ -208,7 +208,7 @@ defmodule Wasomi.AccountsTest do
 
   describe "update_user_email/2" do
     setup do
-      user = user_fixture()
+      user = user_fixture(confirmed: false)
       email = unique_user_email()
 
       token =
@@ -377,10 +377,28 @@ defmodule Wasomi.AccountsTest do
 
   describe "deliver_user_confirmation_instructions/2" do
     setup do
-      %{user: user_fixture()}
+      %{user: user_fixture(confirmed: false)}
     end
 
     test "sends token through notification", %{user: user} do
+      {:ok, email} =
+        Accounts.deliver_user_confirmation_instructions(user, &"[TOKEN]#{&1}[TOKEN]")
+
+      [_, token | _] = String.split(email.text_body, "[TOKEN]")
+
+      assert email.html_body =~ "background-color:#f97316"
+      assert email.html_body =~ "logo.png"
+      assert email.html_body =~ "We&#39;ll sign you in automatically"
+      assert email.text_body =~ "We'll sign you in automatically"
+
+      {:ok, token} = Base.url_decode64(token, padding: false)
+      assert user_token = Repo.get_by(UserToken, token: :crypto.hash(:sha256, token))
+      assert user_token.user_id == user.id
+      assert user_token.sent_to == user.email
+      assert user_token.context == "confirm"
+    end
+
+    test "extract_user_token/1 can still read confirmation tokens from text emails", %{user: user} do
       token =
         extract_user_token(fn url ->
           Accounts.deliver_user_confirmation_instructions(user, url)
@@ -392,11 +410,52 @@ defmodule Wasomi.AccountsTest do
       assert user_token.sent_to == user.email
       assert user_token.context == "confirm"
     end
+
+    test "does not send a second token inside the resend cooldown", %{user: user} do
+      assert {:ok, _email} =
+               Accounts.deliver_user_confirmation_instructions(user, &"[TOKEN]#{&1}[TOKEN]")
+
+      assert {:error, :rate_limited} =
+               Accounts.deliver_user_confirmation_instructions(user, &"[TOKEN]#{&1}[TOKEN]")
+
+      assert [%UserToken{context: "confirm", user_id: user_id}] =
+               Repo.all(UserToken.by_user_and_contexts_query(user, ["confirm"]))
+
+      assert user_id == user.id
+    end
+
+    test "allows another confirmation email after the resend cooldown", %{user: user} do
+      assert {:ok, _email} =
+               Accounts.deliver_user_confirmation_instructions(user, &"[TOKEN]#{&1}[TOKEN]")
+
+      {1, nil} =
+        UserToken.by_user_and_contexts_query(user, ["confirm"])
+        |> Repo.update_all(
+          set: [
+            inserted_at:
+              DateTime.add(DateTime.utc_now(), -16, :minute) |> DateTime.truncate(:second)
+          ]
+        )
+
+      assert {:ok, _email} =
+               Accounts.deliver_user_confirmation_instructions(user, &"[TOKEN]#{&1}[TOKEN]")
+
+      assert Repo.aggregate(UserToken.by_user_and_contexts_query(user, ["confirm"]), :count) == 2
+    end
+
+    test "does not send confirmation instructions to already confirmed users" do
+      user = user_fixture()
+
+      assert {:error, :already_confirmed} =
+               Accounts.deliver_user_confirmation_instructions(user, &"[TOKEN]#{&1}[TOKEN]")
+
+      refute Repo.get_by(UserToken, user_id: user.id, context: "confirm")
+    end
   end
 
   describe "confirm_user/1" do
     setup do
-      user = user_fixture()
+      user = user_fixture(confirmed: false)
 
       token =
         extract_user_token(fn url ->
@@ -413,7 +472,6 @@ defmodule Wasomi.AccountsTest do
       assert confirmed_user.confirmed_at != user.confirmed_at
       assert Repo.get!(User, user.id).confirmed_at
       refute Repo.get_by(UserToken, user_id: user.id)
-      assert_email_sent(subject: "Welcome to Wasomi Business Institute")
     end
 
     test "does not confirm with invalid token", %{user: user} do
@@ -521,6 +579,185 @@ defmodule Wasomi.AccountsTest do
     end
   end
 
+  describe "change_user_profile/2" do
+    test "returns a user changeset" do
+      assert %Ecto.Changeset{} = changeset = Accounts.change_user_profile(%User{})
+      assert changeset.required == []
+    end
+
+    test "allows all profile fields to be set" do
+      changeset =
+        Accounts.change_user_profile(%User{}, %{
+          "headline" => "Supply Chain Manager",
+          "bio" => "Building things.",
+          "country" => "Kenya",
+          "organization" => "GS1 Kenya",
+          "industry" => "Supply Chain & Logistics",
+          "occupation" => "Software Engineer",
+          "experience_level" => "mid",
+          "learning_goal" => "certification",
+          "avatar_key" => "https://cdn.example.test/avatars/1/pic.png"
+        })
+
+      assert changeset.valid?
+      assert get_change(changeset, :headline) == "Supply Chain Manager"
+      assert get_change(changeset, :bio) == "Building things."
+      assert get_change(changeset, :country) == "Kenya"
+      assert get_change(changeset, :organization) == "GS1 Kenya"
+      assert get_change(changeset, :industry) == "Supply Chain & Logistics"
+      assert get_change(changeset, :occupation) == "Software Engineer"
+      assert get_change(changeset, :experience_level) == :mid
+      assert get_change(changeset, :learning_goal) == :certification
+
+      assert get_change(changeset, :avatar_key) ==
+               "https://cdn.example.test/avatars/1/pic.png"
+    end
+
+    test "every field is optional" do
+      assert %Ecto.Changeset{valid?: true} = Accounts.change_user_profile(%User{}, %{})
+    end
+
+    test "rejects a bio over the length cap" do
+      changeset = Accounts.change_user_profile(%User{}, %{"bio" => String.duplicate("a", 501)})
+      assert %{bio: ["should be at most 500 character(s)"]} = errors_on(changeset)
+    end
+
+    test "accepts a bio at exactly the length cap" do
+      changeset = Accounts.change_user_profile(%User{}, %{"bio" => String.duplicate("a", 500)})
+      assert changeset.valid?
+    end
+
+    test "rejects an occupation over the length cap" do
+      changeset =
+        Accounts.change_user_profile(%User{}, %{"occupation" => String.duplicate("a", 161)})
+
+      assert %{occupation: ["should be at most 160 character(s)"]} = errors_on(changeset)
+    end
+
+    test "rejects a country outside the fixed list" do
+      changeset = Accounts.change_user_profile(%User{}, %{"country" => "Atlantis"})
+      assert %{country: ["is not a supported country"]} = errors_on(changeset)
+    end
+
+    test "accepts a country from the fixed list" do
+      changeset = Accounts.change_user_profile(%User{}, %{"country" => "Kenya"})
+      assert changeset.valid?
+    end
+
+    test "treats an empty-string country as unset rather than invalid" do
+      changeset = Accounts.change_user_profile(%User{}, %{"country" => ""})
+      assert changeset.valid?
+      assert get_change(changeset, :country) == nil
+    end
+
+    test "rejects a headline over the length cap" do
+      changeset =
+        Accounts.change_user_profile(%User{}, %{"headline" => String.duplicate("a", 121)})
+
+      assert %{headline: ["should be at most 120 character(s)"]} = errors_on(changeset)
+    end
+
+    test "rejects an organization over the length cap" do
+      changeset =
+        Accounts.change_user_profile(%User{}, %{"organization" => String.duplicate("a", 161)})
+
+      assert %{organization: ["should be at most 160 character(s)"]} = errors_on(changeset)
+    end
+
+    test "rejects an industry outside the fixed list" do
+      changeset = Accounts.change_user_profile(%User{}, %{"industry" => "Wizardry"})
+      assert %{industry: ["is not a supported industry"]} = errors_on(changeset)
+    end
+
+    test "accepts an industry from the fixed list" do
+      changeset =
+        Accounts.change_user_profile(%User{}, %{"industry" => "Technology & Software"})
+
+      assert changeset.valid?
+    end
+
+    test "treats an empty-string industry as unset rather than invalid" do
+      changeset = Accounts.change_user_profile(%User{}, %{"industry" => ""})
+      assert changeset.valid?
+      assert get_change(changeset, :industry) == nil
+    end
+
+    test "rejects an experience_level outside the enum" do
+      changeset = Accounts.change_user_profile(%User{}, %{"experience_level" => "expert"})
+      assert %{experience_level: ["is invalid"]} = errors_on(changeset)
+    end
+
+    test "treats an empty-string experience_level as unset rather than invalid" do
+      changeset = Accounts.change_user_profile(%User{}, %{"experience_level" => ""})
+      assert changeset.valid?
+      assert get_change(changeset, :experience_level) == nil
+    end
+
+    test "rejects a learning_goal outside the enum" do
+      changeset = Accounts.change_user_profile(%User{}, %{"learning_goal" => "fun"})
+      assert %{learning_goal: ["is invalid"]} = errors_on(changeset)
+    end
+
+    test "treats an empty-string learning_goal as unset rather than invalid" do
+      changeset = Accounts.change_user_profile(%User{}, %{"learning_goal" => ""})
+      assert changeset.valid?
+      assert get_change(changeset, :learning_goal) == nil
+    end
+  end
+
+  describe "update_user_profile/2" do
+    setup do
+      %{user: user_fixture()}
+    end
+
+    test "persists valid profile fields", %{user: user} do
+      {:ok, updated} =
+        Accounts.update_user_profile(user, %{
+          "headline" => "Supply Chain Manager",
+          "bio" => "Learning GS1 standards.",
+          "country" => "Uganda",
+          "organization" => "GS1 Kenya",
+          "industry" => "Supply Chain & Logistics",
+          "occupation" => "Supply Chain Analyst",
+          "experience_level" => "senior",
+          "learning_goal" => "upskilling"
+        })
+
+      assert updated.headline == "Supply Chain Manager"
+      assert updated.bio == "Learning GS1 standards."
+      assert updated.country == "Uganda"
+      assert updated.organization == "GS1 Kenya"
+      assert updated.industry == "Supply Chain & Logistics"
+      assert updated.occupation == "Supply Chain Analyst"
+      assert updated.experience_level == :senior
+      assert updated.learning_goal == :upskilling
+    end
+
+    test "rejects invalid data and leaves the stored record untouched", %{user: user} do
+      {:error, changeset} = Accounts.update_user_profile(user, %{"country" => "Nowhereland"})
+      assert %{country: ["is not a supported country"]} = errors_on(changeset)
+      assert Accounts.get_user!(user.id).country == nil
+    end
+
+    test "clears a previously-set field back to nil", %{user: user} do
+      {:ok, user} = Accounts.update_user_profile(user, %{"bio" => "Hello."})
+      {:ok, user} = Accounts.update_user_profile(user, %{"bio" => nil})
+      assert user.bio == nil
+    end
+
+    test "never touches email, password, or role", %{user: user} do
+      {:ok, updated} =
+        Accounts.update_user_profile(user, %{
+          "bio" => "Hi",
+          "email" => "attacker@example.com",
+          "role" => "admin"
+        })
+
+      assert updated.email == user.email
+      assert updated.role == user.role
+    end
+  end
+
   describe "list_users_page/1" do
     test "paginates, newest first" do
       Enum.each(1..3, fn n -> user_fixture(name: "User #{n}") end)
@@ -540,6 +777,48 @@ defmodule Wasomi.AccountsTest do
 
       assert [%{id: id}] = page.entries
       assert id == match.id
+    end
+  end
+
+  describe "Countries" do
+    test "list/0 returns all countries with East Africa first" do
+      list = Countries.list()
+      assert is_list(list)
+      assert hd(list) == "Kenya"
+      assert "Uganda" in list
+      assert "United States" in list
+    end
+
+    test "valid?/1 validates supported countries" do
+      assert Countries.valid?("Kenya")
+      assert Countries.valid?("Tanzania")
+      refute Countries.valid?("Atlantis")
+      refute Countries.valid?("")
+      refute Countries.valid?(nil)
+    end
+
+    test "search/1 returns full list for empty or whitespace query" do
+      assert Countries.search("") == Countries.list()
+      assert Countries.search("   ") == Countries.list()
+      assert Countries.search(nil) == Countries.list()
+    end
+
+    test "search/1 filters countries case-insensitively" do
+      results = Countries.search("ken")
+      assert "Kenya" in results
+
+      results = Countries.search("UGANDA")
+      assert results == ["Uganda"]
+
+      results = Countries.search("land")
+      assert "Finland" in results
+      assert "Poland" in results
+      assert "Switzerland" in results
+      refute "Kenya" in results
+    end
+
+    test "search/1 returns empty list when no match" do
+      assert Countries.search("NonexistentLandXYZ") == []
     end
   end
 end

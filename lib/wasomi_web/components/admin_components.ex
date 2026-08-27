@@ -52,7 +52,7 @@ defmodule WasomiWeb.AdminComponents do
     assigns = assign(assigns, :nav_items, @nav_items)
 
     ~H"""
-    <div class="min-h-screen bg-neutral-50 text-ink lg:flex">
+    <div class="min-h-screen bg-surface text-ink lg:flex">
       <%!-- Mobile top bar --%>
       <div class="flex items-center justify-between border-b border-black/5 bg-white px-5 py-4 lg:hidden">
         <.link navigate={~p"/admin"} class="flex flex-col items-start">
@@ -97,13 +97,13 @@ defmodule WasomiWeb.AdminComponents do
         <div class="border-t border-black/5 p-4">
           <.link
             navigate={~p"/dashboard"}
-            class="sidebar-row group relative mb-2 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-body transition hover:bg-neutral-50 hover:text-primary"
+            class="sidebar-row group relative mb-2 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-body transition hover:bg-surface hover:text-primary"
           >
             <.icon name="hero-arrow-uturn-left" class="h-5 w-5 shrink-0" />
             <span class="sidebar-label inline-block">Back to learner area</span>
             <.sidebar_tooltip label="Back to learner area" />
           </.link>
-          <div class="sidebar-row group relative flex items-center gap-3 rounded-2xl bg-neutral-50 px-3 py-3">
+          <div class="sidebar-row group relative flex items-center gap-3 rounded-2xl bg-surface px-3 py-3">
             <span class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-mint font-semibold uppercase text-primary">
               {String.first(@current_user.name || @current_user.email)}
             </span>
@@ -118,7 +118,7 @@ defmodule WasomiWeb.AdminComponents do
           <.link
             href={~p"/users/log_out"}
             method="delete"
-            class="sidebar-row group relative mt-3 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-body transition hover:bg-neutral-50 hover:text-primary"
+            class="sidebar-row group relative mt-3 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-body transition hover:bg-surface hover:text-primary"
           >
             <.icon name="hero-arrow-left-on-rectangle" class="h-5 w-5 shrink-0" />
             <span class="sidebar-label inline-block">Log out</span>
@@ -145,7 +145,7 @@ defmodule WasomiWeb.AdminComponents do
 
   def page_header(assigns) do
     ~H"""
-    <div class="flex flex-wrap items-start justify-between gap-4 rounded-3xl border border-black/5 bg-white p-6">
+    <div class="flex flex-wrap items-start justify-between gap-4 rounded-3xl border border-black/5 bg-white p-6 shadow-card">
       <div>
         <p :if={@eyebrow} class="text-sm font-semibold uppercase tracking-wider text-primary">
           {@eyebrow}
@@ -168,7 +168,7 @@ defmodule WasomiWeb.AdminComponents do
 
   def stat_card(assigns) do
     ~H"""
-    <div class="rounded-3xl border border-black/5 bg-white p-6">
+    <div class="rounded-3xl border border-black/5 bg-white p-6 shadow-card">
       <div class="flex items-center justify-between">
         <p class="text-sm font-medium text-body">{@label}</p>
         <span class="grid h-10 w-10 place-items-center rounded-xl border border-primary/40 bg-mint text-primary">
@@ -263,7 +263,7 @@ defmodule WasomiWeb.AdminComponents do
           "flex items-start gap-3 rounded-xl border p-3 opacity-0 animate-checklist-in",
           stage.status == :passed && "border-emerald-200 bg-emerald-50",
           stage.status == :failed && "border-amber-200 bg-amber-50",
-          stage.status == :not_applicable && "border-black/10 bg-neutral-50"
+          stage.status == :not_applicable && "border-black/10 bg-surface"
         ]}
       >
         <span class={[
@@ -429,7 +429,7 @@ defmodule WasomiWeb.AdminComponents do
           </g>
         </g>
       </svg>
-      <p :if={@data == []} class="mt-3 rounded-2xl bg-neutral-50 p-6 text-center text-sm text-muted">
+      <p :if={@data == []} class="mt-3 rounded-2xl bg-surface p-6 text-center text-sm text-muted">
         {@empty_message}
       </p>
     </div>
@@ -447,7 +447,7 @@ defmodule WasomiWeb.AdminComponents do
     do: "bg-amber-50 text-amber-700"
 
   defp status_classes(:failed), do: "bg-red-50 text-red-600"
-  defp status_classes(_status), do: "bg-neutral-50 text-body"
+  defp status_classes(_status), do: "bg-surface text-body"
 
   attr :item, :map, required: true
   attr :active, :atom, required: true
@@ -460,7 +460,7 @@ defmodule WasomiWeb.AdminComponents do
         "sidebar-row group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition",
         if(@item.key == @active,
           do: "bg-dark text-white shadow-sm",
-          else: "text-body hover:bg-neutral-50 hover:text-primary"
+          else: "text-body hover:bg-surface hover:text-primary"
         )
       ]}
     >
@@ -569,7 +569,7 @@ defmodule WasomiWeb.AdminComponents do
                 phx-value-id={if @question, do: @question.id, else: "new"}
                 phx-value-index={option_form.index}
                 tabindex="-1"
-                class="mt-8 p-2 text-muted hover:text-red-500 rounded-lg hover:bg-neutral-50 transition shrink-0"
+                class="mt-8 p-2 text-muted hover:text-red-500 rounded-lg hover:bg-surface transition shrink-0"
                 title="Remove option"
               >
                 <.icon name="hero-trash" class="h-4 w-4" />
@@ -584,7 +584,7 @@ defmodule WasomiWeb.AdminComponents do
               type="button"
               phx-click="add_option"
               phx-value-id={if @question, do: @question.id, else: "new"}
-              class="inline-flex items-center gap-1.5 rounded-full border border-black/10 px-3 py-1.5 text-xs font-semibold text-ink transition hover:bg-neutral-50 hover:text-primary active:scale-[0.96]"
+              class="inline-flex items-center gap-1.5 rounded-full border border-black/10 px-3 py-1.5 text-xs font-semibold text-ink transition hover:bg-surface hover:text-primary active:scale-[0.96]"
             >
               <.icon name="hero-plus-circle" class="h-4 w-4" /> Add option
             </button>

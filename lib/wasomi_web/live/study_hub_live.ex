@@ -20,6 +20,7 @@ defmodule WasomiWeb.StudyHubLive do
   import WasomiWeb.StudyComponents
   import WasomiWeb.CaptureProtection, only: [capture_guard_attrs: 1]
 
+  alias Wasomi.Accounts
   alias Wasomi.Assessments
   alias Wasomi.Assessments.SmartTest
   alias Wasomi.Assessments.StudyGuide
@@ -27,7 +28,6 @@ defmodule WasomiWeb.StudyHubLive do
   alias Wasomi.Assessments.Workers.GeneratePracticeSetQuestionsWorker
   alias Wasomi.Assessments.Workers.GenerateSmartTestWorker
   alias Wasomi.Assessments.Workers.GenerateStudyGuideWorker
-  alias Wasomi.Accounts
   alias Wasomi.Catalog
   alias Wasomi.Catalog.CourseModule
   alias Wasomi.Catalog.Lecture
@@ -1098,7 +1098,7 @@ defmodule WasomiWeb.StudyHubLive do
           <div class={
             if @embedded?,
               do: "overflow-hidden rounded-3xl border border-black/5 bg-white",
-              else: "mt-8 overflow-hidden rounded-3xl border border-black/5 bg-white"
+              else: "mt-8 overflow-hidden rounded-3xl border border-black/5 bg-white shadow-card"
           }>
             <%= case @step do %>
               <% :course -> %>

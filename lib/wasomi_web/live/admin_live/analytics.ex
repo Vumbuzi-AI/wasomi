@@ -179,7 +179,7 @@ defmodule WasomiWeb.AdminLive.Analytics do
           </.form>
 
           <div class="sr-only">
-            <div class="flex items-center gap-2 rounded-full border border-black/5 bg-neutral-50 p-1.5">
+            <div class="flex items-center gap-2 rounded-full border border-black/5 bg-surface p-1.5">
               <button
                 type="button"
                 phx-click={JS.push("switch_tab", value: %{tab: "overview"})}
@@ -311,14 +311,14 @@ defmodule WasomiWeb.AdminLive.Analytics do
 
             <p
               :if={@filtered_module_rows == [] and @module_rows != []}
-              class="mt-6 rounded-2xl bg-neutral-50 p-8 text-center text-sm text-body"
+              class="mx-6 my-6 rounded-xl border border-black/5 bg-surface/70 p-8 text-center text-sm text-body lg:mx-8"
             >
               No modules match "{@module_query}".
             </p>
 
             <p
               :if={@module_rows == []}
-              class="mt-6 rounded-2xl bg-neutral-50 p-8 text-center text-sm text-body"
+              class="mx-6 my-6 rounded-xl border border-black/5 bg-surface/70 p-8 text-center text-sm text-body lg:mx-8"
             >
               Select a course above to see module-level completion and quiz performance.
             </p>
@@ -356,7 +356,7 @@ defmodule WasomiWeb.AdminLive.Analytics do
 
               <p
                 :if={@revenue_by_course == []}
-                class="mt-6 rounded-2xl bg-neutral-50 p-8 text-center text-sm text-body"
+                class="mx-6 my-6 rounded-xl border border-black/5 bg-surface/70 p-8 text-center text-sm text-body lg:mx-8"
               >
                 No successful payments in range.
               </p>
@@ -402,14 +402,14 @@ defmodule WasomiWeb.AdminLive.Analytics do
 
               <p
                 :if={@filtered_module_rows == [] and @module_rows == []}
-                class="mt-6 rounded-2xl bg-neutral-50 p-8 text-center text-sm text-body"
+                class="mx-6 my-6 rounded-xl border border-black/5 bg-surface/70 p-8 text-center text-sm text-body lg:mx-8"
               >
                 Select a course above to see learner retention by module.
               </p>
             </section>
           </div>
 
-          <section class="rounded-3xl border border-black/5 bg-white p-6">
+          <section class="rounded-3xl border border-black/5 bg-white p-6 shadow-card">
             <h3 class="text-base font-semibold text-ink">Course leaderboard</h3>
             <p class="mt-1 text-xs text-body">Richest-first. Click a course for detail.</p>
             <.paginated_table
@@ -419,7 +419,7 @@ defmodule WasomiWeb.AdminLive.Analytics do
             >
               <div class="mt-4 overflow-x-auto rounded-2xl border border-black/5">
                 <table class="w-full text-left text-sm">
-                  <thead class="border-b border-black/5 bg-neutral-50 text-xs font-semibold uppercase tracking-wide text-body">
+                  <thead class="border-b border-black/5 bg-surface text-xs font-semibold uppercase tracking-wide text-body">
                     <tr>
                       <th class="px-6 py-4">Course</th>
                       <th class="px-6 py-4">Enrolled</th>
@@ -431,7 +431,7 @@ defmodule WasomiWeb.AdminLive.Analytics do
                   <tbody class="divide-y divide-black/5">
                     <tr
                       :for={row <- @scorecards_page.entries}
-                      class="transition hover:bg-neutral-50/60"
+                      class="transition even:bg-surface/50 hover:bg-mint/45"
                     >
                       <td class="px-6 py-4">
                         <.link
@@ -463,8 +463,8 @@ defmodule WasomiWeb.AdminLive.Analytics do
         </div>
 
         <div :if={@active_tab == :revenue}>
-          <section class="rounded-3xl border border-black/5 bg-white p-6">
-            <div class="rounded-2xl border border-black/5 bg-white p-5 shadow-sm">
+          <section class="rounded-3xl border border-black/5 bg-white p-6 shadow-card">
+            <div class="rounded-2xl border border-black/5 bg-white p-5">
               <.column_chart
                 title="Monthly revenue"
                 data={@revenue_chart}

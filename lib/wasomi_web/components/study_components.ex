@@ -500,7 +500,7 @@ defmodule WasomiWeb.StudyComponents do
             type="button"
             phx-click="flashcard-prev"
             disabled={@index == 0}
-            class="inline-flex items-center gap-1.5 rounded-xl border-2 border-ink px-5 py-3 text-sm font-semibold text-ink transition hover:bg-soft disabled:cursor-not-allowed disabled:opacity-40"
+            class="inline-flex items-center gap-1.5 rounded-xl border-2 border-ink px-5 py-3 text-sm font-semibold text-ink transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-40"
           >
             <.icon name="hero-arrow-left" class="h-4 w-4" /> Previous
           </button>
@@ -1110,6 +1110,7 @@ defmodule WasomiWeb.StudyComponents do
 
         <button
           :if={@smart_test}
+          id="finish-smart-test-top"
           type="button"
           phx-click="finish-smart-test"
           class="rounded-2xl bg-primary px-5 py-3 text-sm font-semibold text-white transition hover:bg-ink"
@@ -1237,6 +1238,7 @@ defmodule WasomiWeb.StudyComponents do
           {smart_test_answered_count(@questions)} of {length(@questions)} answered
         </p>
         <button
+          id="finish-smart-test-bottom"
           type="button"
           phx-click="finish-smart-test"
           class="rounded-2xl bg-primary px-6 py-3.5 text-base font-semibold text-white transition hover:bg-ink"

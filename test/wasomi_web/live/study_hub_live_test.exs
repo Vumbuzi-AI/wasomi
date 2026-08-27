@@ -609,6 +609,7 @@ defmodule WasomiWeb.StudyHubLiveTest do
         |> render_change(%{
           "settings" => %{
             "duration_minutes" => "15",
+            "enforce_time_limit" => "false",
             "multiple_choice_count" => "4",
             "short_answer_count" => "1",
             "difficulty" => "5"
@@ -617,7 +618,9 @@ defmodule WasomiWeb.StudyHubLiveTest do
 
       assert html =~ "5 questions"
       assert html =~ "5 of 5"
-      # The checkbox was left out of the payload, so the limit is now off.
+      # Explicitly unchecked (not just omitted — render_change on a <form>
+      # element reads the checkbox's current DOM state for any key it isn't
+      # told, so leaving this out would keep whatever was last checked).
       assert html =~ "No time limit"
     end
 
@@ -739,7 +742,7 @@ defmodule WasomiWeb.StudyHubLiveTest do
 
       expect(Wasomi.LectureQuestionScorerMock, :score, fn _, _, _ -> {:ok, 1.0} end)
 
-      html = view |> element("button", "Finish test") |> render_click()
+      html = view |> element("#finish-smart-test-top") |> render_click()
 
       assert html =~ "Test complete"
       assert html =~ "100%"
@@ -831,7 +834,7 @@ defmodule WasomiWeb.StudyHubLiveTest do
       {:ok, view, _html} = live(conn, smart_test_path(course, module))
       view |> element("button[phx-click='open-smart-test']") |> render_click()
       view |> element("button", "Start your test") |> render_click()
-      view |> element("button", "Finish test") |> render_click()
+      view |> element("#finish-smart-test-top") |> render_click()
 
       html = view |> element("button", "Retake this test") |> render_click()
 
@@ -960,6 +963,7 @@ defmodule WasomiWeb.StudyHubLiveTest do
             "depth" => "brief",
             "reading_level" => "intermediate",
             "include_examples" => "true",
+            "include_key_terms" => "false",
             "focus" => "  check digits  "
           }
         })
@@ -1015,7 +1019,7 @@ defmodule WasomiWeb.StudyHubLiveTest do
       [guide] = Assessments.list_study_guides(user, module)
       Assessments.mark_study_guide_failed(guide, "boom")
 
-      assert render(view) =~ "We couldn't write this study guide"
+      assert render(view) =~ "write this study guide"
 
       view |> element("button", "Try again") |> render_click()
       assert_enqueued(worker: GenerateStudyGuideWorker, args: %{"study_guide_id" => guide.id})

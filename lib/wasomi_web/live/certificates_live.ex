@@ -41,7 +41,7 @@ defmodule WasomiWeb.CertificatesLive do
           <article
             :for={certificate <- @certificates}
             id={"certificate-#{certificate.id}"}
-            class="flex items-center justify-between gap-4 rounded-3xl border border-black/5 bg-white p-6"
+            class="flex items-center justify-between gap-4 rounded-3xl border border-black/5 bg-white p-6 shadow-card"
           >
             <div class="min-w-0">
               <p class="text-xs font-semibold uppercase tracking-wider text-primary">
@@ -62,7 +62,7 @@ defmodule WasomiWeb.CertificatesLive do
         <div
           :if={@certificates == []}
           id="certificates-empty"
-          class="mt-8 rounded-3xl border border-black/5 bg-white p-8 text-center sm:p-12"
+          class="mt-8 rounded-3xl border border-black/5 bg-white p-8 text-center shadow-card sm:p-12"
         >
           <span class="mx-auto grid h-14 w-14 place-items-center rounded-full bg-mint text-primary">
             <.icon name="hero-trophy" class="h-7 w-7" />

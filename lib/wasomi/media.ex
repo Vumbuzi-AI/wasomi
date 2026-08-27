@@ -9,6 +9,7 @@ defmodule Wasomi.Media do
   alias Wasomi.Accounts.User
   alias Wasomi.Catalog.Lecture
   alias Wasomi.Enrollments
+  alias Wasomi.Media.Cloudflare
 
   @type upload :: %{required(:id) => String.t(), required(:url) => String.t()}
   @type upload_status ::
@@ -107,7 +108,7 @@ defmodule Wasomi.Media do
 
   defp protected_stream_url(%Lecture{video_provider: :cloudflare}, token)
        when is_binary(token) and token != "" do
-    {:ok, Wasomi.Media.Cloudflare.delivery_url(token, "/manifest/video.m3u8")}
+    {:ok, Cloudflare.delivery_url(token, "/manifest/video.m3u8")}
   end
 
   defp protected_stream_url(%Lecture{video_provider: provider}, _token),

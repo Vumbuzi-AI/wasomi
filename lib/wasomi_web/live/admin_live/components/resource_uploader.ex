@@ -56,7 +56,7 @@ defmodule WasomiWeb.AdminLive.Components.ResourceUploader do
           id={"resource-upload-#{entry.ref}"}
           class="flex items-center gap-3 rounded-xl border border-black/5 bg-white p-3"
         >
-          <span class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-neutral-50 text-primary">
+          <span class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-surface text-primary">
             <.icon name={file_icon(entry.client_name)} class="h-5 w-5" />
           </span>
           <div class="min-w-0 flex-1">
@@ -64,7 +64,7 @@ defmodule WasomiWeb.AdminLive.Components.ResourceUploader do
               <p class="truncate text-sm font-medium text-ink">{entry.client_name}</p>
               <span class="shrink-0 text-xs tabular-nums text-muted">{entry.progress}%</span>
             </div>
-            <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-neutral-50">
+            <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-surface">
               <div
                 class="h-full rounded-full bg-primary transition-[width]"
                 style={"width: #{entry.progress}%"}

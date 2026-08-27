@@ -31,8 +31,14 @@ defmodule WasomiWeb.AdminLive.CourseShow do
   # push_patch from the module/lecture form components lands here; reload and
   # close any open modal.
   @impl true
-  def handle_params(%{"slug" => slug}, _url, socket) do
-    {:noreply, socket |> load_course(slug) |> close_modal()}
+  def handle_params(%{"slug" => slug} = params, _url, socket) do
+    active_tab = course_detail_tab(params["tab"], socket.assigns[:active_tab] || :curriculum)
+
+    {:noreply,
+     socket
+     |> assign(:active_tab, active_tab)
+     |> load_course(slug)
+     |> close_modal()}
   end
 
   @impl true
@@ -164,7 +170,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
 
   def handle_event("switch_tab", %{"tab" => tab}, socket)
       when tab in ["curriculum", "students"] do
-    {:noreply, assign(socket, :active_tab, String.to_existing_atom(tab))}
+    {:noreply, assign(socket, :active_tab, course_detail_tab(tab, socket.assigns.active_tab))}
   end
 
   def handle_event("generate_quiz", %{"module-id" => module_id}, socket) do
@@ -466,36 +472,34 @@ defmodule WasomiWeb.AdminLive.CourseShow do
           id="course-detail-tabs"
           role="tablist"
           aria-label="Course details"
-          class="grid grid-cols-2 gap-1.5 rounded-2xl bg-neutral-100 p-1.5"
+          class="grid grid-cols-2 overflow-hidden rounded-2xl border border-black/5 bg-surface p-1"
         >
-          <button
+          <.link
             id="curriculum-tab"
-            type="button"
+            patch={~p"/admin/courses/#{@course.slug}?#{%{tab: "curriculum"}}"}
             role="tab"
             aria-selected={to_string(@active_tab == :curriculum)}
             aria-controls="curriculum-panel"
-            phx-click={JS.push("switch_tab", value: %{tab: "curriculum"})}
             class={[
-              "w-full rounded-xl px-4 py-3 text-sm font-semibold transition",
+              "rounded-xl py-2.5 text-center text-sm font-medium transition",
               if(@active_tab == :curriculum,
-                do: "bg-ink text-white shadow-sm",
+                do: "bg-ink text-white",
                 else: "text-body hover:text-ink"
               )
             ]}
           >
             Curriculum
-          </button>
-          <button
+          </.link>
+          <.link
             id="students-tab"
-            type="button"
+            patch={~p"/admin/courses/#{@course.slug}?#{%{tab: "students"}}"}
             role="tab"
             aria-selected={to_string(@active_tab == :students)}
             aria-controls="students-panel"
-            phx-click={JS.push("switch_tab", value: %{tab: "students"})}
             class={[
-              "w-full rounded-xl px-4 py-3 text-sm font-semibold transition",
+              "rounded-xl py-2.5 text-center text-sm font-medium transition",
               if(@active_tab == :students,
-                do: "bg-ink text-white shadow-sm",
+                do: "bg-ink text-white",
                 else: "text-body hover:text-ink"
               )
             ]}
@@ -507,7 +511,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
             ]}>
               {@student_count}
             </span>
-          </button>
+          </.link>
         </div>
 
         <%!-- Curriculum (editable) --%>
@@ -516,7 +520,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
           id="curriculum-panel"
           role="tabpanel"
           aria-labelledby="curriculum-tab"
-          class="rounded-3xl border border-black/5 bg-white p-6 lg:p-8"
+          class="rounded-3xl border border-black/5 bg-white p-6 shadow-card lg:p-8"
         >
           <div class="flex flex-wrap items-center justify-between gap-4">
             <div>
@@ -548,7 +552,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
               data-sortable-item
               data-id={module.id}
               draggable="false"
-              class="rounded-2xl border border-black/5 bg-neutral-50 p-5 transition data-[dragging=true]:opacity-60 data-[drag-over=true]:border-primary data-[drag-over=true]:bg-mint/50"
+              class="rounded-xl border border-black/10 bg-surface/30 p-5 transition data-[dragging=true]:opacity-60 data-[drag-over=true]:border-primary data-[drag-over=true]:bg-mint/50"
             >
               <div class="flex items-start gap-4">
                 <button
@@ -577,7 +581,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                     class="h-4 w-4"
                   />
                 </button>
-                <span class="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-full bg-neutral-200 font-semibold text-primary">
+                <span class="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-full border border-primary/20 bg-mint font-semibold text-primary">
                   {module.position}
                 </span>
                 <div class="min-w-0 flex-1">
@@ -624,7 +628,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                         data-sortable-item
                         data-id={lecture.id}
                         draggable="false"
-                        class="flex items-center justify-between gap-3 rounded-xl border border-black/5 bg-white px-4 py-3 transition data-[dragging=true]:opacity-60 data-[drag-over=true]:border-primary data-[drag-over=true]:bg-mint/50"
+                        class="flex items-center justify-between gap-3 rounded-lg border border-black/5 bg-white px-4 py-3 transition data-[dragging=true]:opacity-60 data-[drag-over=true]:border-primary data-[drag-over=true]:bg-mint/50"
                       >
                         <span class="flex min-w-0 items-center gap-3">
                           <button
@@ -705,7 +709,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
 
                     <div
                       :for={quiz <- List.wrap(Map.get(@quizzes_by_module, module.id))}
-                      class="mt-2.5 flex items-center justify-between gap-3 rounded-xl border border-black/5 bg-mint/40 px-4 py-3"
+                      class="mt-2.5 flex items-center justify-between gap-3 rounded-lg border border-primary/10 bg-mint/35 px-4 py-3"
                     >
                       <span class="flex min-w-0 items-center gap-3 text-sm text-ink">
                         <.icon
@@ -793,7 +797,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
 
           <div
             :if={@course.modules == []}
-            class="mt-6 rounded-2xl border border-dashed border-black/10 bg-neutral-50/40 p-10 text-center"
+            class="mt-6 rounded-2xl border border-dashed border-black/10 bg-surface/40 p-10 text-center"
           >
             <span class="mx-auto grid h-12 w-12 place-items-center rounded-full bg-mint text-primary">
               <.icon name="hero-rectangle-stack" class="h-6 w-6" />
@@ -811,13 +815,13 @@ defmodule WasomiWeb.AdminLive.CourseShow do
           id="students-panel"
           role="tabpanel"
           aria-labelledby="students-tab"
-          class="rounded-3xl border border-black/5 bg-white p-6 lg:p-8"
+          class="rounded-3xl border border-black/5 bg-white p-6 shadow-card lg:p-8"
         >
           <h2 class="text-xl font-semibold text-ink">Enrolled students</h2>
 
           <div :if={@students != []} class="mt-5 overflow-x-auto">
             <table class="w-full text-left text-sm">
-              <thead class="border-b border-black/5 text-xs uppercase tracking-wide text-body">
+              <thead class="border-b border-black/5 bg-surface text-xs uppercase tracking-wide text-body">
                 <tr>
                   <th class="py-3 pr-4 font-semibold">Student</th>
                   <th class="py-3 pr-4 font-semibold">Enrolled</th>
@@ -827,7 +831,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                 </tr>
               </thead>
               <tbody class="divide-y divide-black/5">
-                <tr :for={row <- @students}>
+                <tr :for={row <- @students} class="transition even:bg-surface/50 hover:bg-mint/45">
                   <td class="py-3 pr-4">
                     <.link
                       navigate={~p"/admin/students/#{row.enrollment.user_id}"}
@@ -840,7 +844,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                   <td class="py-3 pr-4 text-body">{format_date(row.enrollment.activated_at)}</td>
                   <td class="py-3 pr-4">
                     <div class="flex items-center gap-2">
-                      <div class="h-1.5 w-16 overflow-hidden rounded-full bg-neutral-50">
+                      <div class="h-1.5 w-16 overflow-hidden rounded-full bg-surface">
                         <div
                           class="h-full rounded-full bg-primary"
                           style={"width: #{row.completion_percent}%"}
@@ -870,7 +874,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
             </table>
           </div>
 
-          <p :if={@students == []} class="mt-5 rounded-2xl bg-neutral-50 p-5 text-body">
+          <p :if={@students == []} class="mt-5 rounded-2xl bg-surface p-5 text-body">
             No students have enrolled in this course yet.
           </p>
         </section>
@@ -1027,6 +1031,10 @@ defmodule WasomiWeb.AdminLive.CourseShow do
     </.admin_layout>
     """
   end
+
+  defp course_detail_tab("students", _current_tab), do: :students
+  defp course_detail_tab("curriculum", _current_tab), do: :curriculum
+  defp course_detail_tab(_tab, current_tab), do: current_tab
 
   defp to_int(value) when is_integer(value), do: value
   defp to_int(value) when is_binary(value), do: String.to_integer(value)

@@ -599,7 +599,7 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
 
       view |> element("button[phx-value-tool='flashcards']") |> render_click()
 
-      assert has_element?(view, "#embedded-study-tool-flashcards")
+      assert has_element?(view, "#embedded-study-tool-flashcards-lesson")
     end
 
     test "Smart Test stays in the course workspace and opens at the scope picker", %{
@@ -616,10 +616,10 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
       view |> element("button[data-lecture-id='#{lecture.id}']") |> render_click()
       view |> element("button[phx-value-tool='timed_quiz']") |> render_click()
 
-      assert has_element?(view, "#embedded-study-tool-timed_quiz")
+      assert has_element?(view, "#embedded-study-tool-timed_quiz-lesson")
       refute has_element?(view, "iframe")
 
-      smart_test = find_live_child(view, "embedded-study-tool-timed_quiz")
+      smart_test = find_live_child(view, "embedded-study-tool-timed_quiz-lesson")
       assert has_element?(smart_test, "h2", "Study the whole module, or one lesson?")
 
       smart_test |> element("button[phx-value-scope='module']") |> render_click()
@@ -639,7 +639,7 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
 
       view |> element("button[phx-value-tool='flashcards']") |> render_click()
 
-      assert has_element?(view, "#embedded-study-tool-flashcards")
+      assert has_element?(view, "#embedded-study-tool-flashcards-lesson")
     end
 
     test "an unknown section value is ignored rather than crashing the view", %{

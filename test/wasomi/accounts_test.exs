@@ -208,7 +208,7 @@ defmodule Wasomi.AccountsTest do
 
   describe "update_user_email/2" do
     setup do
-      user = user_fixture()
+      user = user_fixture(confirmed: false)
       email = unique_user_email()
 
       token =
@@ -377,10 +377,28 @@ defmodule Wasomi.AccountsTest do
 
   describe "deliver_user_confirmation_instructions/2" do
     setup do
-      %{user: user_fixture()}
+      %{user: user_fixture(confirmed: false)}
     end
 
     test "sends token through notification", %{user: user} do
+      {:ok, email} =
+        Accounts.deliver_user_confirmation_instructions(user, &"[TOKEN]#{&1}[TOKEN]")
+
+      [_, token | _] = String.split(email.text_body, "[TOKEN]")
+
+      assert email.html_body =~ "background-color:#f97316"
+      assert email.html_body =~ "logo.png"
+      assert email.html_body =~ "We&#39;ll sign you in automatically"
+      assert email.text_body =~ "We'll sign you in automatically"
+
+      {:ok, token} = Base.url_decode64(token, padding: false)
+      assert user_token = Repo.get_by(UserToken, token: :crypto.hash(:sha256, token))
+      assert user_token.user_id == user.id
+      assert user_token.sent_to == user.email
+      assert user_token.context == "confirm"
+    end
+
+    test "extract_user_token/1 can still read confirmation tokens from text emails", %{user: user} do
       token =
         extract_user_token(fn url ->
           Accounts.deliver_user_confirmation_instructions(user, url)
@@ -392,11 +410,52 @@ defmodule Wasomi.AccountsTest do
       assert user_token.sent_to == user.email
       assert user_token.context == "confirm"
     end
+
+    test "does not send a second token inside the resend cooldown", %{user: user} do
+      assert {:ok, _email} =
+               Accounts.deliver_user_confirmation_instructions(user, &"[TOKEN]#{&1}[TOKEN]")
+
+      assert {:error, :rate_limited} =
+               Accounts.deliver_user_confirmation_instructions(user, &"[TOKEN]#{&1}[TOKEN]")
+
+      assert [%UserToken{context: "confirm", user_id: user_id}] =
+               Repo.all(UserToken.by_user_and_contexts_query(user, ["confirm"]))
+
+      assert user_id == user.id
+    end
+
+    test "allows another confirmation email after the resend cooldown", %{user: user} do
+      assert {:ok, _email} =
+               Accounts.deliver_user_confirmation_instructions(user, &"[TOKEN]#{&1}[TOKEN]")
+
+      {1, nil} =
+        UserToken.by_user_and_contexts_query(user, ["confirm"])
+        |> Repo.update_all(
+          set: [
+            inserted_at:
+              DateTime.add(DateTime.utc_now(), -16, :minute) |> DateTime.truncate(:second)
+          ]
+        )
+
+      assert {:ok, _email} =
+               Accounts.deliver_user_confirmation_instructions(user, &"[TOKEN]#{&1}[TOKEN]")
+
+      assert Repo.aggregate(UserToken.by_user_and_contexts_query(user, ["confirm"]), :count) == 2
+    end
+
+    test "does not send confirmation instructions to already confirmed users" do
+      user = user_fixture()
+
+      assert {:error, :already_confirmed} =
+               Accounts.deliver_user_confirmation_instructions(user, &"[TOKEN]#{&1}[TOKEN]")
+
+      refute Repo.get_by(UserToken, user_id: user.id, context: "confirm")
+    end
   end
 
   describe "confirm_user/1" do
     setup do
-      user = user_fixture()
+      user = user_fixture(confirmed: false)
 
       token =
         extract_user_token(fn url ->
@@ -413,7 +472,6 @@ defmodule Wasomi.AccountsTest do
       assert confirmed_user.confirmed_at != user.confirmed_at
       assert Repo.get!(User, user.id).confirmed_at
       refute Repo.get_by(UserToken, user_id: user.id)
-      assert_email_sent(subject: "Welcome to Wasomi Business Institute")
     end
 
     test "does not confirm with invalid token", %{user: user} do

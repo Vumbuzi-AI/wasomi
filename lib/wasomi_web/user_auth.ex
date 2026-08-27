@@ -72,9 +72,10 @@ defmodule WasomiWeb.UserAuth do
 
   It clears all session data for safety. See renew_session.
   """
-  def log_out_user(conn) do
+  def log_out_user(conn, opts \\ []) do
     user_token = get_session(conn, :user_token)
     user_token && Accounts.delete_user_session_token(user_token)
+    redirect_to = Keyword.get(opts, :to, ~p"/")
 
     if live_socket_id = get_session(conn, :live_socket_id) do
       WasomiWeb.Endpoint.broadcast(live_socket_id, "disconnect", %{})
@@ -83,7 +84,7 @@ defmodule WasomiWeb.UserAuth do
     conn
     |> renew_session()
     |> delete_resp_cookie(@remember_me_cookie)
-    |> redirect(to: ~p"/")
+    |> redirect(to: redirect_to)
   end
 
   @doc """
@@ -155,15 +156,20 @@ defmodule WasomiWeb.UserAuth do
   def on_mount(:ensure_authenticated, _params, session, socket) do
     socket = mount_current_user(socket, session)
 
-    if socket.assigns.current_user do
-      {:cont, socket}
-    else
-      socket =
-        socket
-        |> Phoenix.LiveView.put_flash(:error, "You must log in to access this page.")
-        |> Phoenix.LiveView.redirect(to: ~p"/users/log_in")
+    case socket.assigns.current_user do
+      nil ->
+        socket =
+          socket
+          |> Phoenix.LiveView.put_flash(:error, "You must log in to access this page.")
+          |> Phoenix.LiveView.redirect(to: ~p"/users/log_in")
 
-      {:halt, socket}
+        {:halt, socket}
+
+      %{confirmed_at: nil} ->
+        {:halt, redirect_unconfirmed_live_user(socket)}
+
+      _user ->
+        {:cont, socket}
     end
   end
 
@@ -181,6 +187,9 @@ defmodule WasomiWeb.UserAuth do
     socket = mount_current_user(socket, session)
 
     case socket.assigns.current_user do
+      %{confirmed_at: nil} ->
+        {:halt, redirect_unconfirmed_live_user(socket)}
+
       %{role: :admin} ->
         {:cont, Phoenix.Component.assign(socket, :page_title_suffix, " · Wasomi Admin")}
 
@@ -230,14 +239,19 @@ defmodule WasomiWeb.UserAuth do
   they use the application at all, here would be a good place.
   """
   def require_authenticated_user(conn, _opts) do
-    if conn.assigns[:current_user] do
-      conn
-    else
-      conn
-      |> put_flash(:error, "You must log in to access this page.")
-      |> maybe_store_return_to()
-      |> redirect(to: ~p"/users/log_in")
-      |> halt()
+    case conn.assigns[:current_user] do
+      nil ->
+        conn
+        |> put_flash(:error, "You must log in to access this page.")
+        |> maybe_store_return_to()
+        |> redirect(to: ~p"/users/log_in")
+        |> halt()
+
+      %{confirmed_at: nil} ->
+        redirect_unconfirmed_conn(conn)
+
+      _user ->
+        conn
     end
   end
 
@@ -246,6 +260,10 @@ defmodule WasomiWeb.UserAuth do
   """
   def require_admin(conn, _opts) do
     case conn.assigns[:current_user] do
+      # unreachable via router (require_authenticated_user already catches this) — kept for standalone calls
+      %{confirmed_at: nil} ->
+        redirect_unconfirmed_conn(conn)
+
       %{role: :admin} ->
         conn
 
@@ -276,6 +294,25 @@ defmodule WasomiWeb.UserAuth do
 
   defp maybe_store_return_to(conn), do: conn
 
-  defp signed_in_path(%{role: :admin}), do: ~p"/admin"
-  defp signed_in_path(_user), do: ~p"/dashboard"
+  @doc """
+  Where a user lands after auth actions that don't have their own explicit
+  destination — unconfirmed users go back to the confirmation page, admins
+  to `/admin`, everyone else to `/dashboard`.
+  """
+  def signed_in_path(%{confirmed_at: nil}), do: ~p"/users/confirm"
+  def signed_in_path(%{role: :admin}), do: ~p"/admin"
+  def signed_in_path(_user), do: ~p"/dashboard"
+
+  defp redirect_unconfirmed_conn(conn) do
+    conn
+    |> put_flash(:error, "Please confirm your email before continuing.")
+    |> redirect(to: ~p"/users/confirm")
+    |> halt()
+  end
+
+  defp redirect_unconfirmed_live_user(socket) do
+    socket
+    |> Phoenix.LiveView.put_flash(:error, "Please confirm your email before continuing.")
+    |> Phoenix.LiveView.redirect(to: ~p"/users/confirm")
+  end
 end

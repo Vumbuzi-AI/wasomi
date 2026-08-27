@@ -164,10 +164,11 @@ defmodule Wasomi.Emails.TemplateTest do
   end
 
   describe "logo" do
-    test "render/1 inlines the real logo as a data URI, not the old placeholder mark" do
+    test "render/1 uses the real logo image, not the old placeholder mark" do
       html = Template.render(%{title: "Welcome"})
 
-      assert html =~ ~s(<img src="data:image/png;base64,)
+      assert html =~ ~s(<img src="http)
+      assert html =~ "/images/logo.png"
       assert html =~ ~s(alt="Wasomi")
     end
   end

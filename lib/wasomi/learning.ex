@@ -28,12 +28,9 @@ defmodule Wasomi.Learning do
   @never_started_threshold_days 7
   @gone_quiet_threshold_days 14
 
-  # Each trigger is a 3-touch sequence, not a single email: `{kind,
-  # gap_days, previous_kind}`. `gap_days` is measured from the previous
-  # touch's own `inserted_at` (not a fixed point like `enrolled_at`) so a
-  # cron catching up after downtime can never fire two touches for the same
-  # enrollment on the same run — touch N can only become eligible once
-  # touch N-1's notification has existed for `gap_days`.
+  # `{kind, gap_days, previous_kind}` per touch. `gap_days` counts from the
+  # previous touch's `inserted_at`, not a fixed origin — keeps a delayed
+  # cron from firing two touches on the same day.
   @never_started_touches %{
     1 => {:reengagement_never_started, @never_started_threshold_days, nil},
     2 => {:reengagement_never_started_2, 7, :reengagement_never_started},
@@ -640,14 +637,11 @@ defmodule Wasomi.Learning do
     |> Enum.reject(&course_complete?(&1.user, &1.course))
   end
 
-  # Touch 1 of either sequence gates on the enrollment's own fixed origin
-  # point (`enrolled_at` for never-started; gone-quiet's origin is already
-  # baked into its base query above, via the progress-staleness check, so
-  # `:none` here is a no-op). Touch 2/3 replace that with "the previous
-  # touch's notification exists and was sent at least `gap_days` ago" —
-  # this is what makes the sequence self-correcting: touch N simply cannot
-  # become eligible before touch N-1 has existed for a full gap, no matter
-  # when the scan runs.
+  # Touch 1 gates on the enrollment's own origin (`:none` is a no-op for
+  # gone-quiet, whose origin is already in its base query above). Touch 2/3
+  # instead require the previous touch's notification to be `gap_days` old
+  # — this is what makes the sequence self-correcting regardless of when
+  # the cron actually runs.
   defp gate_on_previous_touch_or_origin(query, nil, cutoff, :enrolled_at) do
     where(query, [enrollment: e], e.enrolled_at <= ^cutoff)
   end

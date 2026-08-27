@@ -281,6 +281,38 @@ defmodule Wasomi.Accounts do
     end
   end
 
+  @doc """
+  Returns an `%Ecto.Changeset{}` for changing the user's private profile
+  (bio, country, occupation, avatar).
+
+  ## Examples
+
+      iex> change_user_profile(user)
+      %Ecto.Changeset{data: %User{}}
+
+  """
+  def change_user_profile(user, attrs \\ %{}) do
+    User.profile_changeset(user, attrs)
+  end
+
+  @doc """
+  Updates the user's private profile.
+
+  ## Examples
+
+      iex> update_user_profile(user, %{bio: "..."})
+      {:ok, %User{}}
+
+      iex> update_user_profile(user, %{country: "Not a country"})
+      {:error, %Ecto.Changeset{}}
+
+  """
+  def update_user_profile(%User{} = user, attrs) do
+    user
+    |> User.profile_changeset(attrs)
+    |> Repo.update()
+  end
+
   ## Session
 
   @doc """

@@ -248,11 +248,13 @@ defmodule WasomiWeb.HomeComponents do
   defp home_destination_label(%{role: :admin}), do: "Admin dashboard"
   defp home_destination_label(_user), do: "My dashboard"
 
+  attr :images, :map, required: true
+
   def hero(assigns) do
     ~H"""
     <section class="relative isolate min-h-[640px] overflow-hidden bg-dark lg:min-h-[740px]">
       <img
-        src="/images/hero-home.png"
+        src={@images.hero.url}
         alt=""
         aria-hidden="true"
         class="absolute inset-0 h-full w-full animate-image-in object-cover object-top"
@@ -348,6 +350,8 @@ defmodule WasomiWeb.HomeComponents do
     """
   end
 
+  attr :images, :map, required: true
+
   def gs1_in_action(assigns) do
     ~H"""
     <section class="bg-white py-20 lg:py-28">
@@ -399,7 +403,10 @@ defmodule WasomiWeb.HomeComponents do
           </div>
 
           <div class="hidden border border-black/10 -mx-6 sm:-mx-10 lg:grid-cols-2 peer-checked/s1:grid peer-checked/s1:animate-fade-up">
-            <.gs1_step_visual image="/images/gs1-box.png" alt="Product labelled with a GS1 barcode" />
+            <.gs1_step_visual
+              image={@images.gs1_step_identify.url}
+              alt={@images.gs1_step_identify.alt}
+            />
             <.gs1_step_content
               eyebrow="Step 01 · Identify"
               title="Give every product a clear identity"
@@ -410,10 +417,7 @@ defmodule WasomiWeb.HomeComponents do
           </div>
 
           <div class="hidden border border-black/10 -mx-6 sm:-mx-10 lg:grid-cols-2 peer-checked/s2:grid peer-checked/s2:animate-fade-up">
-            <.gs1_step_visual
-              image="/images/hero-home.png"
-              alt="Scanning a barcode to capture product data"
-            />
+            <.gs1_step_visual image={@images.gs1_step_capture.url} alt={@images.gs1_step_capture.alt} />
             <.gs1_step_content
               eyebrow="Step 02 · Capture"
               title="Capture product data accurately"
@@ -424,10 +428,7 @@ defmodule WasomiWeb.HomeComponents do
           </div>
 
           <div class="hidden border border-black/10 -mx-6 sm:-mx-10 lg:grid-cols-2 peer-checked/s3:grid peer-checked/s3:animate-fade-up">
-            <.gs1_step_visual
-              image="/images/hero_image.jpg"
-              alt="Trading partners sharing product data"
-            />
+            <.gs1_step_visual image={@images.gs1_step_share.url} alt={@images.gs1_step_share.alt} />
             <.gs1_step_content
               eyebrow="Step 03 · Share"
               title="Share trusted data with partners"
@@ -438,10 +439,7 @@ defmodule WasomiWeb.HomeComponents do
           </div>
 
           <div class="hidden border border-black/10 -mx-6 sm:-mx-10 lg:grid-cols-2 peer-checked/s4:grid peer-checked/s4:animate-fade-up">
-            <.gs1_step_visual
-              image="/images/auth-learning-bg.jpg"
-              alt="Verifying a product along its journey"
-            />
+            <.gs1_step_visual image={@images.gs1_step_verify.url} alt={@images.gs1_step_verify.alt} />
             <.gs1_step_content
               eyebrow="Step 04 · Verify"
               title="Verify products across the journey"

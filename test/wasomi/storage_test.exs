@@ -61,6 +61,58 @@ defmodule Wasomi.StorageTest do
              })
   end
 
+  test "R2 honors a caller-supplied max_image_bytes override for image uploads" do
+    assert {:error, :image_too_large} =
+             R2.presign_upload(nil, %{
+               "filename" => "hero.png",
+               "content_type" => "image/png",
+               "size" => 2_000_001
+             })
+
+    assert {:error, :image_too_large} =
+             R2.presign_upload(nil, %{
+               "filename" => "hero.png",
+               "content_type" => "image/png",
+               "size" => 5_000_001,
+               "max_image_bytes" => 5_000_000
+             })
+  end
+
+  test "R2 clamps a max_image_bytes override to its hard ceiling" do
+    previous_bucket = Application.get_env(:wasomi, :r2_bucket)
+    previous_endpoint = Application.get_env(:wasomi, :r2_endpoint)
+    previous_access = Application.get_env(:ex_aws, :access_key_id)
+    previous_secret = Application.get_env(:ex_aws, :secret_access_key)
+
+    on_exit(fn ->
+      Application.put_env(:wasomi, :r2_bucket, previous_bucket)
+      Application.put_env(:wasomi, :r2_endpoint, previous_endpoint)
+      Application.put_env(:ex_aws, :access_key_id, previous_access)
+      Application.put_env(:ex_aws, :secret_access_key, previous_secret)
+    end)
+
+    Application.put_env(:wasomi, :r2_bucket, "test-bucket")
+    Application.put_env(:wasomi, :r2_endpoint, "https://r2.example.test")
+    Application.put_env(:ex_aws, :access_key_id, "test-access-key")
+    Application.put_env(:ex_aws, :secret_access_key, "test-secret-key")
+
+    assert {:error, :image_too_large} =
+             R2.presign_upload(nil, %{
+               "filename" => "hero.png",
+               "content_type" => "image/png",
+               "size" => 10_000_001,
+               "max_image_bytes" => 50_000_000
+             })
+
+    assert {:ok, %{kind: :image}} =
+             R2.presign_upload(nil, %{
+               "filename" => "hero.png",
+               "content_type" => "image/png",
+               "size" => 5_000_000,
+               "max_image_bytes" => 50_000_000
+             })
+  end
+
   test "R2 accepts a PNG upload within the size limit" do
     previous_bucket = Application.get_env(:wasomi, :r2_bucket)
     previous_endpoint = Application.get_env(:wasomi, :r2_endpoint)

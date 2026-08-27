@@ -25,7 +25,13 @@ defmodule WasomiWeb.AdminComponents do
     %{key: :mentors, label: "Mentors", icon: "hero-user-group", path: "/admin/mentors"},
     %{key: :students, label: "Students", icon: "hero-users", path: "/admin/students"},
     %{key: :payments, label: "Payments", icon: "hero-banknotes", path: "/admin/payments"},
-    %{key: :analytics, label: "Analytics", icon: "hero-chart-bar", path: "/admin/analytics"}
+    %{key: :analytics, label: "Analytics", icon: "hero-chart-bar", path: "/admin/analytics"},
+    %{
+      key: :landing_images,
+      label: "Landing page",
+      icon: "hero-photo",
+      path: "/admin/landing-images"
+    }
   ]
 
   @doc """
@@ -34,7 +40,8 @@ defmodule WasomiWeb.AdminComponents do
   ## Attributes
 
     * `:active` - key of the active nav item (`:overview`, `:courses`,
-      `:students`, `:payments`, `:analytics`). Defaults to `nil`.
+      `:students`, `:payments`, `:analytics`, `:landing_images`). Defaults
+      to `nil`.
     * `:current_user` - the signed-in admin, used for the profile footer.
   """
   attr :active, :atom, default: nil

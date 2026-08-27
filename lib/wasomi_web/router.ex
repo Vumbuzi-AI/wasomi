@@ -83,6 +83,7 @@ defmodule WasomiWeb.Router do
       live "/users/settings/confirm_email/:token", UserSettingsLive, :confirm_email
       live "/dashboard", DashboardLive, :index
       live "/notifications", NotificationsLive, :index
+      live "/catalog", CatalogLive.Portal, :index
       live "/courses-taken", CoursesTakenLive, :index
       live "/certificates", CertificatesLive, :index
       live "/courses/:slug/checkout", CheckoutLive, :show
@@ -134,10 +135,11 @@ defmodule WasomiWeb.Router do
     pipe_through [:browser]
 
     delete "/users/log_out", UserSessionController, :delete
+    get "/users/confirm/:token", UserConfirmationController, :show
+    post "/users/confirm/:token", UserConfirmationController, :confirm
 
     live_session :current_user,
       on_mount: [{WasomiWeb.UserAuth, :mount_current_user}] do
-      live "/users/confirm/:token", UserConfirmationLive, :edit
       live "/users/confirm", UserConfirmationInstructionsLive, :new
     end
   end

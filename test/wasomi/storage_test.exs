@@ -198,6 +198,104 @@ defmodule Wasomi.StorageTest do
     assert {:ok, {^admin, "key.pdf"}} = Storage.delete_upload(admin, "key.pdf")
   end
 
+  describe "presign_avatar_upload/3" do
+    test "any authenticated learner (not just admins) can request one" do
+      learner = Wasomi.AccountsFixtures.user_fixture()
+
+      assert {:ok, %{user: ^learner, attrs: %{"prefix" => prefix}}} =
+               Storage.presign_avatar_upload(learner, %{filename: "me.png"}, Adapter)
+
+      assert prefix == "avatars/#{learner.id}"
+    end
+
+    test "forces the prefix to the caller's own avatar path, ignoring a client-supplied one" do
+      learner = Wasomi.AccountsFixtures.user_fixture()
+
+      assert {:ok, %{attrs: %{"prefix" => prefix}}} =
+               Storage.presign_avatar_upload(
+                 learner,
+                 %{"filename" => "me.png", "prefix" => "avatars/someone-elses-id"},
+                 Adapter
+               )
+
+      assert prefix == "avatars/#{learner.id}"
+    end
+
+    test "presign_avatar_upload/2 reads the configured adapter at runtime" do
+      previous = Application.get_env(:wasomi, :storage_provider)
+      on_exit(fn -> Application.put_env(:wasomi, :storage_provider, previous) end)
+      Application.put_env(:wasomi, :storage_provider, Adapter)
+
+      learner = Wasomi.AccountsFixtures.user_fixture()
+
+      assert {:ok, %{user: ^learner}} =
+               Storage.presign_avatar_upload(learner, %{filename: "me.png"})
+    end
+
+    test "R2 still rejects an unsupported type or an oversized avatar" do
+      previous_bucket = Application.get_env(:wasomi, :r2_bucket)
+      previous_endpoint = Application.get_env(:wasomi, :r2_endpoint)
+
+      on_exit(fn ->
+        Application.put_env(:wasomi, :r2_bucket, previous_bucket)
+        Application.put_env(:wasomi, :r2_endpoint, previous_endpoint)
+      end)
+
+      Application.put_env(:wasomi, :r2_bucket, "test-bucket")
+      Application.put_env(:wasomi, :r2_endpoint, "https://r2.example.test")
+
+      learner = Wasomi.AccountsFixtures.user_fixture()
+
+      assert {:error, :unsupported_content_type} =
+               Storage.presign_avatar_upload(
+                 learner,
+                 %{"filename" => "me.gif", "content_type" => "image/gif", "size" => 100},
+                 R2
+               )
+
+      assert {:error, :image_too_large} =
+               Storage.presign_avatar_upload(
+                 learner,
+                 %{"filename" => "me.png", "content_type" => "image/png", "size" => 2_000_001},
+                 R2
+               )
+    end
+
+    test "R2 accepts PNG, JPEG, and WEBP avatars — the formats the settings UI advertises" do
+      previous_bucket = Application.get_env(:wasomi, :r2_bucket)
+      previous_endpoint = Application.get_env(:wasomi, :r2_endpoint)
+      previous_access = Application.get_env(:ex_aws, :access_key_id)
+      previous_secret = Application.get_env(:ex_aws, :secret_access_key)
+
+      on_exit(fn ->
+        Application.put_env(:wasomi, :r2_bucket, previous_bucket)
+        Application.put_env(:wasomi, :r2_endpoint, previous_endpoint)
+        Application.put_env(:ex_aws, :access_key_id, previous_access)
+        Application.put_env(:ex_aws, :secret_access_key, previous_secret)
+      end)
+
+      Application.put_env(:wasomi, :r2_bucket, "test-bucket")
+      Application.put_env(:wasomi, :r2_endpoint, "https://r2.example.test")
+      Application.put_env(:ex_aws, :access_key_id, "test-access-key")
+      Application.put_env(:ex_aws, :secret_access_key, "test-secret-key")
+
+      learner = Wasomi.AccountsFixtures.user_fixture()
+
+      for {filename, content_type} <- [
+            {"me.png", "image/png"},
+            {"me.jpg", "image/jpeg"},
+            {"me.webp", "image/webp"}
+          ] do
+        assert {:ok, %{content_type: ^content_type}} =
+                 Storage.presign_avatar_upload(
+                   learner,
+                   %{"filename" => filename, "content_type" => content_type, "size" => 100},
+                   R2
+                 )
+      end
+    end
+  end
+
   defmodule MockExAwsHttpClient do
     def request(method, url, body, headers, _opts) do
       send(self(), {:http_request, method, url, body, headers})

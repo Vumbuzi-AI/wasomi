@@ -1,0 +1,33 @@
+<.auth_shell active={:register} back_to={~p"/users/confirm"} back_label="Need a new link?">
+  <h1 class="mt-8 text-4xl font-semibold text-dark">Confirm your account</h1>
+  <p class="mt-2 text-body">
+    Confirming as <span class="font-semibold text-dark">{@pending_user.email}</span>.
+  </p>
+
+  <.form
+    for={%{}}
+    id="confirmation_form"
+    action={~p"/users/confirm/#{@token}"}
+    method="post"
+    class="mt-8"
+  >
+    <button
+      type="submit"
+      phx-disable-with="Confirming..."
+      class="group inline-flex w-full items-center justify-center gap-2 rounded-full bg-slate-100 px-6 py-3.5 font-semibold text-dark transition hover:bg-dark hover:text-white"
+    >
+      Confirm my account
+      <svg
+        class="h-4 w-4"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <polyline points="20 6 9 17 4 12" />
+      </svg>
+    </button>
+  </.form>
+</.auth_shell>

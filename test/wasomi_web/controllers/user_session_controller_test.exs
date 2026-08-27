@@ -45,6 +45,33 @@ defmodule WasomiWeb.UserSessionControllerTest do
       assert redirected_to(conn) == ~p"/admin"
     end
 
+    test "rejects unconfirmed users and redirects to confirmation instructions without creating a session",
+         %{conn: conn} do
+      user = user_fixture(confirmed: false)
+
+      conn =
+        post(conn, ~p"/users/log_in", %{
+          "user" => %{"email" => user.email, "password" => valid_user_password()}
+        })
+
+      refute get_session(conn, :user_token)
+      assert redirected_to(conn) == ~p"/users/confirm?email=#{user.email}"
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~
+               "Please confirm your email address before logging in"
+    end
+
+    test "preserves a `+`-tagged email through the unconfirmed-login redirect", %{conn: conn} do
+      user = user_fixture(email: "learner+tag@example.com", confirmed: false)
+
+      conn =
+        post(conn, ~p"/users/log_in", %{
+          "user" => %{"email" => user.email, "password" => valid_user_password()}
+        })
+
+      assert redirected_to(conn) == ~p"/users/confirm?#{[email: user.email]}"
+    end
+
     test "logs the user in with return to", %{conn: conn, user: user} do
       conn =
         conn
@@ -58,21 +85,6 @@ defmodule WasomiWeb.UserSessionControllerTest do
 
       assert redirected_to(conn) == "/foo/bar"
       assert Phoenix.Flash.get(conn.assigns.flash, :info) =~ "Welcome back!"
-    end
-
-    test "login following registration", %{conn: conn, user: user} do
-      conn =
-        conn
-        |> post(~p"/users/log_in", %{
-          "_action" => "registered",
-          "user" => %{
-            "email" => user.email,
-            "password" => valid_user_password()
-          }
-        })
-
-      assert redirected_to(conn) == ~p"/dashboard"
-      assert Phoenix.Flash.get(conn.assigns.flash, :info) =~ "Account created successfully"
     end
 
     test "login following password update", %{conn: conn, user: user} do

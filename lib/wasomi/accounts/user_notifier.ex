@@ -24,12 +24,14 @@ defmodule Wasomi.Accounts.UserNotifier do
   Deliver instructions to confirm account.
   """
   def deliver_confirmation_instructions(user, url) do
+    name = recipient_name(user)
+
     deliver(user.email, "Confirmation instructions", %{
       title: "Welcome to Wasomi! Let's confirm your email",
-      intro: "Hi #{user.email},",
+      intro: "Hi #{name},",
       body: [
-        "You're one step away from unlocking practical business and technology masterclasses.",
-        "Click the button below to verify your email address and jump right into learning."
+        "You're one step away from activating your account and starting your learning journey.",
+        "Click the button below, then confirm on the page that opens. We'll sign you in automatically and take you to your learner dashboard."
       ],
       cta: %{label: "Confirm account", url: url}
     })
@@ -39,12 +41,14 @@ defmodule Wasomi.Accounts.UserNotifier do
   Welcomes a user after their account is confirmed.
   """
   def deliver_welcome(user) do
-    deliver(user.email, "Welcome to Wasomi Business Institute", %{
-      title: "Welcome aboard, #{user.name}!",
-      intro: "Hi #{user.name},",
+    name = recipient_name(user)
+
+    deliver(user.email, "Welcome to Wasomi", %{
+      title: "Welcome aboard, #{name}!",
+      intro: "Hi #{name},",
       body: [
         "Your account is confirmed and ready to go!",
-        "Get ready to level up your career with practical, high-impact masterclasses built for technology and business professionals."
+        "Get ready to start learning and level up your skills with practical, high-impact courses."
       ],
       cta: %{label: "Explore courses", url: "#{WasomiWeb.Endpoint.url()}/courses"}
     })
@@ -54,16 +58,17 @@ defmodule Wasomi.Accounts.UserNotifier do
   Tells a learner an admin has granted them access to a course.
   """
   def deliver_course_access_granted(user, course) do
+    name = recipient_name(user)
     url = "#{WasomiWeb.Endpoint.url()}/learn/courses/#{course.slug}"
 
     deliver(user.email, "You now have access to #{course.title}", %{
       title: "You're in! Access granted to #{course.title}",
-      intro: Template.rich(["Hi ", {:bold, user.name}, ","]),
+      intro: Template.rich(["Hi ", {:bold, name}, ","]),
       body: [
         Template.rich([
           "Great news — you've officially been granted full access to \"",
           {:bold, course.title},
-          "\" on Wasomi Business Institute!"
+          "\" on Wasomi!"
         ]),
         "Get learning and stay ahead! Your course materials are unlocked and ready. Jump in now to master real-world skills at your own pace."
       ],
@@ -81,11 +86,12 @@ defmodule Wasomi.Accounts.UserNotifier do
         :course -> certificate.course.title
       end
 
+    name = recipient_name(certificate.user)
     url = "#{WasomiWeb.Endpoint.url()}/certificates/#{certificate.id}/download"
 
     deliver(certificate.user.email, "Your Wasomi certificate is ready", %{
       title: "You earned it!",
-      intro: "Hi #{certificate.user.name},",
+      intro: "Hi #{name},",
       body: [
         "Huge congratulations on completing \"#{title}\"! Your hard work paid off, and your official certificate is ready to download.",
         "Sign in to your Wasomi account to claim your certificate and celebrate your achievement."
@@ -105,7 +111,7 @@ defmodule Wasomi.Accounts.UserNotifier do
 
     deliver(user.email, subject, %{
       title: title,
-      intro: Template.rich(["Hi ", {:bold, user.name}, ","]),
+      intro: Template.rich(["Hi ", {:bold, recipient_name(user)}, ","]),
       body: body,
       cta: %{label: "Start learning now", url: url}
     })
@@ -167,7 +173,7 @@ defmodule Wasomi.Accounts.UserNotifier do
 
     deliver(user.email, subject, %{
       title: title,
-      intro: Template.rich(["Hi ", {:bold, user.name}, ","]),
+      intro: Template.rich(["Hi ", {:bold, recipient_name(user)}, ","]),
       body: body,
       cta: %{label: "Resume learning", url: url}
     })
@@ -222,9 +228,11 @@ defmodule Wasomi.Accounts.UserNotifier do
   Deliver instructions to reset a user password.
   """
   def deliver_reset_password_instructions(user, url) do
+    name = recipient_name(user)
+
     deliver(user.email, "Reset password instructions", %{
       title: "Need to reset your password?",
-      intro: "Hi #{user.email},",
+      intro: "Hi #{name},",
       body: [
         "No worries! Click the link below to securely reset your password and get back to learning.",
         "If you didn't request a password reset, you can safely ignore this email."
@@ -237,9 +245,11 @@ defmodule Wasomi.Accounts.UserNotifier do
   Deliver instructions to update a user email.
   """
   def deliver_update_email_instructions(user, url) do
+    name = recipient_name(user)
+
     deliver(user.email, "Update email instructions", %{
       title: "Confirm your new email address",
-      intro: "Hi #{user.email},",
+      intro: "Hi #{name},",
       body: [
         "You requested an update to your email address.",
         "Click the button below to verify your new email address and complete the change."
@@ -247,4 +257,8 @@ defmodule Wasomi.Accounts.UserNotifier do
       cta: %{label: "Update email", url: url}
     })
   end
+
+  defp recipient_name(%{name: name}) when is_binary(name) and byte_size(name) > 0, do: name
+  defp recipient_name(%{email: email}) when is_binary(email), do: email
+  defp recipient_name(_), do: "there"
 end

@@ -3,9 +3,11 @@ defmodule Wasomi.Emails.Template do
   Branded HTML/text shell shared by every transactional email sent from
   `Wasomi.Accounts.UserNotifier`.
 
-  Colors and the logo mark mirror `assets/tailwind.config.js` — the source of
-  truth for brand tokens — not `design.md`, which is currently stale (it still
-  documents the old green palette).
+  Follows Wasomi's official design system:
+    * Deep Navy (`#012c6a`) for headings, brand anchors, and strong typography.
+    * High-energy Orange (`#f97316`) for primary action buttons and accents.
+    * Neutral slate canvas (`#f8fafc`) with clean white cards and subtle borders.
+    * Outfit typography stack.
 
   `render/1` accepts:
 
@@ -20,11 +22,12 @@ defmodule Wasomi.Emails.Template do
   building HTML at the call site.
   """
 
+  @navy "#012c6a"
   @primary "#f97316"
-  @dark "#0a0a0a"
-  @body_color "#404040"
-  @muted "#a3a3a3"
-  @mint "#fff7ed"
+  @body_color "#334155"
+  @muted "#64748b"
+  @bg "#f8fafc"
+  @border "#e2e8f0"
 
   @doc "Renders the full HTML document for an email."
   def render(assigns) do
@@ -33,27 +36,33 @@ defmodule Wasomi.Emails.Template do
     <html lang="en">
       <head>
         <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <link rel="preconnect" href="https://fonts.googleapis.com">
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400&display=swap" rel="stylesheet">
+        <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
       </head>
-      <body style="margin:0;padding:0;background-color:#{@mint};font-family:'Outfit',Helvetica,Arial,sans-serif;font-weight:400;">
-        <div style="max-width:560px;margin:0 auto;padding:40px 20px;">
-          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:24px;overflow:hidden;border:1px solid rgba(0,0,0,0.06);">
+      <body style="margin:0;padding:0;background-color:#{@bg};font-family:'Outfit',Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;">
+        <div style="max-width:580px;margin:0 auto;padding:40px 20px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:20px;overflow:hidden;border:1px solid #{@border};box-shadow:0 4px 20px -2px rgba(1,44,106,0.06);">
             <tr>
-              <td style="padding:32px 32px 8px;">#{logo()}</td>
+              <td style="padding:36px 36px 8px;">#{logo()}</td>
             </tr>
             <tr>
-              <td style="padding:16px 32px 40px;">
-                <h1 style="margin:0 0 20px;color:#{@dark};font-size:22px;font-weight:400;line-height:1.35;">#{esc(assigns[:title])}</h1>
+              <td style="padding:12px 36px 36px;">
+                <h1 style="margin:0 0 20px;color:#{@navy};font-size:24px;font-weight:700;line-height:1.3;letter-spacing:-0.3px;font-family:'Outfit',Helvetica,Arial,sans-serif;">#{esc(assigns[:title])}</h1>
                 #{paragraphs(assigns)}
                 #{cta_button(assigns[:cta])}
+                #{fallback_link(assigns[:cta])}
               </td>
             </tr>
           </table>
-          <p style="margin:24px 8px 0;color:#{@muted};font-size:12px;text-align:center;font-weight:400;">
-            #{esc(assigns[:footer_note] || "This message was sent by Wasomi Business Institute.")}
-          </p>
+          <div style="margin-top:28px;text-align:center;font-size:12px;color:#{@muted};line-height:1.6;font-family:'Outfit',Helvetica,Arial,sans-serif;">
+            <p style="margin:0 0 4px;font-weight:600;color:#{@navy};">Wasomi Business Institute</p>
+            <p style="margin:0;">Practical business & technology learning for professionals.</p>
+            <p style="margin:8px 0 0;color:#94a3b8;">
+              #{esc(assigns[:footer_note] || "If you did not request this email, you can safely ignore it.")}
+            </p>
+          </div>
         </div>
       </body>
     </html>
@@ -110,41 +119,21 @@ defmodule Wasomi.Emails.Template do
     |> Enum.join("\n\n")
   end
 
-  # Most mail clients strip/block remote images by default, so the real
-  # logo is inlined as a data URI rather than linked — guarantees it shows
-  # up without the recipient needing to click "show images". Cached in
-  # `:persistent_term`: this renders on every transactional email sent, and
-  # re-reading + re-encoding the same ~56 KB file each time isn't free.
   defp logo do
-    case logo_data_uri() do
-      nil ->
-        ~s(<span style="font-size:18px;font-weight:600;color:#{@dark};">Wasomi</span>)
+    url = "#{WasomiWeb.Endpoint.url()}/images/logo.png"
 
-      data_uri ->
-        ~s(<img src="#{data_uri}" alt="Wasomi" height="28" style="display:block;height:28px;width:auto;">)
-    end
-  end
-
-  defp logo_data_uri do
-    :persistent_term.get({__MODULE__, :logo_data_uri}, nil) || load_and_cache_logo()
-  end
-
-  defp load_and_cache_logo do
-    data_uri =
-      case Application.app_dir(:wasomi, "priv/static/images/logo.png") |> File.read() do
-        {:ok, bytes} -> "data:image/png;base64,#{Base.encode64(bytes)}"
-        {:error, _reason} -> nil
-      end
-
-    :persistent_term.put({__MODULE__, :logo_data_uri}, data_uri)
-    data_uri
+    """
+    <div style="display:block;margin-bottom:12px;">
+      <img src="#{url}" alt="Wasomi" height="34" style="height:34px;width:auto;display:block;border:0;outline:none;" />
+    </div>
+    """
   end
 
   defp paragraphs(assigns) do
     [assigns[:intro] | List.wrap(assigns[:body])]
     |> Enum.reject(&is_nil/1)
     |> Enum.map_join("\n", fn paragraph ->
-      ~s(<p style="margin:0 0 16px;color:#{@body_color};font-size:15px;line-height:1.6;font-weight:400;">#{paragraph_html(paragraph)}</p>)
+      ~s(<p style="margin:0 0 16px;color:#{@body_color};font-size:15px;line-height:1.65;font-weight:400;font-family:'Outfit',Helvetica,Arial,sans-serif;">#{paragraph_html(paragraph)}</p>)
     end)
   end
 
@@ -162,9 +151,28 @@ defmodule Wasomi.Emails.Template do
 
     if safe_url?(url) do
       """
-      <a href="#{esc(url)}" style="display:inline-block;margin-top:8px;padding:14px 28px;border-radius:999px;background-color:#{@primary};color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;">
-        #{esc(label)}
-      </a>
+      <div style="margin:28px 0 12px;">
+        <a href="#{esc(url)}" style="display:inline-block;padding:14px 32px;border-radius:9999px;background-color:#{@primary};color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;text-align:center;box-shadow:0 4px 14px rgba(249,115,22,0.28);font-family:'Outfit',Helvetica,Arial,sans-serif;">
+          #{esc(label)}
+        </a>
+      </div>
+      """
+    else
+      ""
+    end
+  end
+
+  defp fallback_link(nil), do: ""
+
+  defp fallback_link(%{} = cta) do
+    url = Map.get(cta, :url)
+
+    if safe_url?(url) do
+      """
+      <div style="margin-top:28px;padding-top:20px;border-top:1px solid #f1f5f9;font-size:12px;color:#{@muted};line-height:1.5;font-family:'Outfit',Helvetica,Arial,sans-serif;">
+        <p style="margin:0 0 6px;">Button not working? Copy and paste this link into your browser:</p>
+        <p style="margin:0;word-break:break-all;"><a href="#{esc(url)}" style="color:#{@navy};text-decoration:underline;">#{esc(url)}</a></p>
+      </div>
       """
     else
       ""

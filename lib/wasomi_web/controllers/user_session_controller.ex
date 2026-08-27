@@ -4,10 +4,6 @@ defmodule WasomiWeb.UserSessionController do
   alias Wasomi.Accounts
   alias WasomiWeb.UserAuth
 
-  def create(conn, %{"_action" => "registered"} = params) do
-    create(conn, params, "Account created successfully!")
-  end
-
   def create(conn, %{"_action" => "password_updated"} = params) do
     conn
     |> put_session(:user_return_to, ~p"/users/settings")
@@ -21,16 +17,26 @@ defmodule WasomiWeb.UserSessionController do
   defp create(conn, %{"user" => user_params}, info) do
     %{"email" => email, "password" => password} = user_params
 
-    if user = Accounts.get_user_by_email_and_password(email, password) do
-      conn
-      |> put_flash(:info, info)
-      |> UserAuth.log_in_user(user, user_params)
-    else
-      # In order to prevent user enumeration attacks, don't disclose whether the email is registered.
-      conn
-      |> put_flash(:error, "Invalid email or password")
-      |> put_flash(:email, String.slice(email, 0, 160))
-      |> redirect(to: ~p"/users/log_in")
+    case Accounts.get_user_by_email_and_password(email, password) do
+      %Accounts.User{confirmed_at: nil} ->
+        conn
+        |> put_flash(
+          :error,
+          "Please confirm your email address before logging in. Check your inbox for the confirmation link."
+        )
+        |> redirect(to: ~p"/users/confirm?#{[email: email]}")
+
+      %Accounts.User{} = user ->
+        conn
+        |> put_flash(:info, info)
+        |> UserAuth.log_in_user(user, user_params)
+
+      nil ->
+        # In order to prevent user enumeration attacks, don't disclose whether the email is registered.
+        conn
+        |> put_flash(:error, "Invalid email or password")
+        |> put_flash(:email, String.slice(email, 0, 160))
+        |> redirect(to: ~p"/users/log_in")
     end
   end
 

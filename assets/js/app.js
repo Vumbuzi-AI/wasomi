@@ -2206,6 +2206,107 @@ Hooks.DatePicker = {
   },
 };
 
+// searchable dropdown, filters client-side, no server round trip. Not phx-update=ignore
+// on purpose: needs to stay patchable so validation errors actually render
+Hooks.SearchableSelect = {
+  mounted() {
+    this.value = this.el.querySelector("[data-role='value']");
+    this.trigger = this.el.querySelector("[data-role='trigger']");
+    this.triggerLabel = this.el.querySelector("[data-role='trigger-label']");
+    this.panel = this.el.querySelector("[data-role='panel']");
+    this.search = this.el.querySelector("[data-role='search']");
+    this.options = Array.from(this.el.querySelectorAll("[data-role='option']"));
+    this.groupLabels = Array.from(
+      this.el.querySelectorAll("[data-role='group-label']"),
+    );
+    this.empty = this.el.querySelector("[data-role='empty']");
+    if (!this.value || !this.trigger || !this.panel || !this.search) return;
+
+    this.placeholder = this.triggerLabel.dataset.placeholder || "Select…";
+
+    this.onDocumentClick = (event) => {
+      if (!this.el.contains(event.target)) this.close();
+    };
+
+    this.trigger.addEventListener("click", () => this.toggle());
+
+    this.search.addEventListener("input", () => this.filter());
+
+    this.search.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        this.close();
+        this.trigger.focus();
+      }
+    });
+
+    this.options.forEach((option) => {
+      option.addEventListener("click", () => this.select(option));
+    });
+
+    document.addEventListener("click", this.onDocumentClick);
+  },
+
+  // re-filter after any patch — server doesn't know about client-side filter state
+  updated() {
+    if (this.search) this.filter();
+  },
+
+  destroyed() {
+    document.removeEventListener("click", this.onDocumentClick);
+  },
+
+  toggle() {
+    if (this.panel.classList.contains("hidden")) {
+      this.open();
+    } else {
+      this.close();
+    }
+  },
+
+  open() {
+    this.panel.classList.remove("hidden");
+    this.search.value = "";
+    this.filter();
+    this.search.focus();
+  },
+
+  close() {
+    this.panel.classList.add("hidden");
+  },
+
+  filter() {
+    const query = this.search.value.trim().toLowerCase();
+    let anyVisible = false;
+
+    this.options.forEach((option) => {
+      const matches = option.textContent.toLowerCase().includes(query);
+      option.classList.toggle("hidden", !matches);
+      if (matches) anyVisible = true;
+    });
+
+    this.groupLabels.forEach((label) => {
+      let sibling = label.nextElementSibling;
+      let groupHasVisible = false;
+      while (sibling && sibling.dataset.role === "option") {
+        if (!sibling.classList.contains("hidden")) groupHasVisible = true;
+        sibling = sibling.nextElementSibling;
+      }
+      label.classList.toggle("hidden", !groupHasVisible);
+    });
+
+    if (this.empty) this.empty.classList.toggle("hidden", anyVisible);
+  },
+
+  select(option) {
+    const nextValue = option.dataset.value || "";
+    this.value.value = nextValue;
+    this.value.dispatchEvent(new Event("input", { bubbles: true }));
+    this.triggerLabel.textContent = nextValue || this.placeholder;
+    this.close();
+  },
+};
+
 let csrfToken = document
   .querySelector("meta[name='csrf-token']")
   .getAttribute("content");

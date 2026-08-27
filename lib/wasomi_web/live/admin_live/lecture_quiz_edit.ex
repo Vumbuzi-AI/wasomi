@@ -456,7 +456,7 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
       <section
         :if={@active_tab == :generate}
         id="generate-section"
-        class="rounded-3xl border border-black/5 bg-white p-6 shadow-sm"
+        class="rounded-3xl border border-black/5 bg-white p-6 shadow-card"
       >
         <h2 class="text-lg font-semibold text-ink">Generate questions</h2>
         <p class="mt-1 text-sm text-body">
@@ -678,7 +678,7 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
             id={"question-#{question.id}"}
             data-sortable-item
             data-id={question.id}
-            class="rounded-3xl border border-black/5 bg-white p-6 shadow-sm data-[dragging=true]:opacity-50 lg:p-8"
+            class="rounded-3xl border border-black/5 bg-white p-6 shadow-card data-[dragging=true]:opacity-50 lg:p-8"
           >
             <div class="mb-5 flex items-center justify-between gap-4">
               <div class="flex items-center gap-3">
@@ -686,7 +686,7 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
                   type="button"
                   data-sortable-handle
                   title="Drag to reorder"
-                  class="cursor-grab rounded-lg p-2 text-muted hover:bg-neutral-50 hover:text-ink active:cursor-grabbing"
+                  class="cursor-grab rounded-lg p-2 text-muted hover:bg-surface hover:text-ink active:cursor-grabbing"
                 >
                   <.icon name="hero-bars-3" class="h-5 w-5" />
                 </button>
@@ -694,7 +694,7 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
                 <span class={[
                   "rounded-full px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wider",
                   question.status == :published && "bg-mint text-primary",
-                  question.status == :draft && "bg-neutral-50 text-body"
+                  question.status == :draft && "bg-surface text-body"
                 ]}>
                   {Phoenix.Naming.humanize(question.status)}
                 </span>
@@ -817,7 +817,7 @@ defmodule WasomiWeb.AdminLive.LectureQuizEdit do
       "inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium",
       @status == :ready && "bg-mint text-primary",
       @status == :failed && "bg-red-50 text-red-600",
-      @status in [:pending, :processing] && "bg-neutral-50 text-body"
+      @status in [:pending, :processing] && "bg-surface text-body"
     ]}>
       <.icon
         :if={@status in [:pending, :processing]}

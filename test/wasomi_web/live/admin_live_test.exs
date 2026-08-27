@@ -336,17 +336,30 @@ defmodule WasomiWeb.AdminLiveTest do
 
       {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
 
-      assert has_element?(view, "#course-detail-tabs.grid.grid-cols-2")
+      assert has_element?(view, "#course-detail-tabs.grid.grid-cols-2.rounded-2xl")
       assert has_element?(view, "#curriculum-tab[aria-selected='true']")
       assert has_element?(view, "#curriculum-tab", "Curriculum")
+
+      assert has_element?(
+               view,
+               ~s{#curriculum-tab[href="/admin/courses/#{course.slug}?tab=curriculum"]}
+             )
+
       assert has_element?(view, "#students-tab[aria-selected='false']")
       assert has_element?(view, "#students-tab", "Enrolled students")
+
+      assert has_element?(
+               view,
+               ~s{#students-tab[href="/admin/courses/#{course.slug}?tab=students"]}
+             )
+
       assert has_element?(view, "#students-tab span", "1")
       assert has_element?(view, "#curriculum-panel")
       refute has_element?(view, "#students-panel")
 
       view |> element("#students-tab") |> render_click()
 
+      assert_patch(view, ~p"/admin/courses/#{course.slug}?tab=students")
       assert has_element?(view, "#curriculum-tab[aria-selected='false']")
       assert has_element?(view, "#students-tab[aria-selected='true']")
       refute has_element?(view, "#curriculum-panel")
@@ -392,17 +405,17 @@ defmodule WasomiWeb.AdminLiveTest do
       assert html =~ "0%"
     end
 
-    test "links each lecture to its own lecture-quiz page", %{conn: conn} do
+    test "opens each lecture's quiz editor inline from its Add quiz button", %{conn: conn} do
       course = course_fixture()
       module = course_module_fixture(course_id: course.id)
       lecture = lecture_fixture(module_id: module.id, position: 1)
 
       {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
 
-      assert has_element?(
-               view,
-               ~s(a[href="/admin/courses/#{course.slug}/lectures/#{lecture.id}/quiz"])
-             )
+      view |> element("button", "Add quiz") |> render_click()
+
+      assert has_element?(view, "#quiz-modal")
+      assert has_element?(view, "#quiz-live-#{lecture.id}-generate")
     end
 
     test "shows the number of generated lecture-quiz questions", %{conn: conn} do
@@ -738,14 +751,16 @@ defmodule WasomiWeb.AdminLiveTest do
 
       refute has_element?(view, "#lecture-basics-form input[name='lecture[position]']")
 
-      html =
-        view
-        |> form("#lecture-basics-form",
-          lecture: %{title: "Updated title", description: "Updated description"}
-        )
-        |> render_submit()
+      view
+      |> form("#lecture-basics-form",
+        lecture: %{title: "Updated title", description: "Updated description"}
+      )
+      |> render_submit()
 
-      assert html =~ "Updated title"
+      # The saving component notifies its parent (course_show) via a
+      # message it handles on its own next turn, not inside this submit's
+      # synchronous reply — re-render to observe state after that lands.
+      assert render(view) =~ "Updated title"
       assert Wasomi.Catalog.get_lecture!(lecture.id).position == 2
     end
 

@@ -91,7 +91,7 @@ defmodule WasomiWeb.AdminLive.Dashboard do
 
         <div class="grid gap-4 lg:grid-cols-2">
           <%!-- Top courses --%>
-          <section class="rounded-3xl border border-black/5 bg-white p-6">
+          <section class="rounded-3xl border border-black/5 bg-white p-6 shadow-card">
             <div class="flex items-center justify-between">
               <div>
                 <h2 class="text-2xl font-semibold text-ink">Revenue</h2>
@@ -109,7 +109,7 @@ defmodule WasomiWeb.AdminLive.Dashboard do
               <.link
                 :for={{row, index} <- Enum.with_index(@top_courses, 1)}
                 navigate={~p"/admin/courses/#{row.course.slug}"}
-                class="flex items-center gap-4 py-4 first:pt-0 last:pb-0 transition hover:opacity-80"
+                class="flex items-center gap-4 rounded-2xl px-3 py-4 transition even:bg-surface/50 hover:bg-mint/45"
               >
                 <span class="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-primary/40 text-sm font-semibold text-primary">
                   {String.pad_leading("#{index}", 2, "0")}
@@ -124,13 +124,13 @@ defmodule WasomiWeb.AdminLive.Dashboard do
               </.link>
             </div>
 
-            <p :if={@top_courses == []} class="mt-5 rounded-2xl bg-neutral-50 p-5 text-body">
+            <p :if={@top_courses == []} class="mt-5 rounded-2xl bg-surface p-5 text-body">
               No courses yet. Create your first course to start selling.
             </p>
           </section>
 
           <%!-- Recent payments --%>
-          <section class="rounded-3xl border border-black/5 bg-white p-6">
+          <section class="rounded-3xl border border-black/5 bg-white p-6 shadow-card">
             <div class="flex items-center justify-between">
               <div>
                 <h2 class="text-2xl font-semibold text-ink">Payments</h2>
@@ -159,7 +159,7 @@ defmodule WasomiWeb.AdminLive.Dashboard do
             <div :if={@recent_payments != []} class="mt-5 divide-y divide-black/5">
               <div
                 :for={payment <- @recent_payments}
-                class="flex items-center gap-3 py-4 first:pt-0 last:pb-0"
+                class="flex items-center gap-3 rounded-2xl px-3 py-4 transition even:bg-surface/50 hover:bg-mint/45"
               >
                 <span class="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-primary/40 text-primary">
                   <.icon name="hero-document-text" class="h-5 w-5" />
@@ -177,7 +177,7 @@ defmodule WasomiWeb.AdminLive.Dashboard do
               </div>
             </div>
 
-            <p :if={@recent_payments == []} class="mt-5 rounded-2xl bg-neutral-50 p-5 text-body">
+            <p :if={@recent_payments == []} class="mt-5 rounded-2xl bg-surface p-5 text-body">
               Payments will appear here as learners check out.
             </p>
           </section>

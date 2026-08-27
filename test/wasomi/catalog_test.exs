@@ -3,6 +3,7 @@ defmodule Wasomi.CatalogTest do
   use Oban.Testing, repo: Wasomi.Repo
 
   alias Wasomi.Catalog
+  alias Wasomi.Catalog.LectureResource
   alias Wasomi.Catalog.Workers.TranscribeLecture
 
   describe "courses" do
@@ -497,8 +498,8 @@ defmodule Wasomi.CatalogTest do
       }
 
       image =
-        Wasomi.Catalog.LectureResource.changeset(
-          %Wasomi.Catalog.LectureResource{},
+        LectureResource.changeset(
+          %LectureResource{},
           Map.merge(base, %{name: "diagram.png", content_type: "image/png"})
         )
 
@@ -509,16 +510,16 @@ defmodule Wasomi.CatalogTest do
       # No content type from the browser: the filename decides, so a .pdf still
       # gets through and anything else does not.
       no_type_pdf =
-        Wasomi.Catalog.LectureResource.changeset(
-          %Wasomi.Catalog.LectureResource{},
+        LectureResource.changeset(
+          %LectureResource{},
           Map.merge(base, %{name: "notes.pdf", content_type: nil})
         )
 
       assert no_type_pdf.valid?
 
       no_type_other =
-        Wasomi.Catalog.LectureResource.changeset(
-          %Wasomi.Catalog.LectureResource{},
+        LectureResource.changeset(
+          %LectureResource{},
           Map.merge(base, %{name: "handout.docx", content_type: nil})
         )
 
@@ -526,7 +527,7 @@ defmodule Wasomi.CatalogTest do
 
       # A link is not an upload, so the PDF rule doesn't apply to it.
       link =
-        Wasomi.Catalog.LectureResource.changeset(%Wasomi.Catalog.LectureResource{}, %{
+        LectureResource.changeset(%LectureResource{}, %{
           kind: :link,
           name: "Further reading",
           url: "https://example.com/reading",
@@ -550,7 +551,7 @@ defmodule Wasomi.CatalogTest do
                  [%{question: "Why?", answer: "Because."}]
                )
 
-      refute Wasomi.Repo.get(Wasomi.Catalog.LectureResource, old_resource.id)
+      refute Wasomi.Repo.get(LectureResource, old_resource.id)
       refute Wasomi.Repo.get(Wasomi.Catalog.LectureQuestion, old_question.id)
       assert [%{kind: :link, position: 1, url: "https://example.com/reading"}] = updated.resources
       assert [%{question: "Why?", position: 1}] = updated.questions
@@ -620,7 +621,7 @@ defmodule Wasomi.CatalogTest do
                )
 
       assert Catalog.get_lecture!(lecture.id).title == lecture.title
-      assert Wasomi.Repo.get!(Wasomi.Catalog.LectureResource, resource.id).id == resource.id
+      assert Wasomi.Repo.get!(LectureResource, resource.id).id == resource.id
     end
 
     test "create_lecture_content/3 enqueues transcription when the lecture has a video" do

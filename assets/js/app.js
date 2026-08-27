@@ -2199,6 +2199,162 @@ Hooks.DatePicker = {
   },
 };
 
+// v3 (invisible) runs first; v2 (checkbox) is the fallback when the
+// server flags a low score or v3 never runs at all (blocked, timed out).
+Hooks.Recaptcha = {
+  mounted() {
+    this.v2Rendered = false;
+
+    this.handleFormSubmit = (e) => {
+      const siteKey = this.el.dataset.siteKey;
+      const v2SiteKey = this.el.dataset.v2SiteKey;
+      if (!siteKey && !v2SiteKey) return;
+
+      if (this.el.dataset.captchaVerified) {
+        this.el.dataset.captchaVerified = "";
+        return;
+      }
+
+      e.preventDefault();
+      e.stopImmediatePropagation();
+
+      if (this.el.dataset.showV2 === "true") {
+        // Server already asked for v2 — just ensure it's rendered.
+        this.ensureV2Rendered();
+        return;
+      }
+
+      if (!siteKey) {
+        this.ensureV2Rendered();
+        return;
+      }
+
+      this.waitForGrecaptcha()
+        .then(() => this.executeAndSubmit(siteKey))
+        .catch(() => this.fallbackToV2OrReport());
+    };
+
+    this.el.addEventListener("submit", this.handleFormSubmit);
+    this.maybeRenderV2();
+  },
+
+  updated() {
+    this.maybeRenderV2();
+  },
+
+  maybeRenderV2() {
+    if (this.el.dataset.showV2 === "true") this.ensureV2Rendered();
+  },
+
+  waitForGrecaptcha(timeoutMs = 6000, intervalMs = 200) {
+    return new Promise((resolve, reject) => {
+      const deadline = Date.now() + timeoutMs;
+
+      const check = () => {
+        if (window.grecaptcha) return resolve();
+        if (Date.now() >= deadline) return reject();
+        setTimeout(check, intervalMs);
+      };
+
+      check();
+    });
+  },
+
+  executeAndSubmit(siteKey) {
+    const action = this.el.dataset.action || "submit";
+
+    window.grecaptcha.ready(() => {
+      const widgetId = this.ensureV3Widget(siteKey);
+      if (widgetId === undefined) {
+        this.fallbackToV2OrReport();
+        return;
+      }
+
+      window.grecaptcha
+        .execute(widgetId, { action })
+        .then((token) => this.submitWithToken(token, "v3"))
+        .catch((err) => {
+          console.error("reCAPTCHA v3 execution error:", err);
+          this.fallbackToV2OrReport();
+        });
+    });
+  },
+
+  // render=explicit means execute() needs a widget id, not the raw site
+  // key — render it once into the permanent recaptcha-v3-widget container.
+  ensureV3Widget(siteKey) {
+    if (this.v3WidgetId !== undefined) return this.v3WidgetId;
+
+    const container = this.el.querySelector("[data-role='recaptcha-v3-widget']");
+    if (!container) return undefined;
+
+    this.v3WidgetId = window.grecaptcha.render(container, {
+      sitekey: siteKey,
+      size: "invisible",
+      badge: "bottomright",
+    });
+
+    return this.v3WidgetId;
+  },
+
+  fallbackToV2OrReport() {
+    if (this.el.dataset.v2SiteKey) {
+      this.ensureV2Rendered();
+    } else {
+      this.reportBlocked();
+    }
+  },
+
+  // Renders the real checkbox into the phx-update="ignore" leaf div so a
+  // later LiveView patch can't wipe out Google's injected iframe. Only
+  // ever renders once per mount — the widget itself persists after that.
+  ensureV2Rendered() {
+    const v2SiteKey = this.el.dataset.v2SiteKey;
+    const container = this.el.querySelector("[data-role='recaptcha-v2-widget']");
+    if (!v2SiteKey || !container || this.v2Rendered) return;
+
+    this.waitForGrecaptcha()
+      .then(() => {
+        window.grecaptcha.render(container, {
+          sitekey: v2SiteKey,
+          callback: (token) => this.submitWithToken(token, "v2"),
+        });
+        this.v2Rendered = true;
+      })
+      .catch(() => this.reportBlocked());
+  },
+
+  submitWithToken(token, version) {
+    this.setHiddenField("captcha_token", token);
+    this.setHiddenField("captcha_version", version);
+    this.el.dataset.captchaVerified = "true";
+    this.el.requestSubmit();
+  },
+
+  setHiddenField(name, value) {
+    let input = this.el.querySelector(`input[name='${name}']`);
+    if (!input) {
+      input = document.createElement("input");
+      input.type = "hidden";
+      input.name = name;
+      this.el.appendChild(input);
+    }
+    input.value = value;
+  },
+
+  // Reuses the same inline error the LiveView shows for a server-side
+  // captcha failure.
+  reportBlocked() {
+    this.pushEventTo(this.el, "recaptcha_blocked", {});
+  },
+
+  destroyed() {
+    if (this.handleFormSubmit) {
+      this.el.removeEventListener("submit", this.handleFormSubmit);
+    }
+  },
+};
+
 let csrfToken = document
   .querySelector("meta[name='csrf-token']")
   .getAttribute("content");

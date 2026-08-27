@@ -1,6 +1,8 @@
 defmodule WasomiWeb.UserLoginLive do
   use WasomiWeb, :live_view
 
+  alias Wasomi.Security.Captcha
+
   def render(assigns) do
     ~H"""
     <.auth_shell active={:login}>
@@ -12,6 +14,11 @@ defmodule WasomiWeb.UserLoginLive do
         id="login_form"
         action={~p"/users/log_in"}
         phx-update="ignore"
+        phx-hook={if @recaptcha_site_key || @recaptcha_v2_site_key, do: "Recaptcha"}
+        data-site-key={@recaptcha_site_key}
+        data-v2-site-key={@recaptcha_v2_site_key}
+        data-show-v2={if @show_recaptcha_v2, do: "true", else: "false"}
+        data-action="login"
         class="mt-8 space-y-5"
       >
         <.auth_input
@@ -81,6 +88,20 @@ defmodule WasomiWeb.UserLoginLive do
           /> Remember me
         </label>
 
+        <p
+          :if={@captcha_error}
+          class="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-600"
+        >
+          {@captcha_error}
+        </p>
+
+        <.recaptcha_v3_widget :if={@recaptcha_site_key} form_id="login_form" />
+        <.recaptcha_v2_widget
+          :if={@recaptcha_v2_site_key}
+          show?={@show_recaptcha_v2}
+          form_id="login_form"
+        />
+
         <button
           type="submit"
           phx-disable-with="Logging in..."
@@ -114,9 +135,33 @@ defmodule WasomiWeb.UserLoginLive do
     """
   end
 
-  def mount(_params, _session, socket) do
+  def mount(params, _session, socket) do
     email = Phoenix.Flash.get(socket.assigns.flash, :email)
     form = to_form(%{"email" => email}, as: "user")
-    {:ok, assign(socket, form: form, page_title: "Log in"), temporary_assigns: [form: form]}
+    show_recaptcha_v2 = params["show_recaptcha_v2"] == "true"
+
+    {:ok,
+     assign(socket,
+       form: form,
+       page_title: "Log in",
+       captcha_error:
+         if(show_recaptcha_v2,
+           do: "For your security, please also complete the checkbox below."
+         ),
+       show_recaptcha_v2: show_recaptcha_v2,
+       recaptcha_site_key: Captcha.site_key(),
+       recaptcha_v2_site_key: Captcha.v2_site_key()
+     ), temporary_assigns: [form: form]}
+  end
+
+  # Client gave up waiting on reCAPTCHA — same inline error as a
+  # server-side failure.
+  def handle_event("recaptcha_blocked", _params, socket) do
+    {:noreply,
+     assign(socket,
+       captcha_error:
+         "We couldn't load our security check. Please disable any ad blocker or " <>
+           "privacy extension for this site, then try again."
+     )}
   end
 end

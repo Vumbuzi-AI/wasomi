@@ -110,6 +110,17 @@ for {env_name, config_key} <- [
   config :wasomi, config_key, value
 end
 
+for {env_name, config_key} <- [
+      {"RECAPTCHA_SITE_KEY", :recaptcha_site_key},
+      {"RECAPTCHA_SECRET_KEY", :recaptcha_secret_key},
+      {"RECAPTCHA_V2_SITE_KEY", :recaptcha_v2_site_key},
+      {"RECAPTCHA_V2_SECRET_KEY", :recaptcha_v2_secret_key}
+    ],
+    value = System.get_env(env_name),
+    value not in [nil, ""] do
+  config :wasomi, config_key, value
+end
+
 if r2_endpoint = System.get_env("R2_ENDPOINT") do
   uri = URI.parse(r2_endpoint)
 

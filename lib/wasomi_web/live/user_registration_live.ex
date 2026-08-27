@@ -3,6 +3,7 @@ defmodule WasomiWeb.UserRegistrationLive do
 
   alias Wasomi.Accounts
   alias Wasomi.Accounts.User
+  alias Wasomi.Security.Captcha
 
   def render(assigns) do
     ~H"""
@@ -16,6 +17,11 @@ defmodule WasomiWeb.UserRegistrationLive do
         phx-submit="save"
         phx-change="validate"
         phx-trigger-action={@trigger_submit}
+        phx-hook={if @recaptcha_site_key || @recaptcha_v2_site_key, do: "Recaptcha"}
+        data-site-key={@recaptcha_site_key}
+        data-v2-site-key={@recaptcha_v2_site_key}
+        data-show-v2={if @show_recaptcha_v2, do: "true", else: "false"}
+        data-action="register"
         action={~p"/users/log_in?_action=registered"}
         method="post"
         class="mt-8 space-y-5"
@@ -129,6 +135,20 @@ defmodule WasomiWeb.UserRegistrationLive do
           /> I agree to the terms and privacy policy
         </label>
 
+        <p
+          :if={@captcha_error}
+          class="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-600"
+        >
+          {@captcha_error}
+        </p>
+
+        <.recaptcha_v3_widget :if={@recaptcha_site_key} form_id="registration_form" />
+        <.recaptcha_v2_widget
+          :if={@recaptcha_v2_site_key}
+          show?={@show_recaptcha_v2}
+          form_id="registration_form"
+        />
+
         <button
           type="submit"
           phx-disable-with="Creating account..."
@@ -167,32 +187,76 @@ defmodule WasomiWeb.UserRegistrationLive do
 
     socket =
       socket
-      |> assign(page_title: "Register", trigger_submit: false, check_errors: false)
+      |> assign(
+        page_title: "Register",
+        trigger_submit: false,
+        check_errors: false,
+        captcha_error: nil,
+        show_recaptcha_v2: false,
+        recaptcha_site_key: Captcha.site_key(),
+        recaptcha_v2_site_key: Captcha.v2_site_key()
+      )
       |> assign_form(changeset)
 
     {:ok, socket, temporary_assigns: [form: nil]}
   end
 
-  def handle_event("save", %{"user" => user_params}, socket) do
-    case Accounts.register_user(user_params) do
-      {:ok, user} ->
-        {:ok, _} =
-          Accounts.deliver_user_confirmation_instructions(
-            user,
-            &url(~p"/users/confirm/#{&1}")
-          )
+  def handle_event("save", %{"user" => user_params} = params, socket) do
+    case Captcha.verify_from_params(params, action: "register") do
+      {:ok, _} ->
+        case Accounts.register_user(user_params) do
+          {:ok, user} ->
+            {:ok, _} =
+              Accounts.deliver_user_confirmation_instructions(
+                user,
+                &url(~p"/users/confirm/#{&1}")
+              )
 
-        changeset = Accounts.change_user_registration(user)
-        {:noreply, socket |> assign(trigger_submit: true) |> assign_form(changeset)}
+            changeset = Accounts.change_user_registration(user)
 
-      {:error, %Ecto.Changeset{} = changeset} ->
-        {:noreply, socket |> assign(check_errors: true) |> assign_form(changeset)}
+            {:noreply,
+             socket
+             |> assign(trigger_submit: true, captcha_error: nil, show_recaptcha_v2: false)
+             |> assign_form(changeset)}
+
+          {:error, %Ecto.Changeset{} = changeset} ->
+            {:noreply,
+             socket
+             |> assign(check_errors: true, captcha_error: nil, show_recaptcha_v2: false)
+             |> assign_form(changeset)}
+        end
+
+      # v3's score was too low to trust outright, but not necessarily a
+      # bot — offer the v2 checkbox instead of a dead end.
+      {:error, :low_score} ->
+        {:noreply,
+         assign(socket,
+           show_recaptcha_v2: true,
+           captcha_error: "For your security, please also complete the checkbox below."
+         )}
+
+      {:error, _reason} ->
+        {:noreply,
+         socket
+         |> assign(captcha_error: "Security verification failed. Please try again.")
+         |> put_flash(:error, "Security verification failed. Please try again.")}
     end
   end
 
   def handle_event("validate", %{"user" => user_params}, socket) do
     changeset = Accounts.change_user_registration(%User{}, user_params)
     {:noreply, assign_form(socket, Map.put(changeset, :action, :validate))}
+  end
+
+  # Client gave up waiting on reCAPTCHA — same inline error as a
+  # server-side failure.
+  def handle_event("recaptcha_blocked", _params, socket) do
+    {:noreply,
+     assign(socket,
+       captcha_error:
+         "We couldn't load our security check. Please disable any ad blocker or " <>
+           "privacy extension for this site, then try again."
+     )}
   end
 
   defp assign_form(socket, %Ecto.Changeset{} = changeset) do

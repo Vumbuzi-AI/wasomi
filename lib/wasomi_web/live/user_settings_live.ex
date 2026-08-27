@@ -6,19 +6,32 @@ defmodule WasomiWeb.UserSettingsLive do
   def render(assigns) do
     ~H"""
     <.student_layout active={:account} current_user={@current_user}>
-      <div class="mx-auto max-w-2xl px-5 py-10 lg:px-10 lg:py-12">
-        <.header>
-          Account Settings
-          <:subtitle>Manage your account email address and password settings</:subtitle>
-        </.header>
+      <div class="mx-auto max-w-3xl px-5 py-10 lg:px-10 lg:py-12">
+        <div class="rounded-3xl border border-black/5 bg-white p-6 shadow-card sm:p-8">
+          <.header>
+            Account Settings
+            <:subtitle>Manage your account email address and password settings</:subtitle>
+          </.header>
+        </div>
 
-        <div class="mt-8 space-y-12 divide-y">
-          <div>
-            <.simple_form
+        <div class="mt-6 space-y-6">
+          <section
+            id="email-settings-card"
+            class="rounded-3xl border border-black/5 bg-white p-6 shadow-card sm:p-8"
+          >
+            <div>
+              <h2 class="text-xl font-semibold text-ink">Email</h2>
+              <p class="mt-1 text-sm text-body">
+                Update the address you use to sign in and receive account messages.
+              </p>
+            </div>
+
+            <.form
               for={@email_form}
               id="email_form"
               phx-submit="update_email"
               phx-change="validate_email"
+              class="mt-7 space-y-6"
             >
               <.input field={@email_form[:email]} type="email" label="Email" required />
               <.input
@@ -30,13 +43,26 @@ defmodule WasomiWeb.UserSettingsLive do
                 value={@email_form_current_password}
                 required
               />
-              <:actions>
-                <.button phx-disable-with="Changing...">Change Email</.button>
-              </:actions>
-            </.simple_form>
-          </div>
-          <div>
-            <.simple_form
+              <div class="flex items-center justify-end">
+                <.button phx-disable-with="Changing..." class="rounded-full bg-ink px-5">
+                  Change Email
+                </.button>
+              </div>
+            </.form>
+          </section>
+
+          <section
+            id="password-settings-card"
+            class="rounded-3xl border border-black/5 bg-white p-6 shadow-card sm:p-8"
+          >
+            <div>
+              <h2 class="text-xl font-semibold text-ink">Password</h2>
+              <p class="mt-1 text-sm text-body">
+                Choose a strong password and confirm the change with your current password.
+              </p>
+            </div>
+
+            <.form
               for={@password_form}
               id="password_form"
               action={~p"/users/log_in?_action=password_updated"}
@@ -44,6 +70,7 @@ defmodule WasomiWeb.UserSettingsLive do
               phx-change="validate_password"
               phx-submit="update_password"
               phx-trigger-action={@trigger_submit}
+              class="mt-7 space-y-6"
             >
               <input
                 name={@password_form[:email].name}
@@ -66,11 +93,13 @@ defmodule WasomiWeb.UserSettingsLive do
                 value={@current_password}
                 required
               />
-              <:actions>
-                <.button phx-disable-with="Changing...">Change Password</.button>
-              </:actions>
-            </.simple_form>
-          </div>
+              <div class="flex items-center justify-end">
+                <.button phx-disable-with="Changing..." class="rounded-full bg-ink px-5">
+                  Change Password
+                </.button>
+              </div>
+            </.form>
+          </section>
         </div>
       </div>
     </.student_layout>

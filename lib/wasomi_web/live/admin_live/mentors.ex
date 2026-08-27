@@ -100,7 +100,7 @@ defmodule WasomiWeb.AdminLive.Mentors do
           </:actions>
         </.page_header>
 
-        <div class="rounded-[2rem] border border-black/5 bg-white p-6 shadow-sm lg:p-8">
+        <div class="rounded-[2rem] border border-black/5 bg-white p-6 shadow-card lg:p-8">
           <div class="flex flex-wrap items-center justify-between gap-4">
             <div>
               <h2 class="text-xl font-semibold text-ink">Mentor roster</h2>
@@ -117,7 +117,7 @@ defmodule WasomiWeb.AdminLive.Mentors do
             <article
               :for={mentor <- @mentors}
               id={"mentor-row-#{mentor.id}"}
-              class="group relative flex flex-col overflow-hidden rounded-3xl border border-black/5 bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-xl"
+              class="group relative flex flex-col overflow-hidden rounded-3xl border border-black/5 bg-white shadow-card transition hover:-translate-y-1 hover:shadow-card-hover"
             >
               <div class="relative aspect-[4/3] overflow-hidden bg-neutral-100">
                 <img
@@ -164,7 +164,7 @@ defmodule WasomiWeb.AdminLive.Mentors do
 
           <div
             :if={@mentors == [] and @total_count == 0}
-            class="mt-6 rounded-3xl border border-black/5 bg-neutral-50 p-12 text-center"
+            class="mt-6 rounded-3xl border border-black/5 bg-surface p-12 text-center"
           >
             <span class="mx-auto grid h-14 w-14 place-items-center rounded-full bg-mint text-primary">
               <.icon name="hero-user-group" class="h-7 w-7" />
@@ -183,7 +183,7 @@ defmodule WasomiWeb.AdminLive.Mentors do
 
           <div
             :if={@mentors == [] and @total_count > 0}
-            class="mt-6 rounded-3xl border border-black/5 bg-neutral-50 p-12 text-center"
+            class="mt-6 rounded-3xl border border-black/5 bg-surface p-12 text-center"
           >
             <span class="mx-auto grid h-14 w-14 place-items-center rounded-full bg-mint text-primary">
               <.icon name="hero-magnifying-glass" class="h-7 w-7" />

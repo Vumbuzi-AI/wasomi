@@ -125,7 +125,7 @@ defmodule WasomiWeb.CheckoutLive do
               You will pay on Paystack's hosted checkout. Wasomi never receives or stores your card details.
             </p>
 
-            <div class="mt-8 flex items-center justify-between rounded-2xl bg-soft p-5">
+            <div class="mt-8 flex items-center justify-between rounded-2xl bg-surface p-5">
               <span class="font-medium text-ink">One-time course fee</span>
               <span class="text-2xl font-semibold text-ink">{Catalog.format_price(@course)}</span>
             </div>

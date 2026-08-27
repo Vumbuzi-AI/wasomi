@@ -100,7 +100,7 @@ defmodule WasomiWeb.AdminLive.Students do
           />
         </div>
 
-        <div class="rounded-3xl border border-black/5 bg-white p-6">
+        <div class="rounded-3xl border border-black/5 bg-white p-6 shadow-card">
           <div class="flex flex-wrap items-center justify-between gap-4">
             <div>
               <h2 class="text-xl font-semibold text-ink">Registered users</h2>
@@ -118,7 +118,7 @@ defmodule WasomiWeb.AdminLive.Students do
           >
             <div :if={@rows != []} class="mt-6 overflow-x-auto">
               <table class="w-full text-left text-sm">
-                <thead class="border-b border-black/5 text-xs uppercase tracking-wide text-body">
+                <thead class="border-b border-black/5 bg-surface text-xs uppercase tracking-wide text-body">
                   <tr>
                     <th class="px-6 py-4 font-semibold">Student</th>
                     <th class="px-6 py-4 font-semibold">Phone</th>
@@ -128,7 +128,7 @@ defmodule WasomiWeb.AdminLive.Students do
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-black/5">
-                  <tr :for={row <- @rows} class="transition hover:bg-neutral-50/60">
+                  <tr :for={row <- @rows} class="transition even:bg-surface/50 hover:bg-mint/45">
                     <td class="px-6 py-4">
                       <div class="flex items-center gap-3">
                         <span class="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-primary/40 bg-mint font-bold uppercase text-primary">
@@ -162,14 +162,14 @@ defmodule WasomiWeb.AdminLive.Students do
 
             <div
               :if={@rows == [] and @total_users == 0}
-              class="mt-6 rounded-2xl bg-neutral-50 p-12 text-center text-body"
+              class="mt-6 rounded-2xl bg-surface p-12 text-center text-body"
             >
               No students have registered yet.
             </div>
 
             <div
               :if={@rows == [] and @total_users > 0}
-              class="mt-6 rounded-2xl bg-neutral-50 p-12 text-center text-body"
+              class="mt-6 rounded-2xl bg-surface p-12 text-center text-body"
             >
               No students match "{@search}".
             </div>

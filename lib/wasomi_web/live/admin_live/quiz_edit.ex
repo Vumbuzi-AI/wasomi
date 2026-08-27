@@ -480,7 +480,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
               id="edit-title"
               phx-click="start_editing_title"
               aria-label="Rename quiz"
-              class="rounded-lg p-1.5 text-muted hover:bg-neutral-50 hover:text-primary transition active:scale-[0.96]"
+              class="rounded-lg p-1.5 text-muted hover:bg-surface hover:text-primary transition active:scale-[0.96]"
             >
               <.icon name="hero-pencil-square" class="h-5 w-5" />
             </button>
@@ -536,7 +536,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
           </ul>
         </div>
 
-        <section class="rounded-3xl border border-black/5 bg-white p-6">
+        <section class="rounded-3xl border border-black/5 bg-white p-6 shadow-card">
           <.form
             for={@quiz_form}
             id="quiz-settings-form"
@@ -571,7 +571,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
         <details
           id="generation-section"
           open={@generations != [] or @quiz.questions == []}
-          class="group rounded-3xl border border-black/5 bg-white p-6"
+          class="group rounded-3xl border border-black/5 bg-white p-6 shadow-card"
         >
           <summary class="flex cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
             <h2 class="text-lg font-semibold text-ink">AI generation &amp; settings</h2>
@@ -602,7 +602,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
               class="mt-4 space-y-6"
             >
               <div class="grid grid-cols-1 gap-6 md:grid-cols-2 min-w-0">
-                <div class="min-w-0 rounded-2xl border border-black/5 bg-neutral-50/50 p-5 space-y-3 flex flex-col justify-between overflow-hidden">
+                <div class="min-w-0 rounded-2xl border border-black/5 bg-surface/50 p-5 space-y-3 flex flex-col justify-between overflow-hidden">
                   <div class="min-w-0">
                     <h3 class="font-semibold text-ink flex items-center gap-2">
                       <.icon name="hero-rectangle-stack" class="h-5 w-5 text-primary shrink-0" />
@@ -657,7 +657,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
                   </div>
                 </div>
 
-                <div class="min-w-0 rounded-2xl border border-black/5 bg-neutral-50/50 p-5 space-y-3 flex flex-col justify-between overflow-hidden">
+                <div class="min-w-0 rounded-2xl border border-black/5 bg-surface/50 p-5 space-y-3 flex flex-col justify-between overflow-hidden">
                   <div>
                     <h3 class="font-semibold text-ink flex items-center gap-2">
                       <.icon name="hero-document-text" class="h-5 w-5 text-primary" />
@@ -778,7 +778,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
               <summary class="flex cursor-pointer list-none items-center justify-between gap-3 [&::-webkit-details-marker]:hidden">
                 <span class="flex items-center gap-2">
                   <h3 class="font-semibold text-ink">Generation history</h3>
-                  <span class="rounded-full bg-neutral-50 px-2 py-0.5 text-xs font-semibold text-body">
+                  <span class="rounded-full bg-surface px-2 py-0.5 text-xs font-semibold text-body">
                     {length(@generations)}
                   </span>
                 </span>
@@ -880,7 +880,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
               id={"question-#{question.id}"}
               data-sortable-item
               data-id={question.id}
-              class="rounded-3xl border border-black/5 bg-white p-6 shadow-sm data-[dragging=true]:opacity-50 lg:p-8"
+              class="rounded-3xl border border-black/5 bg-white p-6 shadow-card data-[dragging=true]:opacity-50 lg:p-8"
             >
               <div class="mb-5 flex items-center justify-between gap-4">
                 <div class="flex items-center gap-3">
@@ -888,7 +888,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
                     type="button"
                     data-sortable-handle
                     title="Drag to reorder"
-                    class="cursor-grab rounded-lg p-2 text-muted hover:bg-neutral-50 hover:text-ink active:cursor-grabbing"
+                    class="cursor-grab rounded-lg p-2 text-muted hover:bg-surface hover:text-ink active:cursor-grabbing"
                   >
                     <.icon name="hero-bars-3" class="h-5 w-5" />
                   </button>
@@ -896,7 +896,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
                   <span class={[
                     "rounded-full px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wider",
                     question.status == :published && "bg-mint text-primary",
-                    question.status == :draft && "bg-neutral-50 text-body"
+                    question.status == :draft && "bg-surface text-body"
                   ]}>
                     {Phoenix.Naming.humanize(question.status)}
                   </span>
@@ -1199,9 +1199,9 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
     <span class={[
       "inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium",
       @status == :ready && @remaining_count > 0 && "bg-mint text-primary",
-      @status == :ready && @remaining_count == 0 && "bg-neutral-50 text-body",
+      @status == :ready && @remaining_count == 0 && "bg-surface text-body",
       @status == :failed && "bg-red-50 text-red-600",
-      @status in [:pending, :processing] && "bg-neutral-50 text-body"
+      @status in [:pending, :processing] && "bg-surface text-body"
     ]}>
       <.icon
         :if={@status in [:pending, :processing]}

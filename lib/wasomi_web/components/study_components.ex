@@ -500,7 +500,7 @@ defmodule WasomiWeb.StudyComponents do
             type="button"
             phx-click="flashcard-prev"
             disabled={@index == 0}
-            class="inline-flex items-center gap-1.5 rounded-xl border-2 border-ink px-5 py-3 text-sm font-semibold text-ink transition hover:bg-soft disabled:cursor-not-allowed disabled:opacity-40"
+            class="inline-flex items-center gap-1.5 rounded-xl border-2 border-ink px-5 py-3 text-sm font-semibold text-ink transition hover:bg-surface disabled:cursor-not-allowed disabled:opacity-40"
           >
             <.icon name="hero-arrow-left" class="h-4 w-4" /> Previous
           </button>

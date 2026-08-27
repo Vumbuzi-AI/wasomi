@@ -21,7 +21,7 @@ defmodule WasomiWeb.StudentComponents do
     %{key: :dashboard, label: "Dashboard", icon: "hero-squares-2x2", path: "/dashboard"},
     %{key: :courses, label: "My courses", icon: "hero-academic-cap", path: "/courses-taken"},
     %{key: :certificates, label: "Certificates", icon: "hero-trophy", path: "/certificates"},
-    %{key: :browse, label: "Browse catalog", icon: "hero-magnifying-glass", path: "/courses"},
+    %{key: :browse, label: "Browse catalog", icon: "hero-magnifying-glass", path: "/catalog"},
     %{key: :account, label: "Account", icon: "hero-cog-6-tooth", path: "/users/settings"}
   ]
 

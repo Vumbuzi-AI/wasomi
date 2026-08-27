@@ -1139,7 +1139,7 @@ defmodule Wasomi.AssessmentsTest do
       set = flashcard_set_fixture()
       {:ok, 1} = Assessments.mark_flashcard_set_ready(set, [draft_flashcard_attrs()])
 
-      set = set |> Assessments.get_flashcard_set!() |> Assessments.reset_flashcard_set()
+      set = set.id |> Assessments.get_flashcard_set!() |> Assessments.reset_flashcard_set()
 
       assert {:ok, 1} =
                Assessments.mark_flashcard_set_ready(set, [

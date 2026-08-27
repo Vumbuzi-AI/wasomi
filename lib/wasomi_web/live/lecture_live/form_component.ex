@@ -699,7 +699,10 @@ defmodule WasomiWeb.LectureLive.FormComponent do
 
       <div class="mx-auto flex w-fit items-center gap-2 rounded-full border border-black/10 bg-soft px-4 py-2 text-xs font-medium text-body">
         <span class="inline-flex items-center gap-1.5">
-          <.icon name="hero-play-circle" class={["h-4 w-4", @video_ready && "text-primary"]} />
+          <.icon
+            name="hero-play-circle"
+            class={"h-4 w-4" <> if(@video_ready, do: " text-primary", else: "")}
+          />
           {if @video_ready, do: "Video added", else: "No video"}
         </span>
         <span class="h-3 w-px bg-black/10" />

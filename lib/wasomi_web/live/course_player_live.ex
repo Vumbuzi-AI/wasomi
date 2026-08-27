@@ -1783,6 +1783,65 @@ defmodule WasomiWeb.CoursePlayerLive do
                 </div>
               <% end %>
             </section>
+
+            <section
+              :if={!@preview?}
+              id="course-certificates"
+              class="mt-8 rounded-3xl border border-black/5 bg-white p-6 lg:p-8"
+            >
+              <div class="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <span class="rounded-full bg-mint px-3 py-1 text-sm font-medium text-primary">
+                    Achievements
+                  </span>
+                  <h2 class="mt-4 text-2xl font-semibold text-ink">Your certificates</h2>
+                  <p class="mt-2 text-body">
+                    Module certificates appear as each module is completed. Your course certificate
+                    appears after every lecture is complete.
+                  </p>
+                </div>
+                <span
+                  :if={@course_progress.complete? && !course_certificate?(@certificates)}
+                  id="course-certificate-pending"
+                  class="rounded-full border border-black/10 px-4 py-2 text-sm font-medium text-body"
+                >
+                  Preparing course certificate…
+                </span>
+              </div>
+
+              <div :if={@certificates != []} class="mt-6 grid gap-4 md:grid-cols-2">
+                <article
+                  :for={certificate <- @certificates}
+                  id={"certificate-#{certificate.id}"}
+                  class="flex items-center justify-between gap-4 rounded-2xl border border-black/5 bg-soft p-5"
+                >
+                  <div class="min-w-0">
+                    <p class="text-xs font-semibold uppercase tracking-wider text-primary">
+                      {if certificate.type == :module,
+                        do: "Module certificate",
+                        else: "Course certificate"}
+                    </p>
+                    <h3 class="mt-1 truncate font-medium text-ink">
+                      {certificate_title(certificate)}
+                    </h3>
+                    <p class="mt-1 text-xs text-muted">{certificate.serial_number}</p>
+                  </div>
+                  <.link
+                    href={~p"/certificates/#{certificate.id}/download"}
+                    class="inline-flex shrink-0 items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-medium text-white transition hover:bg-primary"
+                  >
+                    <.icon name="hero-arrow-down-tray" class="h-4 w-4" /> Download
+                  </.link>
+                </article>
+              </div>
+
+              <p
+                :if={@certificates == [] && !@course_progress.complete?}
+                class="mt-6 rounded-2xl bg-mint p-5 text-sm text-body"
+              >
+                Complete your first module to earn your first certificate.
+              </p>
+            </section>
           </div>
         </div>
       </div>

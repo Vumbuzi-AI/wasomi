@@ -4,8 +4,8 @@ defmodule Wasomi.Mentors do
   """
 
   import Ecto.Query, warn: false
-  alias Wasomi.Repo
   alias Wasomi.Mentors.Mentor
+  alias Wasomi.Repo
 
   @doc """
   Returns the list of mentors, ordered for the admin table (newest first),

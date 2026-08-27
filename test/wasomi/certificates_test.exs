@@ -9,6 +9,7 @@ defmodule Wasomi.CertificatesTest do
   import Mox
 
   alias Wasomi.Certificates
+  alias Wasomi.Certificates.Branding
   alias Wasomi.Certificates.Certificate
   alias Wasomi.Certificates.Workers.IssueCertificate
 
@@ -147,7 +148,7 @@ defmodule Wasomi.CertificatesTest do
       # issuer_name is app-wide branding (Wasomi.Certificates.Branding), not
       # a per-course value — it's the same regardless of what this course's
       # certificate settings are.
-      assert assigns.issuer_name == Wasomi.Certificates.Branding.issuer_name()
+      assert assigns.issuer_name == Branding.issuer_name()
       assert assigns.signatory_name == "Jane Doe"
       assert assigns.signatory_title == "Country Manager"
       assert assigns.signature_url == "https://example.com/sig.png"

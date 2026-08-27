@@ -16,6 +16,7 @@ defmodule Wasomi.Learning do
   alias Wasomi.Enrollments
   alias Wasomi.Enrollments.Enrollment
   alias Wasomi.Learning.{LectureProgress, ResourceProgress}
+  alias Wasomi.Notifications.Notification
 
   @completion_ratio 0.95
   @mark_complete_ratio 0.80
@@ -23,6 +24,27 @@ defmodule Wasomi.Learning do
   # elapsed real time, so a forged/bypassed video-progress event can't jump.
   @max_plausible_playback_rate 4
   @min_plausible_advance_seconds 20
+  # Placeholders pending product sign-off — see NOTES.md.
+  @never_started_threshold_days 7
+  @gone_quiet_threshold_days 14
+
+  # Each trigger is a 3-touch sequence, not a single email: `{kind,
+  # gap_days, previous_kind}`. `gap_days` is measured from the previous
+  # touch's own `inserted_at` (not a fixed point like `enrolled_at`) so a
+  # cron catching up after downtime can never fire two touches for the same
+  # enrollment on the same run — touch N can only become eligible once
+  # touch N-1's notification has existed for `gap_days`.
+  @never_started_touches %{
+    1 => {:reengagement_never_started, @never_started_threshold_days, nil},
+    2 => {:reengagement_never_started_2, 7, :reengagement_never_started},
+    3 => {:reengagement_never_started_3, 14, :reengagement_never_started_2}
+  }
+
+  @gone_quiet_touches %{
+    1 => {:reengagement_gone_quiet, @gone_quiet_threshold_days, nil},
+    2 => {:reengagement_gone_quiet_2, 14, :reengagement_gone_quiet},
+    3 => {:reengagement_gone_quiet_3, 30, :reengagement_gone_quiet_2}
+  }
 
   @doc """
   Saves a playback position and automatically completes the lecture at 95%.
@@ -564,6 +586,114 @@ defmodule Wasomi.Learning do
     |> Repo.preload([:user, :course])
     |> Enum.count(&course_complete?(&1.user, &1.course))
   end
+
+  @doc """
+  Active enrollments with zero lecture-progress rows, eligible for touch
+  `touch` (1, 2, or 3) of the "never started" re-engagement sequence
+  (`Wasomi.Notifications.deliver_reengagement_never_started/2`) — touch 1
+  gates on `enrolled_at`, touches 2/3 gate on the previous touch's own send
+  time (see the module attributes above for the exact gaps).
+  """
+  def list_never_started_enrollments(touch \\ 1) when touch in [1, 2, 3] do
+    {kind, gap_days, previous_kind} = Map.fetch!(@never_started_touches, touch)
+    cutoff = days_ago(gap_days)
+
+    from(e in Enrollment,
+      as: :enrollment,
+      where: e.status == :active,
+      where: not exists(enrollment_progress_query()),
+      where: not exists(enrollment_notified_query(kind))
+    )
+    |> gate_on_previous_touch_or_origin(previous_kind, cutoff, :enrolled_at)
+    |> Repo.all()
+  end
+
+  @doc """
+  Active, incomplete enrollments eligible for touch `touch` (1, 2, or 3) of
+  the "gone quiet" re-engagement sequence
+  (`Wasomi.Notifications.deliver_reengagement_gone_quiet/2`) — every touch
+  requires the SAME "no progress in the last `gap_days`" freshness check,
+  evaluated fresh against today (not a value carried over from an earlier
+  touch), so a learner who quietly resumed and stalled again still only
+  ever gets nudged when they're *currently* stale; touches 2/3 additionally
+  require the previous touch to have been sent at least `gap_days` ago.
+
+  Disjoint from `list_never_started_enrollments/1` by construction: a
+  learner with zero progress rows can never match the "has progress"
+  condition here, so the same enrollment can never qualify for both
+  triggers.
+  """
+  def list_gone_quiet_enrollments(touch \\ 1) when touch in [1, 2, 3] do
+    {kind, gap_days, previous_kind} = Map.fetch!(@gone_quiet_touches, touch)
+    cutoff = days_ago(gap_days)
+
+    from(e in Enrollment,
+      as: :enrollment,
+      where: e.status == :active,
+      where: exists(enrollment_progress_query()),
+      where: not exists(where(enrollment_progress_query(), [p], p.updated_at > ^cutoff)),
+      where: not exists(enrollment_notified_query(kind)),
+      preload: [:user, :course]
+    )
+    |> gate_on_previous_touch_or_origin(previous_kind, cutoff, :none)
+    |> Repo.all()
+    |> Enum.reject(&course_complete?(&1.user, &1.course))
+  end
+
+  # Touch 1 of either sequence gates on the enrollment's own fixed origin
+  # point (`enrolled_at` for never-started; gone-quiet's origin is already
+  # baked into its base query above, via the progress-staleness check, so
+  # `:none` here is a no-op). Touch 2/3 replace that with "the previous
+  # touch's notification exists and was sent at least `gap_days` ago" —
+  # this is what makes the sequence self-correcting: touch N simply cannot
+  # become eligible before touch N-1 has existed for a full gap, no matter
+  # when the scan runs.
+  defp gate_on_previous_touch_or_origin(query, nil, cutoff, :enrolled_at) do
+    where(query, [enrollment: e], e.enrolled_at <= ^cutoff)
+  end
+
+  defp gate_on_previous_touch_or_origin(query, nil, _cutoff, :none), do: query
+
+  defp gate_on_previous_touch_or_origin(query, previous_kind, cutoff, _origin) do
+    where(
+      query,
+      [enrollment: e],
+      exists(where(enrollment_notified_query(previous_kind), [n], n.inserted_at <= ^cutoff))
+    )
+  end
+
+  # Correlated to the caller's `as: :enrollment` binding: every lecture
+  # this enrollment's course contains, for progress rows belonging to that
+  # same enrollment's learner.
+  defp enrollment_progress_query do
+    from(p in LectureProgress,
+      join: lecture in Lecture,
+      on: lecture.id == p.lecture_id,
+      join: course_module in CourseModule,
+      on: course_module.id == lecture.module_id,
+      where:
+        p.user_id == parent_as(:enrollment).user_id and
+          course_module.course_id == parent_as(:enrollment).course_id
+    )
+  end
+
+  # Excludes enrollments already nudged for `kind` — the query-level mirror
+  # of the unique index `Wasomi.Notifications` reserves against. Without
+  # this, an already-notified enrollment (whose zero-progress or stale
+  # `updated_at` never changes on its own) would keep re-appearing in the
+  # candidate list on every cron run forever; the unique index still makes
+  # that harmless, but this keeps the daily scan bounded to real candidates.
+  defp enrollment_notified_query(kind) do
+    from(n in Notification,
+      where:
+        n.user_id == parent_as(:enrollment).user_id and
+          n.course_id == parent_as(:enrollment).course_id and
+          n.kind == ^kind
+    )
+  end
+
+  defp days_ago(days),
+    do: DateTime.utc_now() |> DateTime.add(-days, :day) |> DateTime.truncate(:second)
 
   defp completion_counts(user_id, lectures_query) do
     lecture_ids = from(lecture in lectures_query, select: lecture.id)

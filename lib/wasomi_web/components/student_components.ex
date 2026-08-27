@@ -9,6 +9,7 @@ defmodule WasomiWeb.StudentComponents do
   use Phoenix.Component
 
   alias Phoenix.LiveView.JS
+  alias Wasomi.Notifications
 
   import WasomiWeb.CoreComponents, only: [icon: 1]
 
@@ -21,6 +22,7 @@ defmodule WasomiWeb.StudentComponents do
     %{key: :dashboard, label: "Dashboard", icon: "hero-squares-2x2", path: "/dashboard"},
     %{key: :courses, label: "My courses", icon: "hero-academic-cap", path: "/courses-taken"},
     %{key: :certificates, label: "Certificates", icon: "hero-trophy", path: "/certificates"},
+    %{key: :notifications, label: "Notifications", icon: "hero-bell", path: "/notifications"},
     %{key: :browse, label: "Browse catalog", icon: "hero-magnifying-glass", path: "/courses"},
     %{key: :account, label: "Account", icon: "hero-cog-6-tooth", path: "/users/settings"}
   ]
@@ -31,16 +33,25 @@ defmodule WasomiWeb.StudentComponents do
   ## Attributes
 
     * `:active` - the key of the active nav item (`:dashboard`, `:courses`,
-      `:study`, `:certificates`, `:browse`, `:account`). Defaults to `nil`.
+      `:study`, `:certificates`, `:notifications`, `:browse`, `:account`).
+      Defaults to `nil`.
     * `:current_user` - the signed-in user, used for the profile footer.
   """
   attr :active, :atom, default: nil
   attr :current_user, :map, required: true
   attr :embedded, :boolean, default: false
+  attr :unread_notifications_count, :integer, default: nil
   slot :inner_block, required: true
 
   def student_layout(assigns) do
-    assigns = assign(assigns, :nav_items, @nav_items)
+    assigns =
+      assigns
+      |> assign(:nav_items, @nav_items)
+      |> assign(
+        :unread_notifications_count,
+        assigns[:unread_notifications_count] ||
+          Notifications.count_unread_for_user(assigns.current_user)
+      )
 
     ~H"""
     <div class="min-h-screen bg-surface text-ink lg:flex">
@@ -65,7 +76,6 @@ defmodule WasomiWeb.StudentComponents do
       <aside
         :if={!@embedded}
         id="student-sidebar"
-        phx-update="ignore"
         class="app-sidebar hidden w-full shrink-0 border-b border-black/5 bg-white lg:flex lg:h-screen lg:w-72 lg:flex-col lg:border-b-0 lg:border-r"
       >
         <div class="sidebar-header hidden items-center justify-between px-6 py-7 lg:flex">
@@ -84,7 +94,12 @@ defmodule WasomiWeb.StudentComponents do
         </div>
 
         <nav class="flex-1 space-y-1 px-4 py-4 lg:py-2">
-          <.nav_link :for={item <- @nav_items} item={item} active={@active} />
+          <.nav_link
+            :for={item <- @nav_items}
+            item={item}
+            active={@active}
+            unread_notifications_count={@unread_notifications_count}
+          />
         </nav>
 
         <div class="border-t border-black/5 p-4">
@@ -216,10 +231,17 @@ defmodule WasomiWeb.StudentComponents do
 
   attr :item, :map, required: true
   attr :active, :atom, required: true
+  attr :unread_notifications_count, :integer, required: true
 
   defp nav_link(assigns) do
+    assigns =
+      assigns
+      |> assign(:notifications_item?, assigns.item.key == :notifications)
+      |> assign(:has_unread_notifications?, assigns.unread_notifications_count > 0)
+
     ~H"""
     <.link
+      id={"student-nav-#{@item.key}"}
       navigate={@item.path}
       class={[
         "sidebar-row group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition",
@@ -229,12 +251,36 @@ defmodule WasomiWeb.StudentComponents do
         )
       ]}
     >
-      <.icon name={@item.icon} class="h-5 w-5 shrink-0" />
-      <span class="sidebar-label inline-block">{@item.label}</span>
-      <.sidebar_tooltip label={@item.label} />
+      <span class="relative grid shrink-0 place-items-center">
+        <.icon name={@item.icon} class="h-5 w-5" />
+        <span
+          :if={@notifications_item? && @has_unread_notifications?}
+          class="sidebar-notification-dot absolute -right-0.5 -top-0.5 hidden h-2.5 w-2.5 rounded-full bg-primary ring-2 ring-white"
+        >
+        </span>
+        <span
+          :if={@notifications_item? && @has_unread_notifications?}
+          class="sidebar-notification-count absolute -right-2 -top-2 grid h-4 min-w-4 place-items-center rounded-full bg-primary px-1 text-[10px] font-bold leading-none text-white ring-2 ring-white"
+        >
+          {compact_count(@unread_notifications_count)}
+        </span>
+      </span>
+      <span class="sidebar-label inline-block">
+        {@item.label}
+      </span>
+      <.sidebar_tooltip label={nav_tooltip_label(@item, @unread_notifications_count)} />
     </.link>
     """
   end
+
+  defp compact_count(count) when count > 9, do: "9+"
+  defp compact_count(count), do: count
+
+  defp nav_tooltip_label(%{key: :notifications, label: label}, count) when count > 0 do
+    "#{label} (#{count} unread)"
+  end
+
+  defp nav_tooltip_label(%{label: label}, _count), do: label
 
   # Shown only while the sidebar is collapsed (see `.sidebar-tooltip` in
   # app.css) — a plain `title` attribute works too, but browsers impose a

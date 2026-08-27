@@ -106,16 +106,18 @@ defmodule WasomiWeb.DashboardLiveTest do
     admin
   end
 
-  test "a live-connected dashboard shows an admin grant the moment it's broadcast", %{
-    conn: conn,
-    user: user
-  } do
+  test "a live-connected dashboard updates learning content and sidebar indicator on admin grant",
+       %{
+         conn: conn,
+         user: user
+       } do
     admin = admin_fixture()
     course = course_fixture(status: :published, title: "Granted course")
 
     {:ok, view, html} = live(conn, ~p"/dashboard")
     refute html =~ "Granted course"
     refute has_element?(view, "#dashboard-notifications")
+    refute has_element?(view, "#student-nav-notifications .sidebar-notification-dot")
 
     {:ok, _enrollment} =
       Wasomi.Enrollments.grant_access(user, admin, %{
@@ -123,55 +125,8 @@ defmodule WasomiWeb.DashboardLiveTest do
         "reason" => "Manual enrollment for a partner scholarship"
       })
 
-    assert has_element?(view, "#dashboard-notifications", "Course access granted")
-    assert has_element?(view, "#dashboard-notifications", "Granted course")
+    refute has_element?(view, "#dashboard-notifications")
     assert has_element?(view, "#dashboard-course-#{course.id}")
-  end
-
-  test "dismissing an in-app notification marks it read and removes it from the panel", %{
-    conn: conn,
-    user: user
-  } do
-    admin = admin_fixture()
-    course = course_fixture(status: :published, title: "Granted course")
-
-    {:ok, _enrollment} =
-      Wasomi.Enrollments.grant_access(user, admin, %{
-        "course_id" => course.id,
-        "reason" => "Manual enrollment for a partner scholarship"
-      })
-
-    {:ok, view, html} = live(conn, ~p"/dashboard")
-    assert html =~ "Course access granted"
-
-    [notification] = Wasomi.Notifications.list_unread_for_user(user)
-
-    html =
-      view
-      |> element("#notification-#{notification.id} button", "Dismiss")
-      |> render_click()
-
-    refute html =~ "Course access granted"
-    assert Wasomi.Notifications.list_unread_for_user(user) == []
-  end
-
-  test "cannot dismiss another learner's notification", %{conn: conn} do
-    admin = admin_fixture()
-    other_learner = Wasomi.AccountsFixtures.user_fixture()
-    course = course_fixture(status: :published, title: "Someone else's course")
-
-    {:ok, _enrollment} =
-      Wasomi.Enrollments.grant_access(other_learner, admin, %{
-        "course_id" => course.id,
-        "reason" => "Manual enrollment for a partner scholarship"
-      })
-
-    [other_notification] = Wasomi.Notifications.list_unread_for_user(other_learner)
-
-    {:ok, view, _html} = live(conn, ~p"/dashboard")
-
-    render_click(view, "dismiss_notification", %{"id" => other_notification.id})
-
-    assert Wasomi.Notifications.list_unread_for_user(other_learner) != []
+    assert has_element?(view, "#student-nav-notifications .sidebar-notification-dot")
   end
 end

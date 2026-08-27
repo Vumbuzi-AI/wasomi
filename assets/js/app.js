@@ -82,15 +82,22 @@ Hooks.SidebarToggle = {
       this.el.title = isCollapsed ? "Expand sidebar" : "Collapse sidebar";
     };
 
-    const collapsed = localStorage.getItem(storageKey) === "true";
-    sidebar.classList.toggle("is-collapsed", collapsed);
-    setTitle(collapsed);
+    this.syncSidebarState = () => {
+      const collapsed = localStorage.getItem(storageKey) === "true";
+      sidebar.classList.toggle("is-collapsed", collapsed);
+      setTitle(collapsed);
+    };
+
+    this.syncSidebarState();
 
     this.el.addEventListener("click", () => {
       const isCollapsed = sidebar.classList.toggle("is-collapsed");
       localStorage.setItem(storageKey, isCollapsed);
       setTitle(isCollapsed);
     });
+  },
+  updated() {
+    if (this.syncSidebarState) this.syncSidebarState();
   },
 };
 

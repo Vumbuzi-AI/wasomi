@@ -14,6 +14,10 @@ defmodule Wasomi.Emails.Template do
     * `:body` — a paragraph or list of paragraphs
     * `:cta` — `%{label: string, url: string}` rendered as the primary button
     * `:footer_note` — replaces the default sign-off line
+
+  `:intro`/`:body` entries are plain strings by default (escaped in full) —
+  use `rich/1` to bold a name or course title within one instead of hand-
+  building HTML at the call site.
   """
 
   @primary "#f97316"
@@ -56,10 +60,38 @@ defmodule Wasomi.Emails.Template do
     """
   end
 
+  @doc """
+  Bolds select segments within a paragraph — e.g. a learner's name or a
+  course title — without letting call sites inject arbitrary HTML: each
+  dynamic value is still escaped individually, `<strong>` is the only tag
+  this ever emits, and everything is available as plain text too, for
+  `render_text/1`.
+
+  ## Examples
+
+      iex> Wasomi.Emails.Template.rich(["Hi ", {:bold, "Jane"}, "!"])
+      {:safe, "Hi <strong>Jane</strong>!", "Hi Jane!"}
+  """
+  def rich(segments) do
+    html =
+      Enum.map_join(segments, "", fn
+        {:bold, value} -> "<strong>#{esc(value)}</strong>"
+        text -> esc(text)
+      end)
+
+    plain =
+      Enum.map_join(segments, "", fn
+        {:bold, value} -> value
+        text -> text
+      end)
+
+    {:safe, html, plain}
+  end
+
   @doc "Renders the plain-text fallback for an email, mirroring `render/1`."
   def render_text(assigns) do
-    intro = assigns[:intro]
-    body = List.wrap(assigns[:body])
+    intro = plain_text(assigns[:intro])
+    body = assigns[:body] |> List.wrap() |> Enum.map(&plain_text/1)
     cta = assigns[:cta]
     url = if is_map(cta), do: Map.get(cta, :url)
 
@@ -78,26 +110,49 @@ defmodule Wasomi.Emails.Template do
     |> Enum.join("\n\n")
   end
 
+  # Most mail clients strip/block remote images by default, so the real
+  # logo is inlined as a data URI rather than linked — guarantees it shows
+  # up without the recipient needing to click "show images". Cached in
+  # `:persistent_term`: this renders on every transactional email sent, and
+  # re-reading + re-encoding the same ~56 KB file each time isn't free.
   defp logo do
-    """
-    <div style="display:flex;align-items:center;gap:10px;">
-      <span style="display:inline-block;width:32px;height:32px;border-radius:999px;background-color:#{@primary};text-align:center;line-height:32px;">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" style="vertical-align:middle;">
-          <path d="M5 18V8l7 7 7-7v10" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
-      </span>
-      <span style="font-size:18px;font-weight:400;color:#{@dark};">Wasomi</span>
-    </div>
-    """
+    case logo_data_uri() do
+      nil ->
+        ~s(<span style="font-size:18px;font-weight:600;color:#{@dark};">Wasomi</span>)
+
+      data_uri ->
+        ~s(<img src="#{data_uri}" alt="Wasomi" height="28" style="display:block;height:28px;width:auto;">)
+    end
+  end
+
+  defp logo_data_uri do
+    :persistent_term.get({__MODULE__, :logo_data_uri}, nil) || load_and_cache_logo()
+  end
+
+  defp load_and_cache_logo do
+    data_uri =
+      case Application.app_dir(:wasomi, "priv/static/images/logo.png") |> File.read() do
+        {:ok, bytes} -> "data:image/png;base64,#{Base.encode64(bytes)}"
+        {:error, _reason} -> nil
+      end
+
+    :persistent_term.put({__MODULE__, :logo_data_uri}, data_uri)
+    data_uri
   end
 
   defp paragraphs(assigns) do
     [assigns[:intro] | List.wrap(assigns[:body])]
     |> Enum.reject(&is_nil/1)
     |> Enum.map_join("\n", fn paragraph ->
-      ~s(<p style="margin:0 0 16px;color:#{@body_color};font-size:15px;line-height:1.6;font-weight:400;">#{esc(paragraph)}</p>)
+      ~s(<p style="margin:0 0 16px;color:#{@body_color};font-size:15px;line-height:1.6;font-weight:400;">#{paragraph_html(paragraph)}</p>)
     end)
   end
+
+  defp paragraph_html({:safe, html, _plain}), do: html
+  defp paragraph_html(text), do: esc(text)
+
+  defp plain_text({:safe, _html, plain}), do: plain
+  defp plain_text(text), do: text
 
   defp cta_button(nil), do: ""
 
@@ -107,7 +162,7 @@ defmodule Wasomi.Emails.Template do
 
     if safe_url?(url) do
       """
-      <a href="#{esc(url)}" style="display:inline-block;margin-top:8px;padding:14px 28px;border-radius:999px;background-color:#{@dark};color:#ffffff;font-size:15px;font-weight:400;text-decoration:none;">
+      <a href="#{esc(url)}" style="display:inline-block;margin-top:8px;padding:14px 28px;border-radius:999px;background-color:#{@primary};color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;">
         #{esc(label)}
       </a>
       """

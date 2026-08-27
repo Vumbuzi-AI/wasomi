@@ -88,17 +88,27 @@ defmodule Wasomi.Content.LandingPreview do
   # tick while the edit modal is open, and re-reading + re-regexing a
   # ~170 KB file from disk each time isn't free. `app.css` only changes on
   # a fresh deploy (new BEAM instance), so there's nothing to invalidate.
+  #
+  # `app.css` is a build artifact from `mix assets.build`/`assets.deploy`,
+  # not something `mix compile`/`mix test` produces on their own — CI's
+  # test job never runs it, so the file legitimately doesn't exist there.
+  # Falling back to "" (unstyled but functional) instead of raising keeps
+  # this page's tests, and any fresh checkout, working without that step.
   defp css do
     :persistent_term.get({__MODULE__, :css}, nil) || load_and_cache_css()
   end
 
   defp load_and_cache_css do
     css =
-      Application.app_dir(:wasomi, "priv/static/assets/app.css")
-      |> File.read!()
-      # `[^;]+` would stop at the first `;` — but the font URL itself has
-      # several (`wght@400;500;600;...`), so match the whole first line.
-      |> String.replace(~r/^@import.*\n/, "", global: false)
+      case Application.app_dir(:wasomi, "priv/static/assets/app.css") |> File.read() do
+        {:ok, contents} ->
+          # `[^;]+` would stop at the first `;` — but the font URL itself
+          # has several (`wght@400;500;600;...`), so match the whole line.
+          String.replace(contents, ~r/^@import.*\n/, "", global: false)
+
+        {:error, _reason} ->
+          ""
+      end
 
     :persistent_term.put({__MODULE__, :css}, css)
     css

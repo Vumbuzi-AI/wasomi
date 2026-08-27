@@ -15,8 +15,19 @@ defmodule Wasomi.Content.LandingPreviewTest do
 
     assert html =~ "<!doctype html>"
     refute html =~ "fonts.googleapis.com"
-    assert html =~ "tailwindcss"
     assert html =~ LandingImage.default_path(:hero)
+  end
+
+  # `app.css` is a build artifact (`mix assets.build`/`assets.deploy`), not
+  # something `mix test` produces on its own — CI's test job never runs it,
+  # so this can't assume the file exists. When it's present locally this
+  # also happens to prove the stylesheet actually got inlined.
+  test "inlines the compiled stylesheet when it has been built" do
+    css_path = Application.app_dir(:wasomi, "priv/static/assets/app.css")
+
+    if File.exists?(css_path) do
+      assert LandingPreview.render_html(:hero, images()) =~ "tailwindcss"
+    end
   end
 
   test "a not-yet-saved override URL is reflected in the rendered document" do

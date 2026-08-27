@@ -369,7 +369,7 @@ defmodule WasomiWeb.AdminLive.QuizEditTest do
     {:ok, view, _html} = live(conn, edit_path(quiz))
 
     assert has_element?(view, "span.bg-mint", "2 generated · 2 to review")
-    refute has_element?(view, "span.bg-neutral-50", "reviewed")
+    refute has_element?(view, "span.bg-surface", "reviewed")
 
     view
     |> element("button", "Discard 2 draft(s)")
@@ -379,7 +379,7 @@ defmodule WasomiWeb.AdminLive.QuizEditTest do
     |> element("#discard-generation-modal button", "Discard drafts")
     |> render_click()
 
-    assert has_element?(view, "span.bg-neutral-50", "2 generated · reviewed")
+    assert has_element?(view, "span.bg-surface", "2 generated · reviewed")
     refute has_element?(view, "span.bg-mint", "to review")
   end
 

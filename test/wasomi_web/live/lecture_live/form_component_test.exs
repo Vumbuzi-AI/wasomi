@@ -214,7 +214,7 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
     assert lecture.duration_seconds == 612
   end
 
-  test "editing a lecture with an existing video shows its thumbnail, never a raw Mux ID, and lets you remove it",
+  test "editing a lecture with an existing video shows an inline player, never a raw Mux ID, and lets you remove it",
        %{conn: conn} do
     lecture =
       lecture_fixture(video_asset_id: "existing-playback-id", duration_seconds: 300)
@@ -238,14 +238,22 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
     assert html =~ "Update the title and description"
     html = view |> element("button[phx-value-step='video']", "Video") |> render_click()
 
-    assert html =~ "https://image.mux.test/existing-playback-id/thumbnail.jpg?token=abc"
+    # A lecture with a real, ready video plays inline (via a safe indirection
+    # route keyed on the lecture id) rather than showing a static thumbnail —
+    # either way, the raw Mux playback id must never reach the DOM.
+    assert has_element?(view, "#lecture-video-playback-#{lecture.id}")
+
+    assert html =~
+             ~p"/media/lectures/#{lecture.id}/playback?preview=true"
+
     assert html =~ "Current video"
+    refute html =~ "existing-playback-id"
     refute html =~ ~s(name="lecture[video_asset_id]")
     refute html =~ ~s(name="lecture[duration_seconds]")
 
     html = render_click(element(view, "[aria-label='Remove selected video']"))
 
-    refute html =~ "https://image.mux.test/existing-playback-id/thumbnail.jpg?token=abc"
+    refute has_element?(view, "#lecture-video-playback-#{lecture.id}")
     assert html =~ "Drop a video here, or click to choose one"
   end
 
@@ -371,12 +379,13 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
 
     html = view |> element("button", "Skip for now") |> render_click()
 
-    assert html =~ "&quot;First lecture&quot; is saved"
+    assert html =~ "Lecture saved"
+    assert html =~ "First lecture"
 
     html = view |> element("button", "Add another lecture") |> render_click()
 
     assert has_element?(view, "#lecture-basics-form")
-    refute html =~ "is saved"
+    refute html =~ "Lecture saved"
 
     [lecture] =
       Catalog.get_course_with_outline!(course.id).modules

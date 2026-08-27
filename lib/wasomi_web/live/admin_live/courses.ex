@@ -194,7 +194,7 @@ defmodule WasomiWeb.AdminLive.Courses do
           />
         </div>
 
-        <div class="rounded-[2rem] border border-black/5 bg-white p-6 shadow-sm lg:p-8">
+        <div class="rounded-[2rem] border border-black/5 bg-white p-6 shadow-card lg:p-8">
           <div class="flex flex-wrap items-center justify-between gap-4">
             <div>
               <h2 class="text-xl font-semibold text-ink">Course catalogue</h2>
@@ -228,7 +228,7 @@ defmodule WasomiWeb.AdminLive.Courses do
                 <article
                   :for={{row, index} <- Enum.with_index(@rows, 1)}
                   id={"course-row-#{row.course.id}"}
-                  class="group relative flex flex-col overflow-hidden rounded-3xl border border-black/5 bg-white shadow-sm transition duration-300 hover:-translate-y-1 hover:shadow-xl"
+                  class="group relative flex flex-col overflow-hidden rounded-3xl border border-black/5 bg-white shadow-card transition duration-300 hover:-translate-y-1 hover:shadow-card-hover"
                 >
                   <div class={["relative aspect-[16/10] overflow-hidden", card_header_class(index)]}>
                     <img
@@ -333,7 +333,7 @@ defmodule WasomiWeb.AdminLive.Courses do
 
               <div
                 :if={@rows == [] and @stats.total == 0}
-                class="rounded-3xl border border-black/5 bg-neutral-50 p-12 text-center"
+                class="rounded-3xl border border-black/5 bg-surface p-12 text-center"
               >
                 <span class="mx-auto grid h-14 w-14 place-items-center rounded-full bg-mint text-primary">
                   <.icon name="hero-academic-cap" class="h-7 w-7" />
@@ -352,7 +352,7 @@ defmodule WasomiWeb.AdminLive.Courses do
 
               <div
                 :if={@rows == [] and @stats.total > 0}
-                class="rounded-3xl border border-black/5 bg-neutral-50 p-12 text-center"
+                class="rounded-3xl border border-black/5 bg-surface p-12 text-center"
               >
                 <span class="mx-auto grid h-14 w-14 place-items-center rounded-full bg-mint text-primary">
                   <.icon name="hero-magnifying-glass" class="h-7 w-7" />

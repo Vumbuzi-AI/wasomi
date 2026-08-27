@@ -43,7 +43,7 @@ defmodule WasomiWeb.StudentComponents do
     assigns = assign(assigns, :nav_items, @nav_items)
 
     ~H"""
-    <div class="min-h-screen bg-soft text-ink lg:flex">
+    <div class="min-h-screen bg-surface text-ink lg:flex">
       <%!-- Mobile top bar --%>
       <div
         :if={!@embedded}
@@ -97,7 +97,7 @@ defmodule WasomiWeb.StudentComponents do
             <span class="sidebar-label inline-block">Admin dashboard</span>
             <.sidebar_tooltip label="Admin dashboard" />
           </.link>
-          <div class="sidebar-row group relative flex items-center gap-3 rounded-2xl bg-soft px-3 py-3">
+          <div class="sidebar-row group relative flex items-center gap-3 rounded-2xl bg-surface px-3 py-3">
             <span class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-mint font-semibold uppercase text-primary">
               {String.first(@current_user.name || @current_user.email)}
             </span>
@@ -112,7 +112,7 @@ defmodule WasomiWeb.StudentComponents do
           <.link
             href={~p"/users/log_out"}
             method="delete"
-            class="sidebar-row group relative mt-3 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-body transition hover:bg-soft hover:text-primary"
+            class="sidebar-row group relative mt-3 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-body transition hover:bg-surface hover:text-primary"
           >
             <.icon name="hero-arrow-left-on-rectangle" class="h-5 w-5 shrink-0" />
             <span class="sidebar-label inline-block">Log out</span>
@@ -146,7 +146,7 @@ defmodule WasomiWeb.StudentComponents do
     ~H"""
     <article
       id={@id}
-      class="group flex flex-col overflow-hidden rounded-3xl border border-black/5 bg-white shadow-sm transition duration-300 hover:-translate-y-1 hover:shadow-xl"
+      class="group flex flex-col overflow-hidden rounded-3xl border border-black/5 bg-white shadow-card transition duration-300 hover:-translate-y-1 hover:shadow-card-hover"
     >
       <div class="relative aspect-[16/9] overflow-hidden bg-mint">
         <img
@@ -225,7 +225,7 @@ defmodule WasomiWeb.StudentComponents do
         "sidebar-row group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition",
         if(@item.key == @active,
           do: "bg-dark text-white shadow-sm",
-          else: "text-body hover:bg-soft hover:text-primary"
+          else: "text-body hover:bg-surface hover:text-primary"
         )
       ]}
     >

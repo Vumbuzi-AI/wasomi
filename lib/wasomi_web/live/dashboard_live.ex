@@ -51,7 +51,7 @@ defmodule WasomiWeb.DashboardLive do
   def render(assigns) do
     ~H"""
     <.student_layout active={:dashboard} current_user={@current_user}>
-      <section class="bg-white py-12 lg:py-16">
+      <section class="bg-surface py-12 lg:py-16">
         <div class="w-full px-5 lg:px-8">
           <span class="rounded-full bg-mint px-3 py-1 text-sm font-medium text-primary">
             Learner dashboard
@@ -149,7 +149,7 @@ defmodule WasomiWeb.DashboardLive do
             <div
               :if={@course_cards == []}
               id="dashboard-empty-courses"
-              class="mt-7 rounded-3xl border border-black/5 bg-white p-8 text-center sm:p-12"
+              class="mt-7 rounded-3xl border border-black/5 bg-white p-8 text-center shadow-card sm:p-12"
             >
               <span class="mx-auto grid h-14 w-14 place-items-center rounded-full bg-mint text-primary">
                 <.icon name="hero-academic-cap" class="h-7 w-7" />
@@ -169,7 +169,7 @@ defmodule WasomiWeb.DashboardLive do
 
           <section
             id="dashboard-receipts"
-            class="rounded-3xl border border-black/5 bg-white p-6 sm:p-8"
+            class="rounded-3xl border border-black/5 bg-white p-6 shadow-card sm:p-8"
           >
             <div class="flex items-start justify-between gap-4">
               <div>
@@ -198,7 +198,7 @@ defmodule WasomiWeb.DashboardLive do
                     {Payments.format_amount(receipt)}
                   </p>
                 </div>
-                <div class="mt-3 flex items-center justify-between gap-4 rounded-2xl bg-soft px-4 py-3 text-xs">
+                <div class="mt-3 flex items-center justify-between gap-4 rounded-2xl bg-surface px-4 py-3 text-xs">
                   <span class="text-muted">Receipt reference</span>
                   <span class="break-all text-right font-medium text-ink">
                     {receipt.provider_reference}
@@ -207,7 +207,7 @@ defmodule WasomiWeb.DashboardLive do
               </article>
             </div>
 
-            <p :if={@receipts == []} class="mt-6 rounded-2xl bg-soft p-5 text-body">
+            <p :if={@receipts == []} class="mt-6 rounded-2xl bg-surface p-5 text-body">
               Successful course payments will appear here.
             </p>
           </section>
@@ -223,7 +223,7 @@ defmodule WasomiWeb.DashboardLive do
 
   defp learner_stat_card(assigns) do
     ~H"""
-    <div class="flex items-center gap-4 rounded-3xl border border-black/5 bg-white p-5">
+    <div class="flex items-center gap-4 rounded-3xl border border-black/5 bg-white p-5 shadow-card">
       <span class="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-mint text-primary">
         <.icon name={@icon} class="h-6 w-6" />
       </span>

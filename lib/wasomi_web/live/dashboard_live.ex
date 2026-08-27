@@ -159,7 +159,7 @@ defmodule WasomiWeb.DashboardLive do
                 Enroll in a course and it will appear here as soon as payment is confirmed.
               </p>
               <.link
-                navigate={~p"/courses"}
+                navigate={~p"/catalog"}
                 class="mt-6 inline-flex rounded-full bg-ink px-6 py-3 font-medium text-white transition hover:bg-primary"
               >
                 Browse courses

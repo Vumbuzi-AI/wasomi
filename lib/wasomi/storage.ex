@@ -20,6 +20,28 @@ defmodule Wasomi.Storage do
 
   def presign_upload(_user, _attrs, _adapter), do: {:error, :forbidden}
 
+  @doc """
+  Presigns an avatar upload for any authenticated learner, not just admins.
+
+  Unlike `presign_upload/2`, avatar uploads are self-serve — every learner
+  manages their own profile picture. The `prefix` is forced to
+  `avatars/<user id>` server-side (any client-supplied prefix is discarded)
+  so a learner can never presign into another learner's, or an unrelated,
+  storage path. Content-type/size limits are still enforced by the
+  configured adapter (PNG only, 2 MB, same as certificate signatures).
+  """
+  def presign_avatar_upload(user, attrs),
+    do: presign_avatar_upload(user, attrs, configured_adapter())
+
+  def presign_avatar_upload(%User{id: id} = user, attrs, adapter) do
+    attrs =
+      attrs
+      |> Map.take(["filename", "content_type", "size", :filename, :content_type, :size])
+      |> Map.put("prefix", "avatars/#{id}")
+
+    adapter.presign_upload(user, attrs)
+  end
+
   def delete_upload(user, key), do: delete_upload(user, key, configured_adapter())
 
   def delete_upload(%User{role: :admin} = user, key, adapter) when is_binary(key) do

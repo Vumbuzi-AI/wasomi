@@ -2,6 +2,8 @@ defmodule Wasomi.Accounts.User do
   use Ecto.Schema
   import Ecto.Changeset
 
+  alias Wasomi.Accounts.Countries
+
   schema "users" do
     field :name, :string
     field :email, :string
@@ -12,9 +14,49 @@ defmodule Wasomi.Accounts.User do
     field :current_password, :string, virtual: true, redact: true
     field :confirmed_at, :utc_datetime
     field :role, Ecto.Enum, values: [:learner, :admin], default: :learner
+    field :bio, :string
+    field :country, :string
+    field :occupation, :string
+    field :avatar_key, :string
+    field :headline, :string
+    field :organization, :string
+    field :industry, :string
+    field :experience_level, Ecto.Enum, values: [:student, :entry, :mid, :senior, :lead_executive]
+
+    field :learning_goal, Ecto.Enum,
+      values: [
+        :career_advancement,
+        :career_switch,
+        :certification,
+        :upskilling,
+        :personal_interest
+      ]
 
     timestamps(type: :utc_datetime)
   end
+
+  @bio_max_length 500
+  @occupation_max_length 160
+  @headline_max_length 120
+  @organization_max_length 160
+
+  @industries [
+    "Technology & Software",
+    "Supply Chain & Logistics",
+    "Banking & Financial Services",
+    "Healthcare & Pharmaceuticals",
+    "Manufacturing & Engineering",
+    "Retail & E-commerce",
+    "Education & Training",
+    "Agriculture & Agribusiness",
+    "Public Sector & Non-Profit",
+    "Consulting & Professional Services",
+    "Energy & Utilities",
+    "Other"
+  ]
+
+  @doc "The fixed list of industries offered on the learner profile's `industry` dropdown."
+  def industries, do: @industries
 
   @doc """
   A user changeset for registration.
@@ -59,6 +101,56 @@ defmodule Wasomi.Accounts.User do
     |> cast(attrs, [:role])
     |> validate_required([:role])
     |> check_constraint(:role, name: :users_role_must_be_valid)
+  end
+
+  @doc """
+  A user changeset for editing the learner's private profile: headline,
+  bio, country, organization, industry, occupation, experience level,
+  learning goal, and avatar.
+
+  This is a self-editable, private surface — none of these fields are
+  required, and none are exposed to other learners through any existing
+  query. `country` and `industry` are each constrained to a fixed list
+  rather than accepted as free text; `experience_level` and
+  `learning_goal` are enums for the same reason.
+  """
+  @profile_select_fields ~w(country industry experience_level learning_goal)a
+
+  def profile_changeset(user, attrs) do
+    user
+    |> cast(blank_selects_to_nil(attrs), [
+      :headline,
+      :bio,
+      :country,
+      :organization,
+      :industry,
+      :occupation,
+      :experience_level,
+      :learning_goal,
+      :avatar_key
+    ])
+    |> validate_length(:headline, max: @headline_max_length)
+    |> validate_length(:bio, max: @bio_max_length)
+    |> validate_length(:organization, max: @organization_max_length)
+    |> validate_length(:occupation, max: @occupation_max_length)
+    |> validate_inclusion(:country, Countries.list(), message: "is not a supported country")
+    |> validate_inclusion(:industry, @industries, message: "is not a supported industry")
+  end
+
+  # "" from an unselected <select> is invalid for Ecto.Enum (not "unset") — normalize to nil
+  defp blank_selects_to_nil(attrs) do
+    Enum.reduce(@profile_select_fields, attrs, fn field, attrs ->
+      attrs
+      |> blank_key_to_nil(field)
+      |> blank_key_to_nil(Atom.to_string(field))
+    end)
+  end
+
+  defp blank_key_to_nil(attrs, key) do
+    case Map.fetch(attrs, key) do
+      {:ok, ""} -> Map.put(attrs, key, nil)
+      _ -> attrs
+    end
   end
 
   defp validate_name(changeset) do

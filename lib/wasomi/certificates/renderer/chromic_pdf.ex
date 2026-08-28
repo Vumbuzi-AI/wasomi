@@ -41,4 +41,21 @@ defmodule Wasomi.Certificates.Renderer.ChromicPdf do
   rescue
     error -> {:error, error}
   end
+
+  # PNG preview for the celebration modal — viewport sizing comes from
+  # `chromic_pdf_options`'s `chrome_args` (config.exs), not set here.
+  @impl true
+  def render_preview(assigns) do
+    html = Template.render_html(assigns)
+
+    case ChromicPDF.capture_screenshot({:html, html},
+           capture_screenshot: %{format: "png"},
+           evaluate: @evaluate
+         ) do
+      {:ok, base64_png} -> {:ok, Base.decode64!(base64_png)}
+      other -> {:error, other}
+    end
+  rescue
+    error -> {:error, error}
+  end
 end

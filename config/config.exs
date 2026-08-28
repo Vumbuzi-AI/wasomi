@@ -15,6 +15,8 @@ config :wasomi,
   storage_provider: Wasomi.Storage.R2,
   certificate_renderer: Wasomi.Certificates.Renderer.ChromicPdf,
   chromic_pdf_options: [
+    # 1300x919 matches the certificate's A4-landscape ratio, for screenshots.
+    chrome_args: "--window-size=1300,1062 --force-device-scale-factor=2",
     session_pool: [
       size: 2,
       init_timeout: 30_000,

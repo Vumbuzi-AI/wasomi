@@ -22,6 +22,8 @@ defmodule Wasomi.Certificates do
 
   import Ecto.Query, warn: false
 
+  require Logger
+
   alias Wasomi.Accounts.User
   alias Wasomi.Catalog.Course
   alias Wasomi.Certificates.Branding
@@ -193,6 +195,18 @@ defmodule Wasomi.Certificates do
     end
   end
 
+  @doc "Signed URL for a certificate's PNG preview image."
+  def preview_url(%User{} = user, %Certificate{} = certificate) do
+    if certificate.user_id == user.id do
+      storage().signed_url(preview_key(certificate.file_key),
+        expires_in: @download_ttl,
+        content_type: "image/png"
+      )
+    else
+      {:error, :forbidden}
+    end
+  end
+
   @doc """
   A descriptive, filesystem-safe filename for a certificate's PDF download —
   e.g. `"GS1 Barcoding Fundamentals - Wasomi Certificate.pdf"` — instead of
@@ -288,7 +302,7 @@ defmodule Wasomi.Certificates do
       })
 
     with {:ok, pdf} <- renderer().render(assigns),
-         :ok <- storage().upload(file_key, pdf),
+         :ok <- storage().upload(file_key, pdf, "application/pdf"),
          {:ok, certificate} <-
            create_certificate(%{
              type: :course,
@@ -298,6 +312,7 @@ defmodule Wasomi.Certificates do
              user_id: user.id,
              course_id: course.id
            }) do
+      upload_preview(assigns, preview_key(file_key))
       {:ok, preload_certificate(certificate), :created}
     else
       {:error, %Ecto.Changeset{} = changeset} ->
@@ -347,6 +362,19 @@ defmodule Wasomi.Certificates do
   defp preload_certificate(certificate), do: Repo.preload(certificate, [:user, :course])
 
   defp file_key(user_id, course_id), do: "certificates/#{user_id}/course/#{course_id}.pdf"
+  defp preview_key(file_key), do: String.replace_suffix(file_key, ".pdf", ".png")
+
+  # Best-effort: a failed preview shouldn't fail issuance of the real
+  # certificate.
+  defp upload_preview(assigns, preview_key) do
+    with {:ok, png} <- renderer().render_preview(assigns),
+         :ok <- storage().upload(preview_key, png, "image/png") do
+      :ok
+    else
+      {:error, reason} ->
+        Logger.warning("certificate preview upload failed: #{inspect(reason)}")
+    end
+  end
 
   defp renderer, do: Application.fetch_env!(:wasomi, :certificate_renderer)
   defp storage, do: Application.fetch_env!(:wasomi, :certificate_storage)

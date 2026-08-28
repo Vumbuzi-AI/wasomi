@@ -6,12 +6,13 @@ defmodule Wasomi.Certificates.Storage.R2 do
   @behaviour Wasomi.Certificates.Storage
 
   @impl true
-  def upload(key, pdf) when is_binary(key) and is_binary(pdf) do
+  def upload(key, data, content_type)
+      when is_binary(key) and is_binary(data) and is_binary(content_type) do
     with {:ok, bucket} <- bucket(),
          {:ok, _response} <-
            bucket
-           |> ExAws.S3.put_object(key, pdf,
-             content_type: "application/pdf",
+           |> ExAws.S3.put_object(key, data,
+             content_type: content_type,
              cache_control: "private, no-store"
            )
            |> ExAws.request() do
@@ -23,6 +24,7 @@ defmodule Wasomi.Certificates.Storage.R2 do
   def signed_url(key, opts \\ []) when is_binary(key) do
     expires_in = Keyword.get(opts, :expires_in, 300)
     filename = Keyword.get(opts, :filename)
+    content_type = Keyword.get(opts, :content_type, "application/pdf")
 
     with {:ok, bucket} <- bucket() do
       :s3
@@ -30,7 +32,7 @@ defmodule Wasomi.Certificates.Storage.R2 do
       |> ExAws.S3.presigned_url(:get, bucket, key,
         expires_in: expires_in,
         query_params: [
-          {"response-content-type", "application/pdf"},
+          {"response-content-type", content_type},
           {"response-content-disposition", content_disposition(filename)}
         ]
       )

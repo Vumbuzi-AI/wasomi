@@ -2324,19 +2324,23 @@ Hooks.Confetti = {
 
     const colors = ["#f97316", "#012c6a", "#fbbf24", "#22c55e", "#ffffff"];
     const count = 140;
-    const particles = Array.from({ length: count }, () => ({
+    const newParticle = () => ({
       x: Math.random() * window.innerWidth,
       y: -20 - Math.random() * window.innerHeight * 0.3,
       size: 6 + Math.random() * 6,
       color: colors[Math.floor(Math.random() * colors.length)],
-      speedY: 2 + Math.random() * 3,
+      speedY: 1.5 + Math.random() * 2,
       speedX: -1.5 + Math.random() * 3,
       rotation: Math.random() * 360,
       spin: -8 + Math.random() * 16,
-    }));
+    });
+    const particles = Array.from({ length: count }, newParticle);
 
     const start = performance.now();
-    const durationMs = 3200;
+    const durationMs = 10000;
+    // Stop spawning fresh particles a bit before the end, so the burst
+    // tapers off instead of cutting off mid-fall.
+    const stopSpawningAt = durationMs - 1500;
 
     const frame = (now) => {
       const elapsed = now - start;
@@ -2346,6 +2350,10 @@ Hooks.Confetti = {
         p.x += p.speedX;
         p.y += p.speedY;
         p.rotation += p.spin;
+
+        if (p.y > window.innerHeight + 20 && elapsed < stopSpawningAt) {
+          Object.assign(p, newParticle(), { y: -20 });
+        }
 
         ctx.save();
         ctx.translate(p.x, p.y);

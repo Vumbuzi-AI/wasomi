@@ -707,6 +707,7 @@ defmodule WasomiWeb.CoursePlayerLive do
     socket = refresh_certificates(socket)
 
     if course_id == socket.assigns.course.id do
+      certificate = %{certificate | course: socket.assigns.course}
       {:noreply, assign(socket, :celebrating_certificate, certificate)}
     else
       {:noreply, socket}
@@ -725,7 +726,7 @@ defmodule WasomiWeb.CoursePlayerLive do
         phx-key="Escape"
         class="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 px-4 backdrop-blur-sm"
       >
-        <div class="relative w-full max-w-md rounded-3xl bg-white p-8 text-center shadow-2xl">
+        <div class="relative w-full max-w-2xl rounded-3xl bg-white p-8 text-center shadow-2xl">
           <button
             type="button"
             phx-click="dismiss-certificate-celebration"
@@ -735,15 +736,23 @@ defmodule WasomiWeb.CoursePlayerLive do
             <.icon name="hero-x-mark" class="h-5 w-5" />
           </button>
 
-          <div class="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-mint">
-            <.icon name="hero-trophy" class="h-11 w-11 text-primary" />
+          <div class="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-mint">
+            <.icon name="hero-trophy" class="h-8 w-8 text-primary" />
           </div>
 
-          <h2 class="mt-5 text-2xl font-bold text-ink">Congratulations!</h2>
-          <p class="mt-2 text-body">
+          <h2 class="mt-4 text-2xl font-bold text-ink">Congratulations!</h2>
+          <p class="mt-1 text-body">
             You've completed <span class="font-semibold text-ink">{@celebrating_certificate.course.title}</span>.
             Your certificate is ready.
           </p>
+
+          <img
+            src={~p"/certificates/#{@celebrating_certificate.id}/preview"}
+            alt={"Certificate — #{@celebrating_certificate.course.title}"}
+            loading="lazy"
+            onerror="this.remove()"
+            class="mx-auto mt-6 w-full rounded-xl border border-black/10 shadow-md"
+          />
 
           <div class="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center">
             <.link

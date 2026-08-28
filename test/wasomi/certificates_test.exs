@@ -223,7 +223,9 @@ defmodule Wasomi.CertificatesTest do
       {:ok, "%PDF-test"}
     end)
 
-    expect(Wasomi.CertificateStorageMock, :upload, fn _key, _pdf -> :ok end)
+    expect(Wasomi.CertificateStorageMock, :upload, fn _key, _pdf, "application/pdf" -> :ok end)
+    stub(Wasomi.CertificateRendererMock, :render_preview, fn _assigns -> {:ok, "PNG-test"} end)
+    stub(Wasomi.CertificateStorageMock, :upload, fn _key, _png, "image/png" -> :ok end)
 
     {:ok, _, _events} =
       complete_lecture_via_progress!(context.user, context.lecture)
@@ -283,10 +285,13 @@ defmodule Wasomi.CertificatesTest do
       {:ok, "%PDF-test"}
     end)
 
-    expect(Wasomi.CertificateStorageMock, :upload, count, fn key, pdf ->
+    expect(Wasomi.CertificateStorageMock, :upload, count, fn key, pdf, "application/pdf" ->
       assert String.ends_with?(key, ".pdf")
       assert pdf == "%PDF-test"
       :ok
     end)
+
+    stub(Wasomi.CertificateRendererMock, :render_preview, fn _assigns -> {:ok, "PNG-test"} end)
+    stub(Wasomi.CertificateStorageMock, :upload, fn _key, _png, "image/png" -> :ok end)
   end
 end

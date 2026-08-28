@@ -5,21 +5,6 @@ defmodule Wasomi.Application do
 
   use Application
 
-  require Logger
-
-  @chrome_candidates [
-    "chromium-browser",
-    "chromium",
-    "google-chrome",
-    "chrome",
-    "/usr/bin/chromium-browser",
-    "/usr/bin/chromium",
-    "/usr/bin/google-chrome",
-    "/opt/google/chrome/chrome",
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    "/Applications/Chromium.app/Contents/MacOS/Chromium"
-  ]
-
   @impl true
   def start(_type, _args) do
     children = [
@@ -30,7 +15,6 @@ defmodule Wasomi.Application do
       {Phoenix.PubSub, name: Wasomi.PubSub},
       # Start the Finch HTTP client for sending emails
       {Finch, name: Wasomi.Finch},
-      maybe_chromic_pdf(),
       # Start a worker by calling: Wasomi.Worker.start_link(arg)
       # {Wasomi.Worker, arg},
       # Start to serve requests, typically the last entry
@@ -40,7 +24,7 @@ defmodule Wasomi.Application do
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options
     opts = [strategy: :one_for_one, name: Wasomi.Supervisor]
-    Supervisor.start_link(Enum.reject(children, &is_nil/1), opts)
+    Supervisor.start_link(children, opts)
   end
 
   # Tell Phoenix to update the endpoint configuration
@@ -50,52 +34,4 @@ defmodule Wasomi.Application do
     WasomiWeb.Endpoint.config_change(changed, removed)
     :ok
   end
-
-  defp maybe_chromic_pdf do
-    # ChromicPDF owns an external Chrome/Chromium process. Keep it opt-in so a
-    # production release can boot without installing or supervising a browser.
-    # Development explicitly enables it in config/dev.exs; tests and production
-    # leave it disabled unless a deployment deliberately opts in.
-    if Application.get_env(:wasomi, :start_chromic_pdf, false) do
-      case chrome_executable() do
-        nil ->
-          Logger.warning(
-            "No Chrome/Chromium executable found; skipping ChromicPDF startup. " <>
-              "Certificate PDF and lecture-video slide rendering will be unavailable until " <>
-              "CHROME_EXECUTABLE is set " <>
-              "or a browser is installed at one of the standard paths."
-          )
-
-          nil
-
-        executable ->
-          options =
-            Application.get_env(:wasomi, :chromic_pdf_options, [])
-            |> Keyword.merge(chrome_executable: executable, no_sandbox: no_sandbox?())
-
-          {ChromicPDF, options}
-      end
-    end
-  end
-
-  defp chrome_executable do
-    case System.get_env("CHROME_EXECUTABLE") do
-      path when is_binary(path) and path != "" -> path
-      _ -> Enum.find_value(@chrome_candidates, &resolve_executable/1)
-    end
-  end
-
-  defp resolve_executable(candidate) do
-    if Path.type(candidate) == :absolute do
-      if File.exists?(candidate), do: candidate
-    else
-      System.find_executable(candidate)
-    end
-  end
-
-  # Sandboxed by default — Chrome's sandbox is a real defense-in-depth layer
-  # against a renderer exploit escaping to the host process. Only disable it
-  # where the deployment target requires it (commonly: running as root in a
-  # container without the extra privileges the sandbox needs).
-  defp no_sandbox?, do: System.get_env("CHROME_NO_SANDBOX") in ["1", "true"]
 end

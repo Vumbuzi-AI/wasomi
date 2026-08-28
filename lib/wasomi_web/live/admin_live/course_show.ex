@@ -958,23 +958,25 @@ defmodule WasomiWeb.AdminLive.CourseShow do
         show
         on_cancel={JS.push("close_publish_checklist")}
       >
-        <h2 class="text-lg font-semibold text-ink">
+        <h2 class="text-xl font-semibold text-ink">
           "{@course.title}" isn't ready to publish yet
         </h2>
-        <p class="mt-1 text-sm text-body">Here's what's blocking it.</p>
+        <p class="mt-1 text-sm text-body">
+          Complete the items below before making this course public.
+        </p>
         <.publish_checklist stages={@publish_checklist} />
-        <div class="mt-6 flex items-center gap-4">
+        <div class="mt-7 flex flex-col gap-3 sm:flex-row sm:items-center">
           <button
             type="button"
             phx-click={JS.push("close_publish_checklist") |> JS.push("edit_course")}
-            class="rounded-full bg-ink px-5 py-2 text-sm font-medium text-white transition hover:bg-primary"
+            class="inline-flex items-center justify-center rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-primary"
           >
             Edit course
           </button>
           <button
             type="button"
             phx-click="close_publish_checklist"
-            class="text-sm font-medium text-muted hover:text-ink"
+            class="inline-flex items-center justify-center rounded-full border border-black/10 px-5 py-2.5 text-sm font-semibold text-ink transition hover:border-primary hover:text-primary"
           >
             Close
           </button>

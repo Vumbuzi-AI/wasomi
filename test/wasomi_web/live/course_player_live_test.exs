@@ -402,6 +402,60 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
            )
   end
 
+  describe "certificate celebration modal" do
+    setup %{conn: conn, user: user} do
+      course = course_fixture(status: :published)
+      module = course_module_fixture(course_id: course.id, position: 1)
+      lecture_fixture(module_id: module.id, position: 1)
+      {:ok, pending} = Enrollments.create_pending_enrollment(user, course)
+      {:ok, _active} = Enrollments.activate_enrollment(pending)
+
+      {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
+      %{view: view, course: course}
+    end
+
+    test "pops with download, LinkedIn, and a preview image when the current course's certificate is ready",
+         %{view: view, course: course, user: user} do
+      certificate = certificate_fixture(user_id: user.id, course_id: course.id)
+      :ok = Certificates.broadcast_ready(certificate)
+
+      assert has_element?(view, "#certificate-celebration")
+      assert has_element?(view, "#certificate-celebration", course.title)
+
+      assert has_element?(
+               view,
+               "a[href='/certificates/#{certificate.id}/download']",
+               "Download certificate"
+             )
+
+      assert has_element?(view, "a[href^='https://www.linkedin.com/profile/add']")
+
+      html = render(view)
+      assert html =~ ~s(src="/certificates/#{certificate.id}/preview")
+      assert html =~ "onerror"
+    end
+
+    test "does not pop for a certificate from a different course", %{view: view, user: user} do
+      other_course = course_fixture(status: :published)
+      certificate = certificate_fixture(user_id: user.id, course_id: other_course.id)
+      :ok = Certificates.broadcast_ready(certificate)
+
+      refute has_element?(view, "#certificate-celebration")
+    end
+
+    test "dismissing removes the modal", %{view: view, course: course, user: user} do
+      certificate = certificate_fixture(user_id: user.id, course_id: course.id)
+      :ok = Certificates.broadcast_ready(certificate)
+      assert has_element?(view, "#certificate-celebration")
+
+      view
+      |> element("button", "Continue learning")
+      |> render_click()
+
+      refute has_element?(view, "#certificate-celebration")
+    end
+  end
+
   test "a module quiz is locked in the sidebar until every lecture in that module is completed",
        %{conn: conn, user: user} do
     course = course_fixture(status: :published)

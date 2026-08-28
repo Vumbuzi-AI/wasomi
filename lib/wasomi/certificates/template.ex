@@ -17,6 +17,62 @@ defmodule Wasomi.Certificates.Template do
 
   alias Phoenix.HTML.Safe
 
+  # Self-hosted as base64 data URIs, embedded at compile time, rather than
+  # linked from Google Fonts. ChromicPDF's render blocks on
+  # `document.fonts.ready` (see the renderer), so a live webfont fetch put
+  # every certificate render at the mercy of network conditions inside the
+  # headless Chrome sandbox for no real benefit — these two families are
+  # tiny (under 90KB total) and never change at runtime. `@external_resource`
+  # tells Mix to recompile this module if a font file is swapped.
+  fonts_dir = Path.join(:code.priv_dir(:wasomi), "certificate_fonts")
+
+  for filename <-
+        ~w(outfit-latin.woff2 outfit-latin-ext.woff2 dancing-script-latin.woff2 dancing-script-latin-ext.woff2) do
+    @external_resource Path.join(fonts_dir, filename)
+  end
+
+  outfit_latin = Path.join(fonts_dir, "outfit-latin.woff2") |> File.read!() |> Base.encode64()
+
+  outfit_latin_ext =
+    Path.join(fonts_dir, "outfit-latin-ext.woff2") |> File.read!() |> Base.encode64()
+
+  dancing_script_latin =
+    Path.join(fonts_dir, "dancing-script-latin.woff2") |> File.read!() |> Base.encode64()
+
+  dancing_script_latin_ext =
+    Path.join(fonts_dir, "dancing-script-latin-ext.woff2") |> File.read!() |> Base.encode64()
+
+  @font_face_css """
+  @font-face {
+    font-family: "Outfit";
+    font-style: normal;
+    font-weight: 100 900;
+    src: url(data:font/woff2;base64,#{outfit_latin_ext}) format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+  }
+  @font-face {
+    font-family: "Outfit";
+    font-style: normal;
+    font-weight: 100 900;
+    src: url(data:font/woff2;base64,#{outfit_latin}) format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  }
+  @font-face {
+    font-family: "Dancing Script";
+    font-style: normal;
+    font-weight: 600;
+    src: url(data:font/woff2;base64,#{dancing_script_latin_ext}) format("woff2");
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+  }
+  @font-face {
+    font-family: "Dancing Script";
+    font-style: normal;
+    font-weight: 600;
+    src: url(data:font/woff2;base64,#{dancing_script_latin}) format("woff2");
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  }
+  """
+
   def render_html(assigns) do
     assigns
     |> certificate()
@@ -27,7 +83,14 @@ defmodule Wasomi.Certificates.Template do
   attr :learner_name, :string, required: true
   attr :title, :string, required: true
   attr :issued_on, :string, required: true
-  attr :serial_number, :string, required: true
+
+  attr :gdti, :string,
+    required: true,
+    doc:
+      "Raw digits only (no \"253\" prefix — that's the GS1 Application " <>
+        "Identifier, added as a printed label at render time, not part " <>
+        "of the identifier's own value)"
+
   attr :issuer_name, :string, default: "Wasomi Business Institute"
 
   attr :headline, :string, default: "Certificate of Completion"
@@ -55,19 +118,25 @@ defmodule Wasomi.Certificates.Template do
   # Supply a `data:image/png;base64,...` URI to print a real, scannable QR in
   # place of the CSS placeholder. Nothing else needs to change.
   attr :qr_data_uri, :string, default: nil
+  attr :preview?, :boolean, default: false
 
   def certificate(assigns) do
+    # `@name` inside `~H` always reads `assigns.name`, never a module
+    # attribute — so the compiled font CSS has to be threaded through as an
+    # assign to reach the template below. Plain `Map.put/3`, not
+    # `Phoenix.Component.assign/2`: `render_html/1` calls this function
+    # directly with a bare map rather than through `<.certificate .../>`, so
+    # the change-tracking metadata `assign/2` requires isn't present.
+    assigns = Map.put(assigns, :font_face_css, @font_face_css)
+
     ~H"""
     <!doctype html>
     <html lang="en">
       <head>
         <meta charset="utf-8" />
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Dancing+Script:wght@600&display=swap"
-          rel="stylesheet"
-        />
+        <style>
+          <%= Phoenix.HTML.raw(@font_face_css) %>
+        </style>
         <style>
           /* Every size below is in `vw`, not `px` — including vertical ones.
              The certificate renders at a fixed A4-landscape ratio but at wildly
@@ -86,6 +155,7 @@ defmodule Wasomi.Certificates.Template do
             font-family: "Outfit", "DejaVu Sans", "Verdana", sans-serif;
             color: #333333;
           }
+          body.preview { overflow: hidden; }
           .page {
             display: flex;
             width: 100vw;
@@ -144,6 +214,7 @@ defmodule Wasomi.Certificates.Template do
             flex-direction: column;
             align-items: flex-end;
           }
+          body.preview .main-head { padding-right: 0.8vw; }
           .qr { width: 7.6vw; height: 7.6vw; display: block; image-rendering: pixelated; }
           /* CSS stand-in for a real QR: a fine checkerboard for the data area
              plus the three corner finder squares that make a QR legible as one
@@ -287,7 +358,7 @@ defmodule Wasomi.Certificates.Template do
           }
         </style>
       </head>
-      <body>
+      <body class={if @preview?, do: "preview"}>
         <main class="page">
           <aside class="rail">
             <img :if={@logo_data_uri} src={@logo_data_uri} alt="" class="logo" />
@@ -328,7 +399,7 @@ defmodule Wasomi.Certificates.Template do
                 <span class="qr-eye tr"></span>
                 <span class="qr-eye bl"></span>
               </div>
-              <div class="serial">{@serial_number}</div>
+              <div class="serial">(253) {@gdti}</div>
             </div>
 
             <div class="top-rule"></div>

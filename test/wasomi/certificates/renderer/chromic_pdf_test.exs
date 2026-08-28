@@ -7,7 +7,7 @@ defmodule Wasomi.Certificates.Renderer.ChromicPdfTest do
     learner_name: "Jane Sample",
     title: "Sample Course",
     issued_on: "August 4, 2026",
-    serial_number: "SAMPLE-0000"
+    gdti: "6167007558430000000000"
   }
 
   test "returns {:error, reason} instead of crashing when ChromicPDF isn't running" do

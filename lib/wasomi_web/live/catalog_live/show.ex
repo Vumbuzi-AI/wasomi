@@ -362,7 +362,11 @@ defmodule WasomiWeb.CatalogLive.Show do
                 }
                 class="group inline-flex shrink-0 items-center gap-2 rounded-full border border-white/30 py-1.5 pl-6 pr-1.5 font-medium text-white transition hover:bg-white hover:text-ink"
               >
-                {if @current_user, do: "Enroll & Pay", else: "Create account"}
+                {cond do
+                  !@current_user -> "Create account"
+                  @course.is_free -> "Enroll for Free"
+                  true -> "Enroll & Pay"
+                end}
                 <span class="grid h-9 w-9 place-items-center rounded-full bg-primary text-white transition group-hover:bg-ink">
                   <.icon name="hero-arrow-right-mini" class="h-4 w-4" />
                 </span>

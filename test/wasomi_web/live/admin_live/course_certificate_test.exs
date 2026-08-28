@@ -7,6 +7,7 @@ defmodule WasomiWeb.AdminLive.CourseCertificateTest do
   import Wasomi.CatalogFixtures
 
   alias Wasomi.Catalog
+  alias Wasomi.Certificates.GDTI
 
   setup :verify_on_exit!
 
@@ -48,6 +49,15 @@ defmodule WasomiWeb.AdminLive.CourseCertificateTest do
       |> render_change()
 
     assert html =~ "Jane Doe"
+  end
+
+  test "the live preview uses the static QR placeholder instead of a generated QR", %{conn: conn} do
+    course = course_fixture()
+    {:ok, _view, html} = live(conn, ~p"/admin/courses/#{course.slug}/certificate")
+
+    assert html =~ "body.preview"
+    assert html =~ "class=&quot;preview&quot;"
+    assert html =~ "qr-placeholder"
   end
 
   test "toggling issuance on requires signatory fields", %{conn: conn} do
@@ -196,7 +206,9 @@ defmodule WasomiWeb.AdminLive.CourseCertificateTest do
 
     expect(Wasomi.CertificateRendererMock, :render, fn assigns ->
       assert assigns.learner_name == "Jane Sample"
-      assert assigns.serial_number == "SAMPLE-0000"
+      assert assigns.gdti == GDTI.core() <> "000000000"
+      assert "data:image/png;base64," <> _base64 = assigns.qr_data_uri
+      refute Map.get(assigns, :preview?, false)
       {:ok, "%PDF-test"}
     end)
 

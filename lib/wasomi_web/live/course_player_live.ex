@@ -86,6 +86,7 @@ defmodule WasomiWeb.CoursePlayerLive do
          |> assign(:lecture_quiz, nil)
          |> assign(:lecture_quiz_answers, %{})
          |> assign(:lecture_quiz_result, nil)
+         |> assign(:celebrating_certificate, nil)
          |> assign_lecture_quiz_gating()
          |> refresh_progress()
          |> load_lecture_quiz()}
@@ -552,6 +553,10 @@ defmodule WasomiWeb.CoursePlayerLive do
     end
   end
 
+  def handle_event("dismiss-certificate-celebration", _params, socket) do
+    {:noreply, assign(socket, :celebrating_certificate, nil)}
+  end
+
   defp safe_section(section_str) do
     section = String.to_existing_atom(section_str)
     if section in @sections, do: {:ok, section}, else: :error
@@ -694,17 +699,88 @@ defmodule WasomiWeb.CoursePlayerLive do
     {:noreply, refresh_progress(socket)}
   end
 
-  def handle_info({:certificate_ready, _certificate}, socket) do
-    {:noreply,
-     socket
-     |> refresh_certificates()
-     |> put_flash(:info, "Your certificate is ready to download.")}
+  # Only celebrate here if the ready certificate belongs to the course this
+  # player is currently open on — PubSub is per-user, not per-course, so a
+  # certificate finishing for some other course this learner is also
+  # enrolled in shouldn't pop a modal over whatever they're doing here.
+  def handle_info({:certificate_ready, %{course_id: course_id} = certificate}, socket) do
+    socket = refresh_certificates(socket)
+
+    if course_id == socket.assigns.course.id do
+      certificate = %{certificate | course: socket.assigns.course}
+      {:noreply, assign(socket, :celebrating_certificate, certificate)}
+    else
+      {:noreply, socket}
+    end
   end
 
   @impl true
   def render(assigns) do
     ~H"""
     <.student_layout active={:courses} current_user={@current_user}>
+      <div
+        :if={@celebrating_certificate}
+        id="certificate-celebration"
+        phx-hook="Confetti"
+        phx-window-keydown="dismiss-certificate-celebration"
+        phx-key="Escape"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 px-4 backdrop-blur-sm"
+      >
+        <div class="relative w-full max-w-2xl rounded-3xl bg-white p-8 text-center shadow-2xl">
+          <button
+            type="button"
+            phx-click="dismiss-certificate-celebration"
+            class="absolute right-4 top-4 text-muted transition hover:text-ink"
+            aria-label="Close"
+          >
+            <.icon name="hero-x-mark" class="h-5 w-5" />
+          </button>
+
+          <div class="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-mint">
+            <.icon name="hero-trophy" class="h-8 w-8 text-primary" />
+          </div>
+
+          <h2 class="mt-4 text-2xl font-bold text-ink">Congratulations!</h2>
+          <p class="mt-1 text-body">
+            You've completed <span class="font-semibold text-ink">{@celebrating_certificate.course.title}</span>.
+            Your certificate is ready.
+          </p>
+
+          <img
+            src={~p"/certificates/#{@celebrating_certificate.id}/preview"}
+            alt={"Certificate — #{@celebrating_certificate.course.title}"}
+            loading="lazy"
+            onerror="this.remove()"
+            class="mx-auto mt-6 w-full rounded-xl border border-black/10 shadow-md"
+          />
+
+          <div class="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center">
+            <.link
+              href={~p"/certificates/#{@celebrating_certificate.id}/download"}
+              class="inline-flex items-center justify-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-ink"
+            >
+              <.icon name="hero-arrow-down-tray" class="h-4 w-4" /> Download certificate
+            </.link>
+            <.link
+              href={Certificates.linkedin_add_to_profile_url(@celebrating_certificate)}
+              target="_blank"
+              rel="noopener noreferrer"
+              class="inline-flex items-center justify-center gap-2 rounded-full border border-black/10 px-5 py-2.5 text-sm font-semibold text-ink transition hover:border-primary hover:text-primary"
+            >
+              <.icon name="hero-arrow-top-right-on-square" class="h-4 w-4" /> Add to LinkedIn
+            </.link>
+          </div>
+
+          <button
+            type="button"
+            phx-click="dismiss-certificate-celebration"
+            class="mt-4 text-sm font-medium text-muted transition hover:text-ink"
+          >
+            Continue learning
+          </button>
+        </div>
+      </div>
+
       <div class="course-workspace min-h-screen bg-surface pb-10 text-body">
         <div id="course-player" {capture_guard_attrs(@current_user)}>
           <div class="border-b border-black/70 bg-white px-5 py-5 sm:px-8 lg:px-12">
@@ -1796,8 +1872,7 @@ defmodule WasomiWeb.CoursePlayerLive do
                   </span>
                   <h2 class="mt-4 text-2xl font-semibold text-ink">Your certificates</h2>
                   <p class="mt-2 text-body">
-                    Module certificates appear as each module is completed. Your course certificate
-                    appears after every lecture is complete.
+                    Your course certificate appears here once every lecture is complete.
                   </p>
                 </div>
                 <span
@@ -1817,14 +1892,12 @@ defmodule WasomiWeb.CoursePlayerLive do
                 >
                   <div class="min-w-0">
                     <p class="text-xs font-semibold uppercase tracking-wider text-primary">
-                      {if certificate.type == :module,
-                        do: "Module certificate",
-                        else: "Course certificate"}
+                      Course certificate
                     </p>
                     <h3 class="mt-1 truncate font-medium text-ink">
                       {certificate_title(certificate)}
                     </h3>
-                    <p class="mt-1 text-xs text-muted">{certificate.serial_number}</p>
+                    <p class="mt-1 text-xs text-muted">{certificate.gdti}</p>
                   </div>
                   <.link
                     href={~p"/certificates/#{certificate.id}/download"}
@@ -2131,7 +2204,6 @@ defmodule WasomiWeb.CoursePlayerLive do
   defp course_certificate?(certificates),
     do: Enum.any?(certificates, &(&1.type == :course))
 
-  defp certificate_title(%{type: :module, module: module}), do: module.title
   defp certificate_title(%{type: :course, course: course}), do: course.title
 
   defp load_lq_submissions(socket, lecture) do

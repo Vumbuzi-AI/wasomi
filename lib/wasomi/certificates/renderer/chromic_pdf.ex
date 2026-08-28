@@ -24,9 +24,10 @@ defmodule Wasomi.Certificates.Renderer.ChromicPdf do
     marginRight: 0
   }
 
-  # The template loads Google Fonts over the network; without this, Chrome can
-  # print before the webfont request finishes and silently fall back to a
-  # generic system font.
+  # The template embeds its fonts as base64 data URIs (see Template), so this
+  # no longer waits on a network fetch — but decoding/rasterizing an embedded
+  # webfont still isn't synchronous with page load, and printing before it
+  # settles would silently fall back to a generic system font.
   @evaluate %{expression: "document.fonts.ready"}
 
   @impl true
@@ -35,6 +36,23 @@ defmodule Wasomi.Certificates.Renderer.ChromicPdf do
 
     case ChromicPDF.print_to_pdf({:html, html}, print_to_pdf: @print_options, evaluate: @evaluate) do
       {:ok, base64_pdf} -> {:ok, Base.decode64!(base64_pdf)}
+      other -> {:error, other}
+    end
+  rescue
+    error -> {:error, error}
+  end
+
+  # PNG preview for the celebration modal — viewport sizing comes from
+  # `chromic_pdf_options`'s `chrome_args` (config.exs), not set here.
+  @impl true
+  def render_preview(assigns) do
+    html = Template.render_html(assigns)
+
+    case ChromicPDF.capture_screenshot({:html, html},
+           capture_screenshot: %{format: "png"},
+           evaluate: @evaluate
+         ) do
+      {:ok, base64_png} -> {:ok, Base.decode64!(base64_png)}
       other -> {:error, other}
     end
   rescue

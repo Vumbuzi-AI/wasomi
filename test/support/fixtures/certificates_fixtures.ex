@@ -4,11 +4,12 @@ defmodule Wasomi.CertificatesFixtures do
   entities via the `Wasomi.Certificates` context.
   """
 
+  alias Wasomi.Certificates.GDTI
+
   @doc """
-  Generate a unique certificate serial_number.
+  Generate a unique certificate GDTI.
   """
-  def unique_certificate_serial_number,
-    do: "some serial_number#{System.unique_integer([:positive])}"
+  def unique_certificate_gdti, do: GDTI.generate()
 
   @doc """
   Generate a certificate.
@@ -16,34 +17,19 @@ defmodule Wasomi.CertificatesFixtures do
   def certificate_fixture(attrs \\ %{}) do
     attrs = Map.new(attrs)
     user_id = Map.get_lazy(attrs, :user_id, fn -> Wasomi.AccountsFixtures.user_fixture().id end)
-    type = Map.get(attrs, :type, :module)
 
-    {course_id, module_id} =
-      case type do
-        :course ->
-          {Map.get_lazy(attrs, :course_id, fn -> Wasomi.CatalogFixtures.course_fixture().id end),
-           nil}
-
-        :module ->
-          module =
-            case Map.get(attrs, :module_id) do
-              nil -> Wasomi.CatalogFixtures.course_module_fixture()
-              module_id -> Wasomi.Catalog.get_course_module!(module_id)
-            end
-
-          {Map.get(attrs, :course_id, module.course_id), module.id}
-      end
+    course_id =
+      Map.get_lazy(attrs, :course_id, fn -> Wasomi.CatalogFixtures.course_fixture().id end)
 
     {:ok, certificate} =
       attrs
       |> Map.put(:user_id, user_id)
       |> Map.put(:course_id, course_id)
-      |> Map.put(:module_id, module_id)
       |> Enum.into(%{
         file_key: "some file_key",
         issued_at: ~U[2026-06-24 10:02:00Z],
-        serial_number: unique_certificate_serial_number(),
-        type: :module
+        gdti: unique_certificate_gdti(),
+        type: :course
       })
       |> Wasomi.Certificates.create_certificate()
 

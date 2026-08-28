@@ -248,39 +248,22 @@ defmodule WasomiWeb.AdminComponents do
 
   def publish_checklist(assigns) do
     ~H"""
-    <div class="mt-4 space-y-2">
+    <div class="mt-6 divide-y divide-black/5 border-y border-black/5">
       <div
         :for={{stage, index} <- Enum.with_index(@stages)}
         style={"animation-delay: #{min(index, 6) * 60}ms"}
-        class={[
-          "flex items-start gap-3 rounded-xl border p-3 opacity-0 animate-checklist-in",
-          stage.status == :passed && "border-emerald-200 bg-emerald-50",
-          stage.status == :failed && "border-amber-200 bg-amber-50",
-          stage.status == :not_applicable && "border-black/10 bg-surface"
-        ]}
+        class="flex items-start gap-3 py-4 opacity-0 animate-checklist-in"
       >
         <span class={[
-          "mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full text-white",
-          stage.status == :passed && "bg-emerald-500",
-          stage.status == :failed && "bg-amber-500",
-          stage.status == :not_applicable && "bg-muted"
+          "mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full",
+          checklist_icon_classes(stage.status)
         ]}>
-          <.icon
-            name={
-              case stage.status do
-                :passed -> "hero-check-mini"
-                :failed -> "hero-x-mark-mini"
-                :not_applicable -> "hero-minus-mini"
-              end
-            }
-            class="h-3.5 w-3.5"
-          />
+          <.icon name={checklist_icon(stage.status)} class="h-3.5 w-3.5" />
         </span>
-        <div class="min-w-0">
+        <div class="min-w-0 flex-1">
           <p class={[
-            "text-sm font-medium",
-            stage.status == :passed && "text-emerald-900",
-            stage.status == :failed && "text-amber-900",
+            "text-sm font-semibold leading-5",
+            stage.status in [:passed, :failed] && "text-ink",
             stage.status == :not_applicable && "text-muted"
           ]}>
             {stage.stage}
@@ -290,15 +273,26 @@ defmodule WasomiWeb.AdminComponents do
           </p>
           <ul
             :if={stage.status == :failed and stage.reasons != []}
-            class="mt-1 list-inside list-disc space-y-0.5 text-xs text-amber-800"
+            class="mt-1.5 space-y-1 text-xs font-medium text-primary"
           >
-            <li :for={reason <- stage.reasons}>{reason}</li>
+            <li :for={reason <- stage.reasons} class="flex gap-2">
+              <span class="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-primary"></span>
+              <span>{reason}</span>
+            </li>
           </ul>
         </div>
       </div>
     </div>
     """
   end
+
+  defp checklist_icon_classes(:passed), do: "text-emerald-600"
+  defp checklist_icon_classes(:failed), do: "text-primary"
+  defp checklist_icon_classes(:not_applicable), do: "text-muted"
+
+  defp checklist_icon(:passed), do: "hero-check-mini"
+  defp checklist_icon(:failed), do: "hero-exclamation-circle-mini"
+  defp checklist_icon(:not_applicable), do: "hero-minus-mini"
 
   @doc """
   Vertical column chart scaled to the data's own maximum — used for

@@ -15,6 +15,8 @@ config :wasomi,
   storage_provider: Wasomi.Storage.R2,
   certificate_renderer: Wasomi.Certificates.Renderer.ChromicPdf,
   chromic_pdf_options: [
+    # 1300x919 matches the certificate's A4-landscape ratio, for screenshots.
+    chrome_args: "--window-size=1300,1062 --force-device-scale-factor=2",
     session_pool: [
       size: 2,
       init_timeout: 30_000,
@@ -37,6 +39,11 @@ config :wasomi,
 # Organisation details printed down the left rail of every certificate.
 config :wasomi, :certificate_branding,
   issuer_name: "GS1 Kenya",
+  # LinkedIn's numeric Company Page ID (from urn:li:organization:<id> in the
+  # page's source) — lets the "Add to LinkedIn" certificate link create a
+  # verified link to GS1 Kenya's page instead of just prefilling their name
+  # as plain text. See Wasomi.Certificates.linkedin_add_to_profile_url/1.
+  organization_id: 2_463_906,
   logo_path: "images/gs1ke-logo.png",
   address_lines: [
     "5th Floor, Nextgen Mall, Mombasa Road",
@@ -52,6 +59,13 @@ config :wasomi, :certificate_branding,
     {"LinkedIn", "https://ke.linkedin.com/company/gs1-kenya"},
     {"YouTube", "https://m.youtube.com/channel/UChMpKZMCVfOuWWc-a-Sb2YQ"}
   ]
+
+# GS1 identity used to build each certificate's GDTI (see
+# `Wasomi.Certificates.GDTI` and TODO.md's GDTI decisions section). One
+# document type covers both module and course certificates.
+config :wasomi, :certificate_gdti,
+  company_prefix: "616700755",
+  document_type: "843"
 
 # ExAws defaults to :hackney; reuse the app's Finch pool instead so hackney
 # (and its `quic` dependency) stays out of the dependency tree.

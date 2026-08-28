@@ -4,6 +4,7 @@ defmodule WasomiWeb.HomeLive do
   import WasomiWeb.HomeComponents
   alias Wasomi.Accounts
   alias Wasomi.Catalog
+  alias Wasomi.Content
   alias Wasomi.Mentors
 
   @impl true
@@ -20,7 +21,8 @@ defmodule WasomiWeb.HomeLive do
      |> assign(:canonical_url, url(~p"/"))
      |> assign(:current_user, current_user(session))
      |> assign(:courses, Catalog.list_published_courses())
-     |> assign(:mentors, Mentors.list_active_mentors())}
+     |> assign(:mentors, Mentors.list_active_mentors())
+     |> assign(:landing_images, Content.landing_image_map())}
   end
 
   @impl true
@@ -30,9 +32,9 @@ defmodule WasomiWeb.HomeLive do
       <.announcement_bar />
       <.home_header current_user={@current_user} />
       <main>
-        <.hero />
+        <.hero images={@landing_images} />
         <.about_wasomi />
-        <.gs1_in_action />
+        <.gs1_in_action images={@landing_images} />
         <.top_courses_section courses={@courses} />
         <.gs1_in_workplaces />
         <.how_it_works />

@@ -21,6 +21,11 @@ defmodule Wasomi.Storage.R2 do
   @max_document_bytes 50_000_000
   @max_video_bytes 1_000_000_000
   @max_image_bytes 2_000_000
+  # Hard ceiling on the caller-supplied `max_image_bytes` override below —
+  # callers are trusted application code (not client input), but this keeps
+  # any single image kind from silently growing without a deliberate bump
+  # here too.
+  @max_image_bytes_ceiling 10_000_000
 
   @impl true
   def presign_upload(_user, attrs) do
@@ -33,7 +38,7 @@ defmodule Wasomi.Storage.R2 do
 
     byte_size = Map.get(attrs, "size") || Map.get(attrs, :size)
 
-    with {:ok, kind} <- validate_metadata(filename, content_type, byte_size),
+    with {:ok, kind} <- validate_metadata(filename, content_type, byte_size, attrs),
          {:ok, bucket} <- bucket(),
          {:ok, endpoint} <- endpoint(),
          {:ok, byte_size} <- normalize_size(byte_size) do
@@ -88,11 +93,11 @@ defmodule Wasomi.Storage.R2 do
 
   def delete_upload(_user, _key), do: {:error, :invalid_storage_key}
 
-  defp validate_metadata(filename, content_type, byte_size)
+  defp validate_metadata(filename, content_type, byte_size, attrs)
        when is_binary(filename) and filename != "" and is_binary(content_type) do
     with {:ok, kind} <- Map.fetch(@allowed_types, content_type),
          {:ok, byte_size} <- normalize_size(byte_size),
-         :ok <- validate_size(kind, byte_size) do
+         :ok <- validate_size(kind, byte_size, image_max_bytes(attrs)) do
       {:ok, kind}
     else
       :error -> {:error, :unsupported_content_type}
@@ -100,7 +105,19 @@ defmodule Wasomi.Storage.R2 do
     end
   end
 
-  defp validate_metadata(_, _, _), do: {:error, :invalid_upload_metadata}
+  defp validate_metadata(_, _, _, _), do: {:error, :invalid_upload_metadata}
+
+  # `max_image_bytes` lets a trusted caller (e.g. hero/landing image
+  # uploads) raise the default 2 MB image ceiling for its own use case,
+  # without loosening it for every other image upload (certificate
+  # signatures stay bound by the 2 MB default). Bounded by
+  # `@max_image_bytes_ceiling` regardless of what's passed in.
+  defp image_max_bytes(attrs) do
+    case Map.get(attrs, "max_image_bytes") || Map.get(attrs, :max_image_bytes) do
+      n when is_integer(n) and n > 0 -> min(n, @max_image_bytes_ceiling)
+      _ -> @max_image_bytes
+    end
+  end
 
   defp normalize_content_type(content_type, _filename)
        when is_binary(content_type) and content_type not in ["", "application/octet-stream"],
@@ -139,12 +156,12 @@ defmodule Wasomi.Storage.R2 do
 
   defp normalize_size(_), do: {:error, :invalid_file_size}
 
-  defp validate_size(:document, size) when size <= @max_document_bytes, do: :ok
-  defp validate_size(:video, size) when size <= @max_video_bytes, do: :ok
-  defp validate_size(:image, size) when size <= @max_image_bytes, do: :ok
-  defp validate_size(:document, _), do: {:error, :document_too_large}
-  defp validate_size(:video, _), do: {:error, :video_too_large}
-  defp validate_size(:image, _), do: {:error, :image_too_large}
+  defp validate_size(:document, size, _max_image_bytes) when size <= @max_document_bytes, do: :ok
+  defp validate_size(:video, size, _max_image_bytes) when size <= @max_video_bytes, do: :ok
+  defp validate_size(:image, size, max_image_bytes) when size <= max_image_bytes, do: :ok
+  defp validate_size(:document, _size, _max_image_bytes), do: {:error, :document_too_large}
+  defp validate_size(:video, _size, _max_image_bytes), do: {:error, :video_too_large}
+  defp validate_size(:image, _size, _max_image_bytes), do: {:error, :image_too_large}
 
   defp safe_filename(filename) do
     filename

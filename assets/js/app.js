@@ -1546,6 +1546,132 @@ Hooks.VideoPreview = {
   },
 };
 
+// Instant client-side preview of a picked file (see VideoPreview above for
+// the same idea) — phx-update="ignore" on the target <img> so LiveView
+// doesn't fight the JS-set src.
+Hooks.LiveImagePreview = {
+  mounted() {
+    this.preview = this.el.querySelector("[data-role='preview']");
+    this.attempts = 0;
+
+    this.el.addEventListener("change", (event) => {
+      const input = event.target;
+      if (input.type !== "file" || !input.files || !input.files[0]) return;
+
+      const file = input.files[0];
+      if (this.objectUrl) URL.revokeObjectURL(this.objectUrl);
+      this.objectUrl = URL.createObjectURL(file);
+      this.preview.src = this.objectUrl;
+    });
+
+    // Retry a persisted (already-saved) image the same way ImageRetry does.
+    this.preview.addEventListener("error", () => {
+      if (this.objectUrl) return; // a locally-picked file failing is a real error
+      if (this.attempts >= 4) return;
+      this.attempts += 1;
+      const src = this.preview.src;
+
+      setTimeout(
+        () => {
+          this.preview.src = "";
+          this.preview.src = src;
+        },
+        300 * this.attempts,
+      );
+    });
+  },
+
+  destroyed() {
+    if (this.objectUrl) URL.revokeObjectURL(this.objectUrl);
+  },
+};
+
+// A just-uploaded R2 object can briefly 404 while it propagates — retry
+// with backoff instead of leaving a permanently broken-image icon.
+Hooks.ImageRetry = {
+  mounted() {
+    this.attempts = 0;
+    this.el.addEventListener("error", () => this.retry());
+  },
+
+  updated() {
+    this.attempts = 0;
+  },
+
+  retry() {
+    if (this.attempts >= 4) return;
+    this.attempts += 1;
+    const src = this.el.src;
+
+    setTimeout(
+      () => {
+        this.el.src = "";
+        this.el.src = src;
+      },
+      300 * this.attempts,
+    );
+  },
+};
+
+// Renders the iframe at real desktop width and scales it down to fit its
+// (narrower) panel — same trick devtools' device toolbar uses — so the
+// preview shows the real desktop layout, not the mobile breakpoint.
+Hooks.ScaledPreview = {
+  designWidth: 1280,
+  maxHeight: 600,
+
+  // The template hashes the preview content into this element's id, so any
+  // real change is a fresh mounted() (node replacement), never a patch —
+  // avoids an in-place `srcdoc` update orphaning this listener.
+  mounted() {
+    this.iframe = this.el.querySelector("iframe");
+    this.iframe.style.width = `${this.designWidth}px`;
+    this.iframe.style.border = "0";
+    this.iframe.style.transformOrigin = "top left";
+    this.iframe.addEventListener("load", () => this.scheduleFit());
+
+    this.ro = new ResizeObserver(() => this.scheduleFit());
+    this.ro.observe(this.el);
+    this.scheduleFit();
+  },
+
+  // Dimensions can be 0 for a frame or two right after "load"/ResizeObserver
+  // fires — retry across frames (~1s budget) instead of trusting one read.
+  scheduleFit(attempt = 0) {
+    requestAnimationFrame(() => {
+      if (!this.fit() && attempt < 60) this.scheduleFit(attempt + 1);
+    });
+  },
+
+  fit() {
+    let doc;
+    try {
+      doc = this.iframe.contentDocument;
+    } catch {
+      return false; // not same-origin somehow — nothing safe to measure
+    }
+    if (!doc || !doc.documentElement) return false;
+
+    const contentHeight = doc.documentElement.scrollHeight;
+    const containerWidth = this.el.clientWidth;
+    if (contentHeight === 0 || containerWidth === 0) return false;
+
+    this.iframe.style.height = `${contentHeight}px`;
+
+    const scale = containerWidth / this.designWidth;
+    this.iframe.style.transform = `scale(${scale})`;
+
+    const visibleHeight = Math.min(contentHeight * scale, this.maxHeight);
+    this.el.style.height = `${visibleHeight}px`;
+    this.el.style.overflowY = contentHeight * scale > this.maxHeight ? "auto" : "hidden";
+    return true;
+  },
+
+  destroyed() {
+    if (this.ro) this.ro.disconnect();
+  },
+};
+
 function titleCaseFromFilename(filename) {
   return filename
     .replace(/\.[^/.]+$/, "")

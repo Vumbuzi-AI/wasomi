@@ -47,6 +47,16 @@
     <link phx-track-static rel="stylesheet" href={~p"/assets/app.css"} />
     <script src="https://cdn.jsdelivr.net/npm/hls.js@1" defer>
     </script>
+    <%!-- render=explicit, not bound to one site key: the v3 site (executed
+    programmatically via grecaptcha.execute) and the v2 fallback checkbox
+    (rendered via grecaptcha.render) share this one script load. --%>
+    <script
+      :if={Wasomi.Security.Captcha.enabled?() or Wasomi.Security.Captcha.v2_enabled?()}
+      src="https://www.google.com/recaptcha/api.js?render=explicit"
+      async
+      defer
+    >
+    </script>
     <script defer phx-track-static type="text/javascript" src={~p"/assets/app.js"}>
     </script>
     <link

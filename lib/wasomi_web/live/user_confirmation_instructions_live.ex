@@ -2,6 +2,7 @@ defmodule WasomiWeb.UserConfirmationInstructionsLive do
   use WasomiWeb, :live_view
 
   alias Wasomi.Accounts
+  alias Wasomi.Security.Captcha
 
   def render(assigns) do
     ~H"""
@@ -23,13 +24,24 @@ defmodule WasomiWeb.UserConfirmationInstructionsLive do
           </p>
         </div>
 
+        <p
+          :if={@captcha_error}
+          class="mt-4 rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-600"
+        >
+          {@captcha_error}
+        </p>
+
         <.form
           for={@form}
           id="resend_confirmation_form"
           phx-submit="send_instructions"
+          phx-hook={if @recaptcha_site_key, do: "Recaptcha"}
+          data-site-key={@recaptcha_site_key}
+          data-action="resend_confirmation"
           class="mt-8 space-y-5"
         >
           <input type="hidden" name="user[email]" value={@display_email} />
+          <.recaptcha_v3_widget :if={@recaptcha_site_key} form_id="resend_confirmation_form" />
           <button
             type="submit"
             phx-disable-with="Sending..."
@@ -67,10 +79,20 @@ defmodule WasomiWeb.UserConfirmationInstructionsLive do
           Enter your email address to receive a new confirmation link.
         </p>
 
+        <p
+          :if={@captcha_error}
+          class="mt-4 rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-600"
+        >
+          {@captcha_error}
+        </p>
+
         <.form
           for={@form}
           id="resend_confirmation_form"
           phx-submit="send_instructions"
+          phx-hook={if @recaptcha_site_key, do: "Recaptcha"}
+          data-site-key={@recaptcha_site_key}
+          data-action="resend_confirmation"
           class="mt-8 space-y-5"
         >
           <.auth_input
@@ -94,6 +116,8 @@ defmodule WasomiWeb.UserConfirmationInstructionsLive do
               </svg>
             </:icon>
           </.auth_input>
+
+          <.recaptcha_v3_widget :if={@recaptcha_site_key} form_id="resend_confirmation_form" />
 
           <button
             type="submit"
@@ -139,7 +163,9 @@ defmodule WasomiWeb.UserConfirmationInstructionsLive do
         confirmed_email: confirmed_email,
         display_email: display_email(socket.assigns[:current_user], confirmed_email),
         name: if(name != "", do: name, else: nil),
-        resend_status: :idle
+        resend_status: :idle,
+        captcha_error: nil,
+        recaptcha_site_key: Captcha.site_key()
       )
 
     {:ok, socket}
@@ -149,6 +175,8 @@ defmodule WasomiWeb.UserConfirmationInstructionsLive do
   defp display_email(%{email: email}, _confirmed_email), do: email
   defp display_email(nil, confirmed_email), do: confirmed_email
 
+  # Already authenticated (just registered, or logged in but unconfirmed) —
+  # no captcha needed, this isn't an anonymous open form.
   def handle_event("send_instructions", _params, %{assigns: %{current_user: user}} = socket)
       when not is_nil(user) do
     status =
@@ -162,14 +190,25 @@ defmodule WasomiWeb.UserConfirmationInstructionsLive do
     {:noreply, assign(socket, resend_status: status)}
   end
 
-  def handle_event("send_instructions", %{"user" => %{"email" => email}}, socket) do
-    if user = Accounts.get_user_by_email(email) do
-      Accounts.deliver_user_confirmation_instructions(
-        user,
-        &url(~p"/users/confirm/#{&1}")
-      )
-    end
+  def handle_event("send_instructions", %{"user" => %{"email" => email}} = params, socket) do
+    captcha_token = params["captcha_token"]
 
-    {:noreply, assign(socket, resend_status: :sent)}
+    case Captcha.verify(captcha_token, action: "resend_confirmation") do
+      {:ok, _} ->
+        if user = Accounts.get_user_by_email(email) do
+          Accounts.deliver_user_confirmation_instructions(
+            user,
+            &url(~p"/users/confirm/#{&1}")
+          )
+        end
+
+        {:noreply, socket |> clear_flash(:error) |> assign(resend_status: :sent)}
+
+      {:error, _reason} ->
+        {:noreply,
+         socket
+         |> assign(captcha_error: "Security verification failed. Please try again.")
+         |> put_flash(:error, "Security verification failed. Please try again.")}
+    end
   end
 end

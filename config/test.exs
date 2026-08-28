@@ -53,7 +53,8 @@ config :wasomi,
   openai_scorer_req_options: [
     plug: {Req.Test, Wasomi.Catalog.LectureQuestionScorer.OpenAI},
     retry: false
-  ]
+  ],
+  recaptcha_mock: true
 
 config :wasomi, Oban, testing: :manual, queues: false, plugins: false
 

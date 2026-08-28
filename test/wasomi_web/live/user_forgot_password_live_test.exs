@@ -1,5 +1,5 @@
 defmodule WasomiWeb.UserForgotPasswordLiveTest do
-  use WasomiWeb.ConnCase, async: true
+  use WasomiWeb.ConnCase, async: false
 
   import Phoenix.LiveViewTest
   import Wasomi.AccountsFixtures
@@ -58,6 +58,146 @@ defmodule WasomiWeb.UserForgotPasswordLiveTest do
 
       assert Phoenix.Flash.get(conn.assigns.flash, :info) =~ "If your email is in our system"
       assert Repo.all(Accounts.UserToken) == []
+    end
+
+    test "renders error when security verification fails", %{conn: conn, user: user} do
+      initial_mock = Application.get_env(:wasomi, :recaptcha_mock)
+      initial_site_key = Application.get_env(:wasomi, :recaptcha_site_key)
+      initial_secret_key = Application.get_env(:wasomi, :recaptcha_secret_key)
+      initial_req_opts = Application.get_env(:wasomi, :recaptcha_req_options)
+
+      on_exit(fn ->
+        Application.put_env(:wasomi, :recaptcha_mock, initial_mock)
+        Application.put_env(:wasomi, :recaptcha_site_key, initial_site_key)
+        Application.put_env(:wasomi, :recaptcha_secret_key, initial_secret_key)
+        Application.put_env(:wasomi, :recaptcha_req_options, initial_req_opts)
+      end)
+
+      Application.put_env(:wasomi, :recaptcha_mock, false)
+      Application.put_env(:wasomi, :recaptcha_secret_key, "secret")
+      Application.put_env(:wasomi, :recaptcha_site_key, "site")
+
+      Req.Test.stub(Wasomi.Security.Captcha, fn conn ->
+        Req.Test.json(conn, %{"success" => false})
+      end)
+
+      Application.put_env(:wasomi, :recaptcha_req_options,
+        plug: {Req.Test, Wasomi.Security.Captcha},
+        retry: false
+      )
+
+      {:ok, lv, _html} = live(conn, ~p"/users/reset_password")
+
+      result =
+        lv
+        |> form("#reset_password_form", user: %{"email" => user.email})
+        |> render_submit(%{"captcha_token" => "invalid-token"})
+
+      assert result =~ "Security verification failed"
+      assert Repo.all(Accounts.UserToken) == []
+    end
+
+    test "offers the v2 fallback checkbox instead of a dead end when v3's score is too low", %{
+      conn: conn,
+      user: user
+    } do
+      initial_mock = Application.get_env(:wasomi, :recaptcha_mock)
+      initial_site_key = Application.get_env(:wasomi, :recaptcha_site_key)
+      initial_secret_key = Application.get_env(:wasomi, :recaptcha_secret_key)
+      initial_v2_site_key = Application.get_env(:wasomi, :recaptcha_v2_site_key)
+      initial_req_opts = Application.get_env(:wasomi, :recaptcha_req_options)
+
+      on_exit(fn ->
+        Application.put_env(:wasomi, :recaptcha_mock, initial_mock)
+        Application.put_env(:wasomi, :recaptcha_site_key, initial_site_key)
+        Application.put_env(:wasomi, :recaptcha_secret_key, initial_secret_key)
+        Application.put_env(:wasomi, :recaptcha_v2_site_key, initial_v2_site_key)
+        Application.put_env(:wasomi, :recaptcha_req_options, initial_req_opts)
+      end)
+
+      Application.put_env(:wasomi, :recaptcha_mock, false)
+      Application.put_env(:wasomi, :recaptcha_secret_key, "secret")
+      Application.put_env(:wasomi, :recaptcha_site_key, "site")
+      Application.put_env(:wasomi, :recaptcha_v2_site_key, "v2-site")
+
+      Req.Test.stub(Wasomi.Security.Captcha, fn conn ->
+        Req.Test.json(conn, %{"success" => true, "score" => 0.1, "action" => "forgot_password"})
+      end)
+
+      Application.put_env(:wasomi, :recaptcha_req_options,
+        plug: {Req.Test, Wasomi.Security.Captcha},
+        retry: false
+      )
+
+      {:ok, lv, _html} = live(conn, ~p"/users/reset_password")
+
+      result =
+        lv
+        |> form("#reset_password_form", user: %{"email" => user.email})
+        |> render_submit(%{"captcha_token" => "low-score-token"})
+
+      assert result =~ "please also complete the checkbox below"
+      assert has_element?(lv, "[data-role='recaptcha-v2-widget']")
+      assert Repo.all(Accounts.UserToken) == []
+    end
+
+    test "allows retrying successfully after a verification failure", %{conn: conn, user: user} do
+      initial_mock = Application.get_env(:wasomi, :recaptcha_mock)
+      initial_site_key = Application.get_env(:wasomi, :recaptcha_site_key)
+      initial_secret_key = Application.get_env(:wasomi, :recaptcha_secret_key)
+      initial_req_opts = Application.get_env(:wasomi, :recaptcha_req_options)
+
+      on_exit(fn ->
+        Application.put_env(:wasomi, :recaptcha_mock, initial_mock)
+        Application.put_env(:wasomi, :recaptcha_site_key, initial_site_key)
+        Application.put_env(:wasomi, :recaptcha_secret_key, initial_secret_key)
+        Application.put_env(:wasomi, :recaptcha_req_options, initial_req_opts)
+      end)
+
+      Application.put_env(:wasomi, :recaptcha_mock, false)
+      Application.put_env(:wasomi, :recaptcha_secret_key, "secret")
+      Application.put_env(:wasomi, :recaptcha_site_key, "site")
+
+      Req.Test.stub(Wasomi.Security.Captcha, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        params = URI.decode_query(body)
+
+        if params["response"] == "good-token" do
+          Req.Test.json(conn, %{
+            "success" => true,
+            "score" => 0.9,
+            "action" => "forgot_password"
+          })
+        else
+          Req.Test.json(conn, %{"success" => false})
+        end
+      end)
+
+      Application.put_env(:wasomi, :recaptcha_req_options,
+        plug: {Req.Test, Wasomi.Security.Captcha},
+        retry: false
+      )
+
+      {:ok, lv, _html} = live(conn, ~p"/users/reset_password")
+
+      # First attempt: invalid token -> fails
+      result =
+        lv
+        |> form("#reset_password_form", user: %{"email" => user.email})
+        |> render_submit(%{"captcha_token" => "bad-token"})
+
+      assert result =~ "Security verification failed"
+      assert Repo.all(Accounts.UserToken) == []
+
+      # Second attempt: valid token -> succeeds and redirects
+      {:ok, conn} =
+        lv
+        |> form("#reset_password_form", user: %{"email" => user.email})
+        |> render_submit(%{"captcha_token" => "good-token"})
+        |> follow_redirect(conn, "/")
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :info) =~ "If your email is in our system"
+      assert Repo.get_by!(Accounts.UserToken, user_id: user.id).context == "reset_password"
     end
   end
 end

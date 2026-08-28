@@ -531,6 +531,47 @@ defmodule WasomiWeb.CoreComponents do
   end
 
   @doc """
+  The reCAPTCHA v2 fallback checkbox for an auth form — rendered by
+  `Hooks.Recaptcha` (assets/js/app.js) once the server asks for it (v3
+  score too low) or the client gives up on v3 entirely (script blocked).
+  The `data-role="recaptcha-v2-widget"` leaf is `phx-update="ignore"` so a
+  later LiveView patch can never wipe out the iframe Google's JS injects
+  into it; only this wrapper's visibility class re-renders normally.
+  """
+  attr :show?, :boolean, required: true
+  attr :form_id, :string, required: true
+
+  def recaptcha_v2_widget(assigns) do
+    ~H"""
+    <div class={["mt-2", if(@show?, do: "block", else: "hidden")]}>
+      <div id={"recaptcha-v2-widget-#{@form_id}"} data-role="recaptcha-v2-widget" phx-update="ignore">
+      </div>
+    </div>
+    """
+  end
+
+  @doc """
+  A permanent, invisible anchor for the v3 widget `Hooks.Recaptcha` renders
+  via `grecaptcha.render(container, {sitekey, size: "invisible"})`.
+
+  With the shared script loaded as `render=explicit` (needed so the v2
+  fallback can coexist on the same page), `grecaptcha.execute(siteKey, ...)`
+  no longer works for v3 — Google throws "Invalid site key or not loaded in
+  api.js". Explicit rendering requires `execute(widgetId)` instead, and that
+  widget needs a real, permanently-attached container to render into. This
+  is `phx-update="ignore"` for the same reason the v2 widget is: a LiveView
+  patch must never wipe out the node the widget id is bound to.
+  """
+  attr :form_id, :string, required: true
+
+  def recaptcha_v3_widget(assigns) do
+    ~H"""
+    <div id={"recaptcha-v3-widget-#{@form_id}"} data-role="recaptcha-v3-widget" phx-update="ignore">
+    </div>
+    """
+  end
+
+  @doc """
   Renders a design-system styled, icon-prefixed input for authentication
   surfaces (log in / sign up). `type="password"` automatically gets a
   show/hide toggle, wired up by the `TogglePassword` JS hook.

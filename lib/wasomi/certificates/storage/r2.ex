@@ -22,6 +22,7 @@ defmodule Wasomi.Certificates.Storage.R2 do
   @impl true
   def signed_url(key, opts \\ []) when is_binary(key) do
     expires_in = Keyword.get(opts, :expires_in, 300)
+    filename = Keyword.get(opts, :filename)
 
     with {:ok, bucket} <- bucket() do
       :s3
@@ -30,10 +31,29 @@ defmodule Wasomi.Certificates.Storage.R2 do
         expires_in: expires_in,
         query_params: [
           {"response-content-type", "application/pdf"},
-          {"response-content-disposition", "attachment"}
+          {"response-content-disposition", content_disposition(filename)}
         ]
       )
     end
+  end
+
+  # `attachment` alone (no filename) leaves the saved filename entirely up
+  # to the browser's own guess from the URL, which lands on the object
+  # key's basename — a bare id, no extension. `filename*` (RFC 5987/6266)
+  # carries the real name including any non-ASCII characters; `filename`
+  # stays as a plain-ASCII fallback for the handful of clients that don't
+  # understand the extended form.
+  defp content_disposition(nil), do: "attachment"
+
+  defp content_disposition(filename) do
+    ~s(attachment; filename="#{ascii_fallback(filename)}"; filename*=UTF-8''#{URI.encode(filename, &URI.char_unreserved?/1)})
+  end
+
+  defp ascii_fallback(filename) do
+    filename
+    |> String.normalize(:nfd)
+    |> String.replace(~r/[^\x00-\x7F]/u, "")
+    |> String.replace("\"", "")
   end
 
   defp bucket do

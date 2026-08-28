@@ -11,6 +11,7 @@ defmodule Wasomi.CertificatesTest do
   alias Wasomi.Certificates
   alias Wasomi.Certificates.Branding
   alias Wasomi.Certificates.Certificate
+  alias Wasomi.Certificates.VerificationQR
   alias Wasomi.Certificates.Workers.IssueCertificate
 
   setup :verify_on_exit!
@@ -33,29 +34,36 @@ defmodule Wasomi.CertificatesTest do
     %{user: user, course: course, module: module, lecture: lecture}
   end
 
-  test "completion enqueues and issues module and course certificates", context do
-    expect_render_and_upload(2)
-
-    assert {:ok, _, [_lecture, {:module_completed, _}, {:course_completed, _}]} =
-             complete_lecture_via_progress!(context.user, context.lecture)
+  test "enqueue_for_completion_events/2 ignores :module_completed entirely", context do
+    assert :ok =
+             Certificates.enqueue_for_completion_events(context.user, [
+               {:module_completed, context.module}
+             ])
 
     assert Repo.aggregate(
              from(job in Oban.Job,
                where: job.worker == "Wasomi.Certificates.Workers.IssueCertificate"
              ),
              :count
-           ) == 2
+           ) == 0
+  end
 
-    assert :ok =
-             Oban.Testing.perform_job(
-               IssueCertificate,
-               %{
-                 user_id: context.user.id,
-                 type: "module",
-                 scope_id: context.module.id
-               },
-               []
-             )
+  test "course completion enqueues and issues a course certificate — module completion doesn't get its own",
+       context do
+    expect_render_and_upload(1)
+
+    assert {:ok, _, [_lecture, {:module_completed, _}, {:course_completed, _}]} =
+             complete_lecture_via_progress!(context.user, context.lecture)
+
+    # Only the course completion enqueues a certificate job — module
+    # completion is still tracked/broadcast (dashboard, course player), it
+    # just doesn't trigger its own certificate anymore.
+    assert Repo.aggregate(
+             from(job in Oban.Job,
+               where: job.worker == "Wasomi.Certificates.Workers.IssueCertificate"
+             ),
+             :count
+           ) == 1
 
     assert :ok =
              Oban.Testing.perform_job(
@@ -69,9 +77,10 @@ defmodule Wasomi.CertificatesTest do
              )
 
     certificates = Certificates.list_for_user_course(context.user, context.course)
-    assert Enum.map(certificates, & &1.type) |> Enum.sort() == [:course, :module]
-    assert Enum.all?(certificates, &String.starts_with?(&1.serial_number, "KBI-"))
-    assert Enum.uniq_by(certificates, & &1.serial_number) == certificates
+    assert Enum.map(certificates, & &1.type) == [:course]
+    company_prefix = Application.fetch_env!(:wasomi, :certificate_gdti)[:company_prefix]
+    assert Enum.all?(certificates, &String.starts_with?(&1.gdti, company_prefix))
+    assert Enum.all?(certificates, &(String.length(&1.gdti) == 22))
   end
 
   test "issuance is idempotent and doesn't render or upload twice", context do
@@ -127,6 +136,59 @@ defmodule Wasomi.CertificatesTest do
              Certificates.download_url(user_fixture(), certificate)
   end
 
+  describe "gdti_collision?/1" do
+    test "true for a changeset that failed on the :gdti unique constraint", context do
+      existing = certificate_fixture(user_id: context.user.id, course_id: context.course.id)
+
+      {:error, changeset} =
+        Certificates.create_certificate(%{
+          type: :course,
+          # Deliberately reusing an already-issued GDTI, for a *different*
+          # certificate (different user), to trip the unique constraint the
+          # same way a genuine random-collision would.
+          gdti: existing.gdti,
+          file_key: "certificates/collision-test.pdf",
+          issued_at: DateTime.utc_now() |> DateTime.truncate(:second),
+          user_id: user_fixture().id,
+          course_id: course_fixture().id
+        })
+
+      assert Certificates.gdti_collision?(changeset)
+    end
+
+    test "false for any other kind of changeset failure" do
+      {:error, changeset} = Certificates.create_certificate(%{})
+
+      refute Certificates.gdti_collision?(changeset)
+    end
+  end
+
+  describe "verify_gdti/1" do
+    test "finds a certificate by its exact GDTI, preloaded for display", context do
+      certificate =
+        certificate_fixture(
+          user_id: context.user.id,
+          course_id: context.course.id,
+          module_id: context.module.id,
+          type: :module
+        )
+
+      assert {:ok, found} = Certificates.verify_gdti(certificate.gdti)
+      assert found.id == certificate.id
+      assert found.user.id == context.user.id
+      assert found.module.id == context.module.id
+    end
+
+    test "returns :not_found for a GDTI that doesn't match any certificate" do
+      assert {:error, :not_found} = Certificates.verify_gdti("not-a-real-gdti")
+    end
+
+    test "returns :not_found rather than raising on non-string input" do
+      assert {:error, :not_found} = Certificates.verify_gdti(nil)
+      assert {:error, :not_found} = Certificates.verify_gdti(123)
+    end
+  end
+
   test "issue_new/3 passes the course's signatory details and the fixed issuer branding into the renderer assigns",
        context do
     # A locally configured R2_PUBLIC_URL (via .env) would otherwise make this
@@ -152,6 +214,12 @@ defmodule Wasomi.CertificatesTest do
       assert assigns.signatory_name == "Jane Doe"
       assert assigns.signatory_title == "Country Manager"
       assert assigns.signature_url == "https://example.com/sig.png"
+
+      assert "data:image/png;base64," <> _base64 = assigns.qr_data_uri
+
+      assert VerificationQR.verification_url(assigns.gdti) =~
+               "/certificates/253/#{assigns.gdti}"
+
       {:ok, "%PDF-test"}
     end)
 
@@ -211,7 +279,7 @@ defmodule Wasomi.CertificatesTest do
     expect(Wasomi.CertificateRendererMock, :render, count, fn assigns ->
       assert assigns.learner_name
       assert assigns.title
-      assert assigns.serial_number
+      assert assigns.gdti
       {:ok, "%PDF-test"}
     end)
 

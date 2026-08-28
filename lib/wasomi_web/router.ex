@@ -29,6 +29,11 @@ defmodule WasomiWeb.Router do
     get "/landing", PageController, :home
     get "/sitemap.xml", SitemapController, :index
 
+    # GS1 Digital Link shape (AI(253) = GDTI) — see TODO.md's GDTI
+    # decisions. No auth, no on_mount: the result is the same for every
+    # visitor regardless of whether they're signed in.
+    live "/certificates/253/:gdti", CertificateVerificationLive, :show
+
     live_session :public_catalog,
       on_mount: [{WasomiWeb.UserAuth, :mount_current_user}] do
       live "/courses", CatalogLive.Index, :index

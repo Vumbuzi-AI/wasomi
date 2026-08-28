@@ -1,18 +1,33 @@
 defmodule Wasomi.Certificates do
   @moduledoc """
-  Issues and serves learner-owned module and course certificates.
+  Issues and serves learner-owned course certificates.
 
-  Scope uniqueness is enforced both by Oban and partial database indexes. A
-  deterministic serial and object key make retries safe even if a worker dies
-  after uploading but before inserting the database row.
+  Scope uniqueness is enforced both by Oban and a partial database index on
+  `(user_id, course_id)` — that's what makes a duplicate issuance attempt
+  (e.g. a worker retry after uploading but before inserting the database
+  row) safe: it always hits the same deterministic `file_key`, and whichever
+  insert loses the scope-uniqueness race falls back to fetching the
+  certificate the winner created. The GDTI itself is randomly generated per
+  issuance (see `Wasomi.Certificates.GDTI`) and plays no part in that
+  idempotency — it only needs to be unique, not deterministic.
+
+  Module-level certificates existed briefly and were removed: a formal,
+  individually GDTI-verifiable certificate per module (10+ for a single
+  course purchase) diluted what a Wasomi certificate means far more than it
+  added, without a matching increase in real credentialing value. Module
+  completion is still tracked and still fires a `:module_completed` event
+  (dashboard/course-player progress UI listens for it), it just doesn't
+  issue anything.
   """
 
   import Ecto.Query, warn: false
 
   alias Wasomi.Accounts.User
-  alias Wasomi.Catalog.{Course, CourseModule}
+  alias Wasomi.Catalog.Course
   alias Wasomi.Certificates.Branding
   alias Wasomi.Certificates.Certificate
+  alias Wasomi.Certificates.GDTI
+  alias Wasomi.Certificates.VerificationQR
   alias Wasomi.Certificates.Workers.IssueCertificate
   alias Wasomi.Learning
   alias Wasomi.Repo
@@ -26,15 +41,13 @@ defmodule Wasomi.Certificates do
   end
 
   @doc """
-  Counts course-level (not module-level) certificates issued, optionally
-  scoped to a single course. Used by the admin conversion funnel as its
-  terminal "Certified" step.
+  Counts certificates issued, optionally scoped to a single course. Used by
+  the admin conversion funnel as its terminal "Certified" step.
   """
   def count_course_certificates(opts \\ []) do
     course_id = Keyword.get(opts, :course_id)
 
     Certificate
-    |> where([c], c.type == :course)
     |> filter_course(course_id)
     |> Repo.aggregate(:count)
   end
@@ -46,7 +59,7 @@ defmodule Wasomi.Certificates do
     Certificate
     |> where([certificate], certificate.user_id == ^user_id)
     |> order_by([certificate], desc: certificate.issued_at)
-    |> preload([:course, :module])
+    |> preload(:course)
     |> Repo.all()
   end
 
@@ -56,8 +69,8 @@ defmodule Wasomi.Certificates do
       [certificate],
       certificate.user_id == ^user_id and certificate.course_id == ^course_id
     )
-    |> order_by([certificate], asc: certificate.type, asc: certificate.issued_at)
-    |> preload([:course, :module])
+    |> order_by([certificate], asc: certificate.issued_at)
+    |> preload(:course)
     |> Repo.all()
   end
 
@@ -68,6 +81,24 @@ defmodule Wasomi.Certificates do
     |> where([certificate], certificate.id == ^id and certificate.user_id == ^user_id)
     |> Repo.one!()
   end
+
+  @doc """
+  Looks up a certificate by its public GDTI, for the unauthenticated
+  certificate-verification page. Unlike `get_certificate!/1` and
+  `get_user_certificate!/2`, this never raises on a miss — an unrecognized
+  or tampered-with identifier is an expected, ordinary outcome here (a
+  mistyped code, a stale/fake QR), not a bug, so callers get a plain
+  `{:error, :not_found}` to render a "not verified" state with rather than
+  a 404/500 page.
+  """
+  def verify_gdti(gdti) when is_binary(gdti) do
+    case Repo.get_by(Certificate, gdti: gdti) do
+      %Certificate{} = certificate -> {:ok, preload_certificate(certificate)}
+      nil -> {:error, :not_found}
+    end
+  end
+
+  def verify_gdti(_gdti), do: {:error, :not_found}
 
   def create_certificate(attrs \\ %{}) do
     %Certificate{}
@@ -88,16 +119,14 @@ defmodule Wasomi.Certificates do
   end
 
   @doc """
-  Enqueues certificate jobs for newly completed module/course transitions.
+  Enqueues a certificate job for a newly completed course. Any other event
+  (including `:module_completed`) is ignored — see the moduledoc.
   """
   def enqueue_for_completion_events(%User{} = user, events) when is_list(events) do
     events
     |> Enum.flat_map(fn
-      {:module_completed, %CourseModule{id: scope_id}} ->
-        [IssueCertificate.new(user.id, :module, scope_id)]
-
       {:course_completed, %Course{id: scope_id}} ->
-        [IssueCertificate.new(user.id, :course, scope_id)]
+        [IssueCertificate.for_completion(user.id, scope_id)]
 
       _ ->
         []
@@ -111,16 +140,16 @@ defmodule Wasomi.Certificates do
   @doc """
   Performs one idempotent issuance after re-checking completion.
   """
-  def issue(user_id, type, scope_id) when type in [:module, :course] do
+  def issue(user_id, course_id) do
     with %User{} = user <- Repo.get(User, user_id),
-         {:ok, scope} <- load_completed_scope(user, type, scope_id) do
-      case get_by_scope(user.id, type, scope_id) do
+         {:ok, course} <- load_completed_course(user, course_id) do
+      case get_by_course(user.id, course_id) do
         %Certificate{} = certificate ->
           {:ok, preload_certificate(certificate), :existing}
 
         nil ->
-          if course_for(type, scope).certificate_enabled do
-            issue_new(user, type, scope)
+          if course.certificate_enabled do
+            issue_new(user, course)
           else
             {:error, :certificates_disabled}
           end
@@ -130,8 +159,6 @@ defmodule Wasomi.Certificates do
       {:error, reason} -> {:error, reason}
     end
   end
-
-  def issue(_user_id, _type, _scope_id), do: {:error, :invalid_scope}
 
   def subscribe(%User{id: id}) do
     Phoenix.PubSub.subscribe(Wasomi.PubSub, user_topic(id))
@@ -153,28 +180,105 @@ defmodule Wasomi.Certificates do
       end
 
     if certificate.user_id == user.id do
+      certificate = Repo.preload(certificate, :course)
+
       storage().signed_url(
         certificate.file_key,
-        Keyword.put_new(opts, :expires_in, @download_ttl)
+        opts
+        |> Keyword.put_new(:expires_in, @download_ttl)
+        |> Keyword.put_new(:filename, certificate_filename(certificate))
       )
     else
       {:error, :forbidden}
     end
   end
 
-  defp issue_new(user, type, scope) do
+  @doc """
+  A descriptive, filesystem-safe filename for a certificate's PDF download —
+  e.g. `"GS1 Barcoding Fundamentals - Wasomi Certificate.pdf"` — instead of
+  the bare numeric course id the download used to save as (the object
+  storage key's own basename, with no filename hint given to the browser).
+  """
+  def certificate_filename(%Certificate{} = certificate) do
+    certificate = Repo.preload(certificate, :course)
+
+    "#{certificate.course.title} - Wasomi Certificate.pdf"
+    |> String.replace(~r/[\/\\:*?"<>|]/, "")
+    |> String.replace(~r/\s+/, " ")
+    |> String.trim()
+  end
+
+  # LinkedIn's own "Add to Profile" deep link for certifications — see
+  # https://learn.microsoft.com/linkedin/consumer/integrations/self-serve/add-to-profile
+  # (LinkedIn's own docs on this have moved around over the years; Microsoft's
+  # mirror has stayed put). Opens LinkedIn's "Add certification" form
+  # pre-filled from these params; the learner just reviews and saves — no
+  # OAuth, no LinkedIn API, no consent screen, since it's a plain deep link
+  # rather than a real integration.
+  #
+  # `organizationName` pre-fills the issuer as plain text either way; giving
+  # LinkedIn the numeric `organizationId` instead upgrades that to a real,
+  # verified link to the issuer's Company Page. Add `organization_id: <id>`
+  # to `:certificate_branding` once GS1 Kenya's page exists, and this picks
+  # it up automatically (organizationName stays as a fallback for whoever
+  # doesn't have theirs set).
+  @doc """
+  Builds the LinkedIn "Add to Profile" URL for a certificate, pre-filled
+  with the course title, issuing organization, issue date, and this
+  certificate's verification URL and GDTI as its credential ID.
+  """
+  def linkedin_add_to_profile_url(%Certificate{} = certificate) do
+    certificate = Repo.preload(certificate, :course)
+    issued_on = certificate.issued_at
+
+    params =
+      [
+        startTask: "CERTIFICATION_NAME",
+        name: certificate.course.title,
+        organizationName: Branding.issuer_name(),
+        issueYear: issued_on.year,
+        issueMonth: issued_on.month,
+        certUrl: VerificationQR.verification_url(certificate.gdti),
+        certId: certificate.gdti
+      ]
+      |> maybe_put_organization_id()
+
+    "https://www.linkedin.com/profile/add?" <> URI.encode_query(params)
+  end
+
+  defp maybe_put_organization_id(params) do
+    case Application.get_env(:wasomi, :certificate_branding, [])[:organization_id] do
+      nil -> params
+      id -> Keyword.put(params, :organizationId, id)
+    end
+  end
+
+  # A collision between two different certificates' randomly generated
+  # GDTIs is astronomically unlikely (see Wasomi.Certificates.GDTI's
+  # moduledoc), but the DB's unique index on :gdti makes it a real,
+  # checkable failure mode rather than a silent bug — so on that specific
+  # error, regenerate a fresh GDTI and retry rather than failing the
+  # learner's issuance outright over a one-in-a-billion coin flip. The PDF
+  # has the GDTI printed on it and QR-encoded, so a retry re-renders and
+  # re-uploads too, not just the DB insert — swapping the GDTI without
+  # updating the file would print a certificate whose QR doesn't match its
+  # own database record.
+  @max_gdti_attempts 3
+
+  defp issue_new(user, course), do: issue_new(user, course, @max_gdti_attempts)
+
+  defp issue_new(user, course, attempts_left) do
     issued_at = DateTime.utc_now() |> DateTime.truncate(:second)
-    scope_id = scope_id(type, scope)
-    serial_number = serial_number(user.id, type, scope_id)
-    file_key = file_key(user.id, type, scope_id)
-    course = course_for(type, scope)
+    gdti = GDTI.generate()
+    file_key = file_key(user.id, course.id)
 
     assigns =
       Map.merge(Branding.assigns(), %{
         learner_name: user.name,
-        title: scope.title,
+        title: course.title,
         issued_on: Calendar.strftime(issued_at, "%B %-d, %Y"),
-        serial_number: serial_number,
+        gdti: gdti,
+        qr_data_uri: VerificationQR.data_uri(gdti),
         signatory_name: course.certificate_signatory_name,
         signatory_title: course.certificate_signatory_title,
         signature_url: course.certificate_signature_key,
@@ -187,20 +291,23 @@ defmodule Wasomi.Certificates do
          :ok <- storage().upload(file_key, pdf),
          {:ok, certificate} <-
            create_certificate(%{
-             type: type,
-             serial_number: serial_number,
+             type: :course,
+             gdti: gdti,
              file_key: file_key,
              issued_at: issued_at,
              user_id: user.id,
-             course_id: course.id,
-             module_id: if(type == :module, do: scope.id)
+             course_id: course.id
            }) do
       {:ok, preload_certificate(certificate), :created}
     else
       {:error, %Ecto.Changeset{} = changeset} ->
-        case get_by_scope(user.id, type, scope_id) do
-          %Certificate{} = certificate -> {:ok, preload_certificate(certificate), :existing}
-          nil -> {:error, changeset}
+        if gdti_collision?(changeset) and attempts_left > 1 do
+          issue_new(user, course, attempts_left - 1)
+        else
+          case get_by_course(user.id, course.id) do
+            %Certificate{} = certificate -> {:ok, preload_certificate(certificate), :existing}
+            nil -> {:error, changeset}
+          end
         end
 
       {:error, reason} ->
@@ -208,17 +315,22 @@ defmodule Wasomi.Certificates do
     end
   end
 
-  defp load_completed_scope(user, :module, module_id) do
-    case Repo.get(CourseModule, module_id) |> Repo.preload(:course) do
-      nil ->
-        {:error, :scope_not_found}
-
-      module ->
-        if Learning.module_complete?(user, module), do: {:ok, module}, else: {:error, :incomplete}
-    end
+  @doc """
+  Whether a failed certificate changeset failed specifically because its
+  (randomly generated) GDTI collided with an already-issued one — as
+  opposed to any other validation failure. Public so the classification
+  logic itself has direct test coverage without needing to force a real
+  DB-level GDTI collision end-to-end.
+  """
+  @spec gdti_collision?(Ecto.Changeset.t()) :: boolean()
+  def gdti_collision?(%Ecto.Changeset{errors: errors}) do
+    Enum.any?(errors, fn
+      {:gdti, {_message, opts}} -> Keyword.get(opts, :constraint) == :unique
+      _other -> false
+    end)
   end
 
-  defp load_completed_scope(user, :course, course_id) do
+  defp load_completed_course(user, course_id) do
     case Repo.get(Course, course_id) do
       nil ->
         {:error, :scope_not_found}
@@ -228,32 +340,13 @@ defmodule Wasomi.Certificates do
     end
   end
 
-  defp get_by_scope(user_id, :module, module_id) do
-    Repo.get_by(Certificate, user_id: user_id, type: :module, module_id: module_id)
+  defp get_by_course(user_id, course_id) do
+    Repo.get_by(Certificate, user_id: user_id, course_id: course_id)
   end
 
-  defp get_by_scope(user_id, :course, course_id) do
-    Repo.get_by(Certificate, user_id: user_id, type: :course, course_id: course_id)
-  end
+  defp preload_certificate(certificate), do: Repo.preload(certificate, [:user, :course])
 
-  defp preload_certificate(certificate), do: Repo.preload(certificate, [:user, :course, :module])
-  defp course_for(:module, module), do: module.course
-  defp course_for(:course, course), do: course
-  defp scope_id(:module, module), do: module.id
-  defp scope_id(:course, course), do: course.id
-
-  defp serial_number(user_id, type, scope_id) do
-    digest =
-      :crypto.hash(:sha256, "#{user_id}:#{type}:#{scope_id}")
-      |> Base.encode16(case: :upper)
-      |> binary_part(0, 12)
-
-    prefix = if type == :module, do: "MOD", else: "CRS"
-    "KBI-#{prefix}-#{digest}"
-  end
-
-  defp file_key(user_id, type, scope_id),
-    do: "certificates/#{user_id}/#{type}/#{scope_id}.pdf"
+  defp file_key(user_id, course_id), do: "certificates/#{user_id}/course/#{course_id}.pdf"
 
   defp renderer, do: Application.fetch_env!(:wasomi, :certificate_renderer)
   defp storage, do: Application.fetch_env!(:wasomi, :certificate_storage)

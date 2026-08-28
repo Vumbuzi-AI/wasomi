@@ -48,7 +48,7 @@ defmodule WasomiWeb.CertificatesLive do
                 {certificate_type(certificate)}
               </p>
               <h3 class="mt-1 truncate font-medium text-ink">{certificate_title(certificate)}</h3>
-              <p class="mt-1 text-xs text-muted">{certificate.serial_number}</p>
+              <p class="mt-1 text-xs text-muted">{certificate.gdti}</p>
             </div>
             <.link
               href={~p"/certificates/#{certificate.id}/download"}
@@ -87,8 +87,6 @@ defmodule WasomiWeb.CertificatesLive do
     assign(socket, :certificates, Certificates.list_for_user(socket.assigns.current_user))
   end
 
-  defp certificate_type(%{type: :module}), do: "Module certificate"
   defp certificate_type(%{type: :course}), do: "Course certificate"
-  defp certificate_title(%{type: :module, module: module}), do: module.title
   defp certificate_title(%{type: :course, course: course}), do: course.title
 end

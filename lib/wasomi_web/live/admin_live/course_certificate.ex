@@ -2,10 +2,13 @@ defmodule WasomiWeb.AdminLive.CourseCertificate do
   use WasomiWeb, :live_view
 
   alias Wasomi.{Catalog, Storage}
-  alias Wasomi.Certificates.{Branding, Template}
+  alias Wasomi.Certificates.{Branding, GDTI, Template, VerificationQR}
 
   @max_signature_bytes 2_000_000
-  @sample_serial_number "SAMPLE-0000"
+  # A stable (not randomly regenerated on every render) sample — real
+  # prefix/document-type/check-digit structure, obviously-fake all-zero
+  # serial so it reads as a sample rather than a real random one.
+  @sample_serial "000000000"
 
   @impl true
   def mount(%{"slug" => slug}, _session, socket) do
@@ -323,7 +326,11 @@ defmodule WasomiWeb.AdminLive.CourseCertificate do
     |> assign(:signature_two_url, signature_two_url)
     |> assign(
       :preview_html,
-      Template.render_html(sample_assigns(socket, changeset, signature_url, signature_two_url))
+      socket
+      |> sample_assigns(changeset, signature_url, signature_two_url)
+      |> Map.put(:preview?, true)
+      |> Map.put(:qr_data_uri, nil)
+      |> Template.render_html()
     )
   end
 
@@ -343,7 +350,8 @@ defmodule WasomiWeb.AdminLive.CourseCertificate do
       learner_name: "Jane Sample",
       title: socket.assigns.course.title,
       issued_on: Calendar.strftime(Date.utc_today(), "%B %-d, %Y"),
-      serial_number: @sample_serial_number,
+      gdti: GDTI.core() <> @sample_serial,
+      qr_data_uri: VerificationQR.data_uri(GDTI.core() <> @sample_serial),
       signatory_name: get_field(changeset, :certificate_signatory_name),
       signatory_title: get_field(changeset, :certificate_signatory_title),
       signature_url: signature_url,

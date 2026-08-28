@@ -68,7 +68,7 @@ erDiagram
 
 `certificates`
 
-- Learner certificates with `type`, `serial_number`, `file_key`, `issued_at`, `user_id`, `course_id`, and optional `module_id`.
+- Learner certificates with `type`, `gdti` (a GS1 Global Document Type Identifier — see `Wasomi.Certificates.GDTI`), `file_key`, `issued_at`, `user_id`, `course_id`, and optional `module_id`.
 - `module` certificates require `module_id`; `course` certificates require `module_id` to be null.
 - Partial unique indexes prevent duplicate module/course certificates for a user.
 

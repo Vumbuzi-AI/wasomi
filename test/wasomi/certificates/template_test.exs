@@ -7,7 +7,7 @@ defmodule Wasomi.Certificates.TemplateTest do
     learner_name: "Alex J. Mercer",
     title: "Advanced Full-Stack Web Development",
     issued_on: "August 4, 2026",
-    serial_number: "GSI-2026-8942"
+    gdti: "6167007558430000000000"
   }
 
   test "renders the learner, title, serial, and date" do
@@ -15,8 +15,13 @@ defmodule Wasomi.Certificates.TemplateTest do
 
     assert html =~ "Alex J. Mercer"
     assert html =~ "Advanced Full-Stack Web Development"
-    assert html =~ "GSI-2026-8942"
     assert html =~ "August 4, 2026"
+  end
+
+  test "prints the GDTI with a (253) Application Identifier label" do
+    html = Template.render_html(@base_assigns)
+
+    assert html =~ "(253) 6167007558430000000000"
   end
 
   test "renders the default headline and citation copy" do

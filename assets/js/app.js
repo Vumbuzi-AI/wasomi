@@ -2300,6 +2300,77 @@ Hooks.SearchableSelect = {
   },
 };
 
+// A brand-colored confetti burst, fired once when the element mounts (a
+// fresh DOM node each time the celebration modal opens, since it's keyed
+// off whether there's a certificate to celebrate). Plain canvas + rAF, no
+// confetti library — the whole effect is small enough not to be worth a
+// new dependency for.
+Hooks.Confetti = {
+  mounted() {
+    const canvas = document.createElement("canvas");
+    canvas.style.cssText =
+      "position:fixed;inset:0;width:100vw;height:100vh;pointer-events:none;z-index:60";
+    document.body.appendChild(canvas);
+    this.canvas = canvas;
+
+    const ctx = canvas.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    const resize = () => {
+      canvas.width = window.innerWidth * dpr;
+      canvas.height = window.innerHeight * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+    resize();
+
+    const colors = ["#f97316", "#012c6a", "#fbbf24", "#22c55e", "#ffffff"];
+    const count = 140;
+    const particles = Array.from({ length: count }, () => ({
+      x: Math.random() * window.innerWidth,
+      y: -20 - Math.random() * window.innerHeight * 0.3,
+      size: 6 + Math.random() * 6,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      speedY: 2 + Math.random() * 3,
+      speedX: -1.5 + Math.random() * 3,
+      rotation: Math.random() * 360,
+      spin: -8 + Math.random() * 16,
+    }));
+
+    const start = performance.now();
+    const durationMs = 3200;
+
+    const frame = (now) => {
+      const elapsed = now - start;
+      ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+
+      particles.forEach((p) => {
+        p.x += p.speedX;
+        p.y += p.speedY;
+        p.rotation += p.spin;
+
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate((p.rotation * Math.PI) / 180);
+        ctx.fillStyle = p.color;
+        ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2);
+        ctx.restore();
+      });
+
+      if (elapsed < durationMs) {
+        this.frameId = requestAnimationFrame(frame);
+      } else {
+        canvas.remove();
+      }
+    };
+
+    this.frameId = requestAnimationFrame(frame);
+  },
+
+  destroyed() {
+    cancelAnimationFrame(this.frameId);
+    this.canvas?.remove();
+  },
+};
+
 let csrfToken = document
   .querySelector("meta[name='csrf-token']")
   .getAttribute("content");

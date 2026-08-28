@@ -68,7 +68,9 @@ defmodule Wasomi.MixProject do
       {:mox, "~> 1.2", only: :test},
       {:dns_cluster, "~> 0.1.1"},
       {:bandit, "~> 1.5"},
-      {:nimble_csv, "~> 1.2"}
+      {:nimble_csv, "~> 1.2"},
+      {:ex_gtin, "~> 1.2"},
+      {:qr_code, "~> 3.2"}
     ]
   end
 

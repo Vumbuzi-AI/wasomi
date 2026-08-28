@@ -52,7 +52,11 @@ defmodule Wasomi.Application do
   end
 
   defp maybe_chromic_pdf do
-    if Application.get_env(:wasomi, :start_chromic_pdf, true) do
+    # ChromicPDF owns an external Chrome/Chromium process. Keep it opt-in so a
+    # production release can boot without installing or supervising a browser.
+    # Development explicitly enables it in config/dev.exs; tests and production
+    # leave it disabled unless a deployment deliberately opts in.
+    if Application.get_env(:wasomi, :start_chromic_pdf, false) do
       case chrome_executable() do
         nil ->
           Logger.warning(

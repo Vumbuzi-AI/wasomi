@@ -126,4 +126,62 @@ defmodule Wasomi.Emails.TemplateTest do
       refute text =~ "Click Me"
     end
   end
+
+  describe "rich/1" do
+    test "wraps a :bold segment in <strong>, escaping its content" do
+      assert Template.rich(["Hi ", {:bold, "Jane"}, "!"]) ==
+               {:safe, "Hi <strong>Jane</strong>!", "Hi Jane!"}
+    end
+
+    test "escapes a plain (non-bold) segment the same as any other body text" do
+      assert {:safe, html, plain} = Template.rich([{:bold, "<script>"}, " & friends"])
+      assert html == "<strong>&lt;script&gt;</strong> &amp; friends"
+      assert plain == "<script> & friends"
+    end
+
+    test "render/1 emits a rich intro/body paragraph's HTML unescaped, but as the safe markup rich/1 built" do
+      html =
+        Template.render(%{
+          title: "Welcome",
+          intro: Template.rich(["Hi ", {:bold, "Jane"}, ","]),
+          body: [Template.rich(["Enrolled in ", {:bold, "GS1 Basics"}, "."])]
+        })
+
+      assert html =~ "Hi <strong>Jane</strong>,"
+      assert html =~ "Enrolled in <strong>GS1 Basics</strong>."
+    end
+
+    test "render_text/1 renders a rich paragraph as plain text, with no <strong> tags" do
+      text =
+        Template.render_text(%{
+          title: "Welcome",
+          intro: Template.rich(["Hi ", {:bold, "Jane"}, ","])
+        })
+
+      assert text =~ "Hi Jane,"
+      refute text =~ "<strong>"
+    end
+  end
+
+  describe "logo" do
+    test "render/1 uses the real logo image, not the old placeholder mark" do
+      html = Template.render(%{title: "Welcome"})
+
+      assert html =~ ~s(<img src="http)
+      assert html =~ "/images/logo.png"
+      assert html =~ ~s(alt="Wasomi")
+    end
+  end
+
+  describe "brand color" do
+    test "the CTA button uses the brand orange, not a neutral dark" do
+      html =
+        Template.render(%{
+          title: "Welcome",
+          cta: %{label: "Go", url: "https://wasomi.com"}
+        })
+
+      assert html =~ "background-color:#f97316"
+    end
+  end
 end

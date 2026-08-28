@@ -2,8 +2,12 @@ defmodule Wasomi.LearningTest do
   use Wasomi.DataCase
 
   alias Wasomi.Assessments
+  alias Wasomi.Enrollments
+  alias Wasomi.Enrollments.Enrollment
   alias Wasomi.Learning
   alias Wasomi.Learning.LectureProgress
+  alias Wasomi.Notifications
+  alias Wasomi.Notifications.Notification
 
   import Wasomi.AccountsFixtures
   import Wasomi.AssessmentsFixtures
@@ -496,6 +500,220 @@ defmodule Wasomi.LearningTest do
 
       assert Learning.lecture_unlocked?(user, course, second)
     end
+  end
+
+  describe "list_never_started_enrollments/1" do
+    test "includes an active enrollment past the threshold with zero progress" do
+      %{user: user, course: course} = enrolled_days_ago(10)
+
+      assert [%Enrollment{id: id}] = Learning.list_never_started_enrollments(1)
+      assert id == Enrollments.get_enrollment(user, course).id
+    end
+
+    test "excludes an enrollment younger than the threshold" do
+      enrolled_days_ago(3)
+
+      assert Learning.list_never_started_enrollments(1) == []
+    end
+
+    test "excludes a pending (unpaid) enrollment" do
+      user = user_fixture()
+      course = course_fixture(status: :published)
+      enrollment_fixture(user_id: user.id, course_id: course.id, status: :pending)
+
+      assert Learning.list_never_started_enrollments(1) == []
+    end
+
+    test "excludes an enrollment with any recorded lecture progress" do
+      %{user: user, lecture: lecture} = enrolled_days_ago(10)
+      Learning.record_progress(user, lecture, 1)
+
+      assert Learning.list_never_started_enrollments(1) == []
+    end
+
+    test "excludes an enrollment already sent the never-started nudge" do
+      %{user: user, course: course} = enrolled_days_ago(10)
+      {:ok, _} = Notifications.deliver_reengagement_never_started(active_enrollment(user, course))
+
+      assert Learning.list_never_started_enrollments(1) == []
+    end
+
+    test "touch 2 includes an enrollment whose touch 1 was sent long enough ago" do
+      %{user: user, course: course} = enrolled_days_ago(20)
+
+      {:ok, notification} =
+        Notifications.deliver_reengagement_never_started(active_enrollment(user, course))
+
+      backdate_notification!(notification, 8)
+
+      assert [%Enrollment{id: id}] = Learning.list_never_started_enrollments(2)
+      assert id == Enrollments.get_enrollment(user, course).id
+    end
+
+    test "touch 2 excludes an enrollment whose touch 1 was sent too recently" do
+      %{user: user, course: course} = enrolled_days_ago(20)
+      {:ok, _} = Notifications.deliver_reengagement_never_started(active_enrollment(user, course))
+
+      assert Learning.list_never_started_enrollments(2) == []
+    end
+
+    test "touch 2 excludes an enrollment that never got touch 1 at all" do
+      enrolled_days_ago(20)
+
+      assert Learning.list_never_started_enrollments(2) == []
+    end
+
+    test "touch 2 excludes an enrollment already sent touch 2" do
+      %{user: user, course: course} = enrolled_days_ago(20)
+
+      {:ok, notification} =
+        Notifications.deliver_reengagement_never_started(active_enrollment(user, course))
+
+      backdate_notification!(notification, 8)
+
+      {:ok, _} =
+        Notifications.deliver_reengagement_never_started(active_enrollment(user, course), 2)
+
+      assert Learning.list_never_started_enrollments(2) == []
+    end
+
+    test "touch 3 includes an enrollment whose touch 2 was sent long enough ago" do
+      %{user: user, course: course} = enrolled_days_ago(30)
+
+      {:ok, touch1} =
+        Notifications.deliver_reengagement_never_started(active_enrollment(user, course))
+
+      backdate_notification!(touch1, 20)
+
+      {:ok, touch2} =
+        Notifications.deliver_reengagement_never_started(active_enrollment(user, course), 2)
+
+      backdate_notification!(touch2, 15)
+
+      assert [%Enrollment{id: id}] = Learning.list_never_started_enrollments(3)
+      assert id == Enrollments.get_enrollment(user, course).id
+    end
+  end
+
+  describe "list_gone_quiet_enrollments/1" do
+    test "includes an active enrollment whose only progress is stale" do
+      %{user: user, course: course, lecture: lecture} = enrolled_days_ago(20)
+      backdated_progress!(user, lecture, 20)
+
+      assert [%Enrollment{id: id}] = Learning.list_gone_quiet_enrollments(1)
+      assert id == Enrollments.get_enrollment(user, course).id
+    end
+
+    test "excludes an enrollment with recent progress" do
+      %{user: user, lecture: lecture} = enrolled_days_ago(20)
+      Learning.record_progress(user, lecture, 1)
+
+      assert Learning.list_gone_quiet_enrollments(1) == []
+    end
+
+    test "excludes an enrollment with zero progress (never-started territory)" do
+      enrolled_days_ago(20)
+
+      assert Learning.list_gone_quiet_enrollments(1) == []
+    end
+
+    test "excludes a fully completed course" do
+      %{user: user, course: course, lecture: lecture} = enrolled_days_ago(20)
+      complete_lecture_via_progress!(user, lecture)
+      backdate_progress_updated_at!(user, lecture, 20)
+
+      assert Learning.list_gone_quiet_enrollments(1) == []
+      assert Learning.course_complete?(user, course)
+    end
+
+    test "excludes an enrollment already sent the gone-quiet nudge" do
+      %{user: user, course: course, lecture: lecture} = enrolled_days_ago(20)
+      backdated_progress!(user, lecture, 20)
+      {:ok, _} = Notifications.deliver_reengagement_gone_quiet(active_enrollment(user, course))
+
+      assert Learning.list_gone_quiet_enrollments(1) == []
+    end
+
+    test "touch 2 includes an enrollment still stale whose touch 1 was sent long enough ago" do
+      %{user: user, course: course, lecture: lecture} = enrolled_days_ago(30)
+      backdated_progress!(user, lecture, 30)
+
+      {:ok, notification} =
+        Notifications.deliver_reengagement_gone_quiet(active_enrollment(user, course))
+
+      backdate_notification!(notification, 15)
+
+      assert [%Enrollment{id: id}] = Learning.list_gone_quiet_enrollments(2)
+      assert id == Enrollments.get_enrollment(user, course).id
+    end
+
+    test "touch 2 excludes an enrollment whose touch 1 was sent too recently" do
+      %{user: user, course: course, lecture: lecture} = enrolled_days_ago(30)
+      backdated_progress!(user, lecture, 30)
+      {:ok, _} = Notifications.deliver_reengagement_gone_quiet(active_enrollment(user, course))
+
+      assert Learning.list_gone_quiet_enrollments(2) == []
+    end
+
+    test "touch 2 excludes an enrollment that quietly resumed after touch 1" do
+      %{user: user, course: course, lecture: lecture} = enrolled_days_ago(30)
+      backdated_progress!(user, lecture, 30)
+
+      {:ok, notification} =
+        Notifications.deliver_reengagement_gone_quiet(active_enrollment(user, course))
+
+      backdate_notification!(notification, 15)
+
+      # resumed a few days ago — no longer "currently" stale, even though
+      # touch 1 itself is old enough
+      Learning.record_progress(user, lecture, 2)
+      backdate_progress_updated_at!(user, lecture, 3)
+
+      assert Learning.list_gone_quiet_enrollments(2) == []
+    end
+  end
+
+  defp enrolled_days_ago(days) do
+    user = user_fixture()
+    course = course_fixture(status: :published)
+    course_module = course_module_fixture(course_id: course.id, position: 1)
+    lecture = lecture_fixture(module_id: course_module.id, position: 1, duration_seconds: 100)
+
+    enrolled_at = DateTime.utc_now() |> DateTime.add(-days, :day) |> DateTime.truncate(:second)
+
+    enrollment_fixture(
+      user_id: user.id,
+      course_id: course.id,
+      status: :active,
+      enrolled_at: enrolled_at
+    )
+
+    %{user: user, course: course, lecture: lecture}
+  end
+
+  defp active_enrollment(user, course), do: Enrollments.get_enrollment(user, course)
+
+  defp backdated_progress!(user, lecture, days) do
+    {:ok, _progress, _events} = Learning.record_progress(user, lecture, 1)
+    backdate_progress_updated_at!(user, lecture, days)
+  end
+
+  # Simulates a previous touch having been sent `days` ago — the next
+  # touch's own gate checks the notification's `inserted_at`, not `now`.
+  defp backdate_notification!(%Notification{id: id}, days) do
+    sent_at = DateTime.utc_now() |> DateTime.add(-days, :day) |> DateTime.truncate(:second)
+
+    Notification
+    |> where([n], n.id == ^id)
+    |> Repo.update_all(set: [inserted_at: sent_at])
+  end
+
+  defp backdate_progress_updated_at!(user, lecture, days) do
+    stale_at = DateTime.utc_now() |> DateTime.add(-days, :day) |> DateTime.truncate(:second)
+
+    LectureProgress
+    |> where([p], p.user_id == ^user.id and p.lecture_id == ^lecture.id)
+    |> Repo.update_all(set: [updated_at: stale_at])
   end
 
   defp two_lecture_course do

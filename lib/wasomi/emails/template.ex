@@ -16,6 +16,10 @@ defmodule Wasomi.Emails.Template do
     * `:body` — a paragraph or list of paragraphs
     * `:cta` — `%{label: string, url: string}` rendered as the primary button
     * `:footer_note` — replaces the default sign-off line
+
+  `:intro`/`:body` entries are plain strings by default (escaped in full) —
+  use `rich/1` to bold a name or course title within one instead of hand-
+  building HTML at the call site.
   """
 
   @navy "#012c6a"
@@ -65,10 +69,38 @@ defmodule Wasomi.Emails.Template do
     """
   end
 
+  @doc """
+  Bolds select segments within a paragraph — e.g. a learner's name or a
+  course title — without letting call sites inject arbitrary HTML: each
+  dynamic value is still escaped individually, `<strong>` is the only tag
+  this ever emits, and everything is available as plain text too, for
+  `render_text/1`.
+
+  ## Examples
+
+      iex> Wasomi.Emails.Template.rich(["Hi ", {:bold, "Jane"}, "!"])
+      {:safe, "Hi <strong>Jane</strong>!", "Hi Jane!"}
+  """
+  def rich(segments) do
+    html =
+      Enum.map_join(segments, "", fn
+        {:bold, value} -> "<strong>#{esc(value)}</strong>"
+        text -> esc(text)
+      end)
+
+    plain =
+      Enum.map_join(segments, "", fn
+        {:bold, value} -> value
+        text -> text
+      end)
+
+    {:safe, html, plain}
+  end
+
   @doc "Renders the plain-text fallback for an email, mirroring `render/1`."
   def render_text(assigns) do
-    intro = assigns[:intro]
-    body = List.wrap(assigns[:body])
+    intro = plain_text(assigns[:intro])
+    body = assigns[:body] |> List.wrap() |> Enum.map(&plain_text/1)
     cta = assigns[:cta]
     url = if is_map(cta), do: Map.get(cta, :url)
 
@@ -101,9 +133,15 @@ defmodule Wasomi.Emails.Template do
     [assigns[:intro] | List.wrap(assigns[:body])]
     |> Enum.reject(&is_nil/1)
     |> Enum.map_join("\n", fn paragraph ->
-      ~s(<p style="margin:0 0 16px;color:#{@body_color};font-size:15px;line-height:1.65;font-weight:400;font-family:'Outfit',Helvetica,Arial,sans-serif;">#{esc(paragraph)}</p>)
+      ~s(<p style="margin:0 0 16px;color:#{@body_color};font-size:15px;line-height:1.65;font-weight:400;font-family:'Outfit',Helvetica,Arial,sans-serif;">#{paragraph_html(paragraph)}</p>)
     end)
   end
+
+  defp paragraph_html({:safe, html, _plain}), do: html
+  defp paragraph_html(text), do: esc(text)
+
+  defp plain_text({:safe, _html, plain}), do: plain
+  defp plain_text(text), do: text
 
   defp cta_button(nil), do: ""
 

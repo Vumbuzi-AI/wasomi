@@ -63,9 +63,13 @@ defmodule Wasomi.Accounts.UserNotifier do
 
     deliver(user.email, "You now have access to #{course.title}", %{
       title: "You're in! Access granted to #{course.title}",
-      intro: "Hi #{name},",
+      intro: Template.rich(["Hi ", {:bold, name}, ","]),
       body: [
-        "Great news — you've officially been granted full access to \"#{course.title}\" on Wasomi!",
+        Template.rich([
+          "Great news — you've officially been granted full access to \"",
+          {:bold, course.title},
+          "\" on Wasomi!"
+        ]),
         "Get learning and stay ahead! Your course materials are unlocked and ready. Jump in now to master real-world skills at your own pace."
       ],
       cta: %{label: "Start learning now", url: url}
@@ -94,6 +98,130 @@ defmodule Wasomi.Accounts.UserNotifier do
       ],
       cta: %{label: "Download certificate", url: url}
     })
+  end
+
+  @doc """
+  Nudges a learner who enrolled but never started a lecture — touch `touch`
+  (1, 2, or 3) of the sequence, each with its own subject/tone.
+  """
+  def deliver_reengagement_never_started(user, course, touch \\ 1)
+      when touch in [1, 2, 3] do
+    url = "#{WasomiWeb.Endpoint.url()}/learn/courses/#{course.slug}"
+    {subject, title, body} = never_started_copy(touch, course)
+
+    deliver(user.email, subject, %{
+      title: title,
+      intro: Template.rich(["Hi ", {:bold, recipient_name(user)}, ","]),
+      body: body,
+      cta: %{label: "Start learning now", url: url}
+    })
+  end
+
+  defp never_started_copy(1, course) do
+    {
+      "Your seat in \"#{course.title}\" is ready when you are",
+      "Haven't started yet? Let's fix that.",
+      [
+        Template.rich([
+          "You enrolled in \"",
+          {:bold, course.title},
+          "\" and your course materials have been waiting for you."
+        ]),
+        "It only takes a few minutes to get through your first lecture — jump in today and start building momentum."
+      ]
+    }
+  end
+
+  defp never_started_copy(2, course) do
+    {
+      "Still thinking about \"#{course.title}\"?",
+      "No pressure — your seat is still here.",
+      [
+        Template.rich([
+          "Just checking in — your spot in \"",
+          {:bold, course.title},
+          "\" hasn't gone anywhere."
+        ]),
+        "Whenever you're ready, your first lecture is one click away."
+      ]
+    }
+  end
+
+  defp never_started_copy(3, course) do
+    {
+      "Last call: your seat in \"#{course.title}\"",
+      "One last reminder, then we'll leave you be.",
+      [
+        Template.rich([
+          "This is the last nudge you'll get about \"",
+          {:bold, course.title},
+          "\" — after this we'll stop reminding you."
+        ]),
+        "Your access isn't going anywhere, so there's genuinely no rush. We just didn't want you to miss it."
+      ]
+    }
+  end
+
+  @doc """
+  Nudges a learner who made progress in a course, then went quiet — touch
+  `touch` (1, 2, or 3) of the sequence, each with its own subject/tone.
+  """
+  def deliver_reengagement_gone_quiet(user, course, touch \\ 1)
+      when touch in [1, 2, 3] do
+    url = "#{WasomiWeb.Endpoint.url()}/learn/courses/#{course.slug}"
+    {subject, title, body} = gone_quiet_copy(touch, course)
+
+    deliver(user.email, subject, %{
+      title: title,
+      intro: Template.rich(["Hi ", {:bold, recipient_name(user)}, ","]),
+      body: body,
+      cta: %{label: "Resume learning", url: url}
+    })
+  end
+
+  defp gone_quiet_copy(1, course) do
+    {
+      "Pick up right where you left off in \"#{course.title}\"",
+      "We miss you in \"#{course.title}\"!",
+      [
+        Template.rich([
+          "You made great progress in \"",
+          {:bold, course.title},
+          "\", then things went quiet. Life happens!"
+        ]),
+        "Your progress is saved, so you can jump back in exactly where you left off whenever you're ready."
+      ]
+    }
+  end
+
+  defp gone_quiet_copy(2, course) do
+    {
+      "Your progress in \"#{course.title}\" is still saved",
+      "Still thinking about finishing up?",
+      [
+        Template.rich([
+          "Everything you completed in \"",
+          {:bold, course.title},
+          "\" is exactly where you left it — nothing to redo."
+        ]),
+        "Even a few minutes picks up where you stopped."
+      ]
+    }
+  end
+
+  defp gone_quiet_copy(3, course) do
+    {
+      "One last nudge for \"#{course.title}\"",
+      "Last check-in — then we'll stop reminding you.",
+      [
+        Template.rich([
+          "This is the last nudge you'll get about \"",
+          {:bold, course.title},
+          "\"."
+        ]),
+        "Your progress stays saved either way, so there's no rush — we just didn't want you to lose track of it."
+      ]
+    }
   end
 
   @doc """

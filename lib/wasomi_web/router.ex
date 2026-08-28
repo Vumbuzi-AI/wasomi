@@ -82,6 +82,7 @@ defmodule WasomiWeb.Router do
       live "/users/settings", UserSettingsLive, :edit
       live "/users/settings/confirm_email/:token", UserSettingsLive, :confirm_email
       live "/dashboard", DashboardLive, :index
+      live "/notifications", NotificationsLive, :index
       live "/catalog", CatalogLive.Portal, :index
       live "/courses-taken", CoursesTakenLive, :index
       live "/certificates", CertificatesLive, :index

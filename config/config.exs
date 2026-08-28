@@ -70,7 +70,25 @@ config :wasomi, Oban,
   plugins: [
     {Oban.Plugins.Cron,
      crontab: [
-       {"* * * * *", Wasomi.Payments.Workers.ReconcilePendingPayments}
+       {"* * * * *", Wasomi.Payments.Workers.ReconcilePendingPayments},
+       # Each reengagement trigger is a 3-touch sequence (see
+       # Wasomi.Learning's @never_started_touches/@gone_quiet_touches) —
+       # one crontab entry per touch, staggered 15 minutes apart so they
+       # never overlap. Touches 2/3 are gated on the previous touch having
+       # already fired, so running all three daily is harmless: only the
+       # touch(es) actually due that day find any candidates.
+       {"0 9 * * *", Wasomi.Notifications.Workers.SendNeverStartedReengagement,
+        args: %{"touch" => 1}},
+       {"15 9 * * *", Wasomi.Notifications.Workers.SendNeverStartedReengagement,
+        args: %{"touch" => 2}},
+       {"30 9 * * *", Wasomi.Notifications.Workers.SendNeverStartedReengagement,
+        args: %{"touch" => 3}},
+       {"45 9 * * *", Wasomi.Notifications.Workers.SendGoneQuietReengagement,
+        args: %{"touch" => 1}},
+       {"0 10 * * *", Wasomi.Notifications.Workers.SendGoneQuietReengagement,
+        args: %{"touch" => 2}},
+       {"15 10 * * *", Wasomi.Notifications.Workers.SendGoneQuietReengagement,
+        args: %{"touch" => 3}}
      ]},
     # Without this, a job that's stuck `executing` (most commonly: the
     # dev/prod node restarted mid-job, orphaning its DB row with no

@@ -173,6 +173,16 @@ body {
   opacity: 0;
 }
 
+/* Collapsed sidebar has no room for the numbered badge — a plain dot
+   still signals unread notifications at a glance. */
+.app-sidebar.is-collapsed .sidebar-notification-count {
+  display: none;
+}
+
+.app-sidebar.is-collapsed .sidebar-notification-dot {
+  display: block;
+}
+
 .app-sidebar.is-collapsed .sidebar-row {
   gap: 0;
 }

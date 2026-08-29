@@ -1328,6 +1328,15 @@ defmodule Wasomi.AccountsTest do
       assert Accounts.onboarding_completed?(done)
       assert Accounts.get_user!(user.id).onboarding_completed_at == done.onboarding_completed_at
     end
+
+    test "the product tour is separately tracked", %{user: user} do
+      refute Accounts.tour_completed?(user)
+
+      {:ok, done} = Accounts.complete_user_tour(user)
+
+      assert %DateTime{} = done.tour_completed_at
+      assert Accounts.tour_completed?(done)
+    end
   end
 
   describe "list_users_page/1" do

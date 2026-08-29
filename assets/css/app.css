@@ -372,3 +372,38 @@ body {
 .phone-field.phone-invalid .iti__tel-input {
   border-color: #fb7185;
 }
+
+/* ==========================================
+   Product tour (driver.js) — Wasomi look & feel
+   ========================================== */
+.driver-popover,
+.driver-popover *,
+.driver-popover button {
+  font-family: "Outfit", "ui-sans-serif", "system-ui", "sans-serif";
+}
+
+.driver-popover {
+  border-radius: 1rem;
+  color: #404040;
+}
+
+.driver-popover-title {
+  color: #012c6a;
+}
+
+.driver-popover-progress-text {
+  color: #a3a3a3;
+}
+
+.driver-popover-navigation-btns button {
+  border-radius: 9999px;
+  border: 1px solid #01326a26;
+  background: #ffffff;
+  color: #012c6a;
+  font-weight: 500;
+}
+
+.driver-popover-navigation-btns button:hover {
+  background: #fff7ed;
+  color: #f97316;
+}

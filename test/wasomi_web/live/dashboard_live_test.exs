@@ -49,6 +49,18 @@ defmodule WasomiWeb.DashboardLiveTest do
     refute html =~ "Welcome back"
   end
 
+  test "offers an opt-in tour prompt that goes away once answered", %{conn: conn, user: user} do
+    {:ok, view, html} = live(conn, ~p"/dashboard")
+    assert html =~ "show you around"
+    assert has_element?(view, "#product-tour", "Show me around")
+
+    view |> element("button", "I'll find my way") |> render_click()
+
+    refute has_element?(view, "#product-tour")
+    refute render(view) =~ "show you around"
+    assert Wasomi.Accounts.tour_completed?(Wasomi.Accounts.get_user!(user.id))
+  end
+
   test "offers the full catalog when more starter courses exist than are shown", %{conn: conn} do
     for n <- 1..7, do: course_fixture(status: :published, title: "Starter #{n}", position: n)
 

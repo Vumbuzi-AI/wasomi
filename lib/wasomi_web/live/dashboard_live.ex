@@ -1,7 +1,7 @@
 defmodule WasomiWeb.DashboardLive do
   use WasomiWeb, :live_view
 
-  alias Wasomi.{Catalog, Certificates, Enrollments, Learning, Notifications, Payments}
+  alias Wasomi.{Accounts, Catalog, Certificates, Enrollments, Learning, Notifications, Payments}
 
   @impl true
   def mount(_params, _session, socket) do
@@ -14,6 +14,16 @@ defmodule WasomiWeb.DashboardLive do
      socket
      |> assign(:page_title, "My learning")
      |> refresh_dashboard()}
+  end
+
+  @impl true
+  def handle_event("tour_completed", _params, socket) do
+    {:ok, user} = Accounts.complete_user_tour(socket.assigns.current_user)
+
+    {:noreply,
+     socket
+     |> assign(:current_user, user)
+     |> assign(:tour_completed?, true)}
   end
 
   @impl true
@@ -52,6 +62,37 @@ defmodule WasomiWeb.DashboardLive do
           >
             {@welcome_state.action.label}
           </.link>
+
+          <div
+            :if={@first_run? and not @tour_completed?}
+            class="mt-8 flex flex-wrap items-center justify-between gap-4 rounded-3xl border border-ink/10 bg-white px-5 py-4 shadow-card"
+          >
+            <div class="flex items-center gap-3">
+              <span class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-ink text-white">
+                <.icon name="hero-sparkles" class="h-5 w-5" />
+              </span>
+              <p class="text-sm font-medium text-ink">
+                New here? Let us show you around — takes about 30 seconds.
+              </p>
+            </div>
+            <div class="flex shrink-0 items-center gap-2">
+              <button
+                id="product-tour"
+                type="button"
+                phx-hook="ProductTour"
+                class="rounded-full bg-primary px-5 py-2 text-sm font-semibold text-white transition hover:bg-ink"
+              >
+                Show me around
+              </button>
+              <button
+                type="button"
+                phx-click="tour_completed"
+                class="rounded-full px-4 py-2 text-sm font-medium text-body transition hover:text-ink"
+              >
+                I'll find my way
+              </button>
+            </div>
+          </div>
 
           <div :if={!@first_run?} id="dashboard-stats" class="mt-8 grid gap-4 sm:grid-cols-3">
             <.learner_stat_card
@@ -249,8 +290,7 @@ defmodule WasomiWeb.DashboardLive do
     certificates = Certificates.list_for_user(user)
     receipts = Payments.list_receipts_for_user(user)
 
-    # A learner with no enrollments, certificates or receipts has never used
-    # the platform — show them courses to start, not empty progress metrics.
+    # No enrollments/certificates/receipts: show courses to start, not zeroed metrics.
     first_run? = course_cards == [] and certificates == [] and receipts == []
     published = if first_run?, do: Catalog.list_published_courses(), else: []
     starter_limit = 6
@@ -264,6 +304,7 @@ defmodule WasomiWeb.DashboardLive do
     |> assign(:first_run?, first_run?)
     |> assign(:starter_courses, Enum.take(published, starter_limit))
     |> assign(:more_courses?, length(published) > starter_limit)
+    |> assign(:tour_completed?, Accounts.tour_completed?(user))
     |> assign_welcome_state()
   end
 

@@ -20,8 +20,7 @@ defmodule WasomiWeb.WelcomeLive do
     {"Lead / Executive", :lead_executive}
   ]
 
-  # Skip stays hidden until the learner has had a moment with the form —
-  # or starts filling it in — so the first instinct is to engage, not bail.
+  # Skip is withheld until the learner engages or this elapses.
   @skip_delay_ms 12_000
 
   def mount(_params, _session, socket) do

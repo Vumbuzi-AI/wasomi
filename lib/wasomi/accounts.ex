@@ -710,6 +710,21 @@ defmodule Wasomi.Accounts do
   def onboarding_completed?(%User{onboarding_completed_at: nil}), do: false
   def onboarding_completed?(%User{}), do: true
 
+  @doc """
+  Marks the opt-in product tour as taken (finished or dismissed).
+  """
+  def complete_user_tour(%User{} = user) do
+    user
+    |> User.tour_completed_changeset()
+    |> Repo.update()
+  end
+
+  @doc """
+  Whether the learner has taken (or dismissed) the product tour.
+  """
+  def tour_completed?(%User{tour_completed_at: nil}), do: false
+  def tour_completed?(%User{}), do: true
+
   ## Session
 
   @doc """

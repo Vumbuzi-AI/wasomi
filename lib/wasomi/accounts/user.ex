@@ -40,6 +40,7 @@ defmodule Wasomi.Accounts.User do
 
     field :last_signed_in_at, :utc_datetime
     field :onboarding_completed_at, :utc_datetime
+    field :tour_completed_at, :utc_datetime
 
     timestamps(type: :utc_datetime)
   end
@@ -648,6 +649,11 @@ defmodule Wasomi.Accounts.User do
   @doc false
   def onboarding_completed_changeset(user) do
     change(user, onboarding_completed_at: DateTime.utc_now() |> DateTime.truncate(:second))
+  end
+
+  @doc false
+  def tour_completed_changeset(user) do
+    change(user, tour_completed_at: DateTime.utc_now() |> DateTime.truncate(:second))
   end
 
   @doc """

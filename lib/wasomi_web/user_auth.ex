@@ -180,10 +180,7 @@ defmodule WasomiWeb.UserAuth do
     end
   end
 
-  # Sends a confirmed learner who has not yet been through the one-time
-  # onboarding step to `/welcome`. Runs after `:ensure_authenticated`, so
-  # `current_user` is already assigned; existing accounts were backfilled and
-  # admins are exempt.
+  # Routes a learner who hasn't done first-run onboarding to `/welcome`.
   def on_mount(:ensure_onboarded, _params, _session, socket) do
     case socket.assigns[:current_user] do
       %{role: :learner, onboarding_completed_at: nil} ->

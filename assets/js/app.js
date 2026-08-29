@@ -22,6 +22,7 @@ import { Socket } from "phoenix";
 import { LiveSocket } from "phoenix_live_view";
 import topbar from "../vendor/topbar";
 import Chart from "chart.js/auto";
+import Cropper from "cropperjs";
 
 const Hooks = {};
 
@@ -1620,19 +1621,75 @@ Hooks.ScaledPreview = {
   designWidth: 1280,
   maxHeight: 600,
 
-  // The template hashes the preview content into this element's id, so any
-  // real change is a fresh mounted() (node replacement), never a patch —
-  // avoids an in-place `srcdoc` update orphaning this listener.
+  // Two modes. With `data-fixed-aspect` (height ÷ width): the iframe is
+  // phx-update="ignore" and sized/scaled here from container width alone;
+  // its document rides on `data-srcdoc` (which LiveView patches) and
+  // updated() re-pushes it — real-time, no scrollHeight measurement.
+  // Without it: the legacy path that measures the rendered content and is
+  // remounted per change via a content-hashed id (per-step slot preview).
   mounted() {
     this.iframe = this.el.querySelector("iframe");
-    this.iframe.style.width = `${this.designWidth}px`;
     this.iframe.style.border = "0";
     this.iframe.style.transformOrigin = "top left";
-    this.iframe.addEventListener("load", () => this.scheduleFit());
+    this.iframe.style.width = `${this.designWidth}px`;
 
-    this.ro = new ResizeObserver(() => this.scheduleFit());
-    this.ro.observe(this.el);
+    this.fixedAspect = this.el.dataset.fixedAspect
+      ? Number(this.el.dataset.fixedAspect)
+      : null;
+
+    if (this.fixedAspect) {
+      this.iframe.style.height = `${Math.round(this.designWidth * this.fixedAspect)}px`;
+      this.renderDoc();
+      this.fitFixed();
+      this.ro = new ResizeObserver(() => this.fitFixed());
+      this.ro.observe(this.el);
+    } else {
+      this.iframe.addEventListener("load", () => this.onFrameLoad());
+      this.ro = new ResizeObserver(() => this.scheduleFit());
+      this.ro.observe(this.el);
+      this.scheduleFit();
+    }
+  },
+
+  updated() {
+    if (this.fixedAspect) {
+      this.renderDoc();
+      this.fitFixed();
+    }
+  },
+
+  renderDoc() {
+    const doc = this.el.dataset.srcdoc || "";
+    if (doc !== this._lastDoc) {
+      this.iframe.srcdoc = doc;
+      this._lastDoc = doc;
+    }
+  },
+
+  fitFixed() {
+    const width = this.el.clientWidth;
+    if (!width) return;
+    const scale = width / this.designWidth;
+    this.iframe.style.transform = `scale(${scale})`;
+    this.el.style.height = `${Math.round(this.designWidth * this.fixedAspect * scale)}px`;
+  },
+
+  // Legacy measured path (per-step slot preview): re-fit whenever an inner
+  // image loads (they can 404 briefly post-upload) or the body reflows.
+  onFrameLoad() {
     this.scheduleFit();
+    try {
+      const doc = this.iframe.contentDocument;
+      doc.querySelectorAll("img").forEach((img) => {
+        img.addEventListener("load", () => this.scheduleFit());
+      });
+      if (doc.body) {
+        this.innerRo = new ResizeObserver(() => this.scheduleFit());
+        this.innerRo.observe(doc.body);
+      }
+    } catch {
+      // cross-origin somehow — nothing to observe
+    }
   },
 
   // Dimensions can be 0 for a frame or two right after "load"/ResizeObserver
@@ -1669,6 +1726,7 @@ Hooks.ScaledPreview = {
 
   destroyed() {
     if (this.ro) this.ro.disconnect();
+    if (this.innerRo) this.innerRo.disconnect();
   },
 };
 
@@ -1902,6 +1960,53 @@ Hooks.RevealOnScroll = {
   },
 };
 
+// Crossfades between `[data-hero-slide]` images on an interval, with
+// `[data-hero-dot]` buttons to jump directly to one (only mounted when
+// there's more than one hero image — see HomeComponents.hero/1).
+Hooks.HeroCarousel = {
+  mounted() {
+    this.slides = Array.from(this.el.querySelectorAll("[data-hero-slide]"));
+    this.dots = Array.from(this.el.querySelectorAll("[data-hero-dot]"));
+    this.active = 0;
+
+    // `animate-image-in`'s `forwards` fill-mode pins slide 0's opacity to 1
+    // permanently once the entrance animation finishes, which would fight
+    // every later crossfade — drop it the moment that one-time job is done.
+    this.slides[0].addEventListener(
+      "animationend",
+      () => this.slides[0].classList.remove("animate-image-in"),
+      { once: true },
+    );
+
+    this.dots.forEach((dot, index) => {
+      dot.addEventListener("click", () => this.goTo(index));
+    });
+
+    this.timer = setInterval(() => this.goTo(this.active + 1), 5500);
+  },
+
+  goTo(index) {
+    const next = ((index % this.slides.length) + this.slides.length) % this.slides.length;
+    if (next === this.active) return;
+
+    this.slides[this.active].classList.replace("opacity-100", "opacity-0");
+    this.slides[next].classList.replace("opacity-0", "opacity-100");
+
+    this.dots[this.active].classList.replace("w-6", "w-2");
+    this.dots[this.active].classList.replace("bg-white", "bg-white/40");
+    this.dots[next].classList.replace("w-2", "w-6");
+    this.dots[next].classList.replace("bg-white/40", "bg-white");
+
+    this.active = next;
+    clearInterval(this.timer);
+    this.timer = setInterval(() => this.goTo(this.active + 1), 5500);
+  },
+
+  destroyed() {
+    clearInterval(this.timer);
+  },
+};
+
 const EYE_OPEN =
   '<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"/><circle cx="12" cy="12" r="3"/>';
 const EYE_CLOSED =
@@ -1959,6 +2064,186 @@ Hooks.QuizCountdown = {
     if (remainingMs <= 0) {
       window.clearInterval(this.timer);
     }
+  },
+};
+
+// A picked file is cropped/compressed client-side, then injected into the
+// real live_file_input via DataTransfer — so LiveView's upload (incl. its
+// max_file_size check) only ever sees the processed result.
+const IMAGE_UPLOAD_MAX_ATTEMPTS = 6;
+
+function loadImageFromFile(file) {
+  const objectUrl = URL.createObjectURL(file);
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve({ img, objectUrl });
+    img.onerror = reject;
+    img.src = objectUrl;
+  });
+}
+
+function canvasToBlob(canvas, type, quality) {
+  return new Promise((resolve) => canvas.toBlob(resolve, type, quality));
+}
+
+function jpegName(name) {
+  return name.replace(/\.[^.]+$/, "") + ".jpg";
+}
+
+// Re-encodes as JPEG at decreasing quality, then falls back to shrinking
+// dimensions, until the result fits under maxBytes (or attempts run out).
+async function compressToLimit(file, maxBytes) {
+  const { img, objectUrl } = await loadImageFromFile(file);
+  try {
+    let width = img.naturalWidth;
+    let height = img.naturalHeight;
+    let quality = 0.85;
+    let blob = null;
+
+    for (let attempt = 0; attempt < IMAGE_UPLOAD_MAX_ATTEMPTS; attempt++) {
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+      blob = await canvasToBlob(canvas, "image/jpeg", quality);
+
+      if (!blob || blob.size <= maxBytes) break;
+
+      if (quality > 0.5) {
+        quality -= 0.1;
+      } else {
+        width = Math.round(width * 0.85);
+        height = Math.round(height * 0.85);
+      }
+    }
+
+    return blob ? new File([blob], jpegName(file.name), { type: "image/jpeg" }) : file;
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+function compressIfNeeded(file, maxBytes) {
+  return file.size > maxBytes ? compressToLimit(file, maxBytes) : Promise.resolve(file);
+}
+
+function buildCropOverlay() {
+  const root = document.createElement("div");
+  root.className = "fixed inset-0 z-[70] flex items-center justify-center bg-zinc-900/70 p-4";
+
+  const panel = document.createElement("div");
+  panel.className = "flex w-full max-w-lg flex-col gap-4 rounded-2xl bg-white p-5 shadow-lg";
+
+  const title = document.createElement("p");
+  title.className = "text-sm font-semibold text-ink";
+  title.textContent = "Crop to fit the hero banner (16:9)";
+
+  const stage = document.createElement("div");
+  stage.className = "max-h-[60vh] overflow-hidden rounded-xl bg-zinc-100";
+
+  const image = document.createElement("img");
+  image.className = "block max-w-full";
+  stage.appendChild(image);
+
+  const actions = document.createElement("div");
+  actions.className = "flex justify-end gap-2";
+
+  const cancelBtn = document.createElement("button");
+  cancelBtn.type = "button";
+  cancelBtn.textContent = "Cancel";
+  cancelBtn.className =
+    "rounded-full border border-black/10 px-4 py-2 text-xs font-semibold text-muted hover:bg-surface hover:text-ink";
+
+  const confirmBtn = document.createElement("button");
+  confirmBtn.type = "button";
+  confirmBtn.textContent = "Apply crop";
+  confirmBtn.className =
+    "rounded-full bg-ink px-4 py-2 text-xs font-semibold text-white hover:bg-primary";
+
+  actions.append(cancelBtn, confirmBtn);
+  panel.append(title, stage, actions);
+  root.appendChild(panel);
+
+  return { root, image, cancelBtn, confirmBtn };
+}
+
+function cropToAspectRatio(file, aspectRatio) {
+  return new Promise((resolve, reject) => {
+    const overlay = buildCropOverlay();
+    document.body.appendChild(overlay.root);
+
+    const objectUrl = URL.createObjectURL(file);
+    let cropper;
+
+    const cleanup = () => {
+      if (cropper) cropper.destroy();
+      URL.revokeObjectURL(objectUrl);
+      overlay.root.remove();
+    };
+
+    overlay.image.addEventListener("load", () => {
+      cropper = new Cropper(overlay.image, {
+        aspectRatio,
+        viewMode: 1,
+        autoCropArea: 1,
+        background: false,
+      });
+    });
+    overlay.image.src = objectUrl;
+
+    overlay.cancelBtn.addEventListener("click", () => {
+      cleanup();
+      reject(new Error("cancelled"));
+    });
+
+    overlay.confirmBtn.addEventListener("click", () => {
+      cropper.getCroppedCanvas().toBlob(
+        (blob) => {
+          cleanup();
+          if (!blob) return reject(new Error("crop failed"));
+          resolve(new File([blob], jpegName(file.name), { type: "image/jpeg" }));
+        },
+        "image/jpeg",
+        0.92,
+      );
+    });
+  });
+}
+
+Hooks.ImageUploadProcessor = {
+  mounted() {
+    this.picker = this.el.querySelector('[data-role="picker"]');
+    // The real LiveView file input lives OUTSIDE this element (this element is
+    // phx-update="ignore"); find it by the id LiveView gives it (@upload.ref).
+    this.liveInput = document.getElementById(this.el.dataset.liveInput);
+    this.aspectRatio = this.el.dataset.aspectRatio ? Number(this.el.dataset.aspectRatio) : null;
+    this.maxBytes = Number(this.el.dataset.maxBytes);
+    this.onPick = (event) => this.handlePick(event);
+    this.picker.addEventListener("change", this.onPick);
+  },
+  destroyed() {
+    this.picker?.removeEventListener("change", this.onPick);
+  },
+  async handlePick(event) {
+    const file = event.target.files[0];
+    event.target.value = "";
+    if (!file) return;
+
+    try {
+      const cropped = this.aspectRatio ? await cropToAspectRatio(file, this.aspectRatio) : file;
+      const processed = await compressIfNeeded(cropped, this.maxBytes);
+      this.injectIntoLiveInput(processed);
+    } catch (err) {
+      if (err && err.message === "cancelled") return;
+      console.error("Image processing failed, uploading the original file:", err);
+      this.injectIntoLiveInput(file);
+    }
+  },
+  injectIntoLiveInput(file) {
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    this.liveInput.files = transfer.files;
+    this.liveInput.dispatchEvent(new Event("change", { bubbles: true }));
   },
 };
 
@@ -2676,6 +2961,20 @@ let liveSocket = new LiveSocket("/live", Socket, {
   params: { _csrf_token: csrfToken },
   hooks: Hooks,
   uploaders: { R2: R2Uploader },
+  dom: {
+    // Phoenix's <.modal> reveals itself once via a phx-mounted `display`
+    // style; a later patch would strip it and re-hide an open modal (e.g.
+    // when an upload finishes). Carry that JS style forward.
+    onBeforeElUpdated(from, to) {
+      if (
+        /(-modal)(-container|-bg)?$/.test(from.id || "") &&
+        from.getAttribute("style") &&
+        !to.getAttribute("style")
+      ) {
+        to.setAttribute("style", from.getAttribute("style"));
+      }
+    },
+  },
 });
 
 // Show progress bar on live navigation and form submits

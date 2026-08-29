@@ -35,7 +35,7 @@ defmodule Wasomi.Content.LandingPreview do
   edited, its persisted/default value otherwise).
   """
   def render_html(:hero, images) do
-    render_document(hero(%{images: images}))
+    render_document(hero(%{images: images}), hero_carousel_script())
   end
 
   def render_html(slot, images) do
@@ -43,7 +43,7 @@ defmodule Wasomi.Content.LandingPreview do
     render_document(gs1_in_action(%{images: images}), select_step_script(step))
   end
 
-  defp render_document(section, extra_script \\ "") do
+  defp render_document(section, extra_script) do
     section_html = section |> Safe.to_iodata() |> IO.iodata_to_binary()
     document(section_html, extra_script <> image_retry_script())
   end
@@ -54,6 +54,43 @@ defmodule Wasomi.Content.LandingPreview do
   # editor. Those are Phoenix hooks, though, and there's no LiveSocket
   # running inside this `srcdoc` document to attach one to — so this is the
   # same retry-with-backoff idea as plain, self-contained JS instead.
+  # Phoenix hooks don't run inside a `srcdoc` document, so mirror the real
+  # homepage's `Hooks.HeroCarousel` as plain JS (faster interval). No-op for ≤1 image.
+  defp hero_carousel_script do
+    """
+    <script>
+      (function () {
+        var root = document.getElementById("hero-carousel");
+        if (!root) return;
+        var slides = Array.prototype.slice.call(root.querySelectorAll("[data-hero-slide]"));
+        var dots = Array.prototype.slice.call(root.querySelectorAll("[data-hero-dot]"));
+        if (slides.length < 2) return;
+        var active = 0;
+        function goTo(i) {
+          var next = ((i % slides.length) + slides.length) % slides.length;
+          if (next === active) return;
+          slides[active].classList.replace("opacity-100", "opacity-0");
+          slides[next].classList.replace("opacity-0", "opacity-100");
+          if (dots[active]) {
+            dots[active].classList.replace("w-6", "w-2");
+            dots[active].classList.replace("bg-white", "bg-white/40");
+          }
+          if (dots[next]) {
+            dots[next].classList.replace("w-2", "w-6");
+            dots[next].classList.replace("bg-white/40", "bg-white");
+          }
+          active = next;
+        }
+        slides[0].classList.remove("animate-image-in");
+        dots.forEach(function (dot, i) {
+          dot.addEventListener("click", function () { goTo(i); });
+        });
+        setInterval(function () { goTo(active + 1); }, 3000);
+      })();
+    </script>
+    """
+  end
+
   defp image_retry_script do
     """
     <script>

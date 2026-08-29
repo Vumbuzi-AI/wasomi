@@ -1,4 +1,11 @@
-defmodule WasomiWeb.NotificationsLive do
+defmodule WasomiWeb.AdminLive.Notifications do
+  @moduledoc """
+  In-app notification inbox for administrators. Mirrors the learner
+  `NotificationsLive` and shows every notification the admin receives —
+  operational alerts such as new student payments, plus channel mentions
+  and announcements from courses they take part in.
+  """
+
   use WasomiWeb, :live_view
 
   alias Wasomi.Notifications
@@ -36,20 +43,17 @@ defmodule WasomiWeb.NotificationsLive do
     end
   end
 
-  # A plain `navigate` link would never fire an event at all, leaving an
-  # acted-on notification stuck "unread" forever — visiting the course is
-  # every bit as much "handled" as clicking Dismiss.
-  def handle_event("visit_course", %{"id" => id}, socket) do
-    user = socket.assigns.current_user
+  def handle_event("mark_all_read", _params, socket) do
+    Notifications.mark_all_read_for_user(socket.assigns.current_user)
+    {:noreply, refresh_notifications(socket)}
+  end
 
-    case Notifications.get_notification(user, id) do
+  # Following a notification's CTA counts as handling it, same as Dismiss.
+  def handle_event("visit_course", %{"id" => id}, socket) do
+    case Notifications.get_notification(socket.assigns.current_user, id) do
       %{course: %{slug: _}} = notification ->
         Notifications.mark_read(notification)
-
-        {:noreply,
-         push_navigate(socket,
-           to: NotificationCTA.destination(notification, user.role == :admin)
-         )}
+        {:noreply, push_navigate(socket, to: NotificationCTA.destination(notification, true))}
 
       _ ->
         {:noreply, socket}
@@ -59,33 +63,27 @@ defmodule WasomiWeb.NotificationsLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <.student_layout active={:notifications} current_user={@current_user}>
-      <div class="px-5 py-8 lg:px-8 lg:py-10">
-        <section class="rounded-[1.75rem] border border-black/5 bg-white px-6 py-8 shadow-sm sm:px-8">
-          <div class="flex flex-wrap items-center justify-between gap-5">
-            <div>
-              <h1 class="text-4xl font-semibold leading-tight text-ink sm:text-5xl">
-                Notifications
-              </h1>
-              <p class="mt-3 max-w-2xl text-lg text-body">
-                Keep track of course access, learning nudges and account updates.
-              </p>
-            </div>
-            <span class="grid h-14 w-14 place-items-center rounded-full bg-mint text-primary">
-              <.icon name="hero-bell" class="h-7 w-7" />
-            </span>
-          </div>
-        </section>
+    <.admin_layout active={:notifications} current_user={@current_user}>
+      <div class="w-full space-y-6 px-5 py-8 lg:px-8">
+        <.page_header title="Notifications">
+          <:subtitle>Student payments, channel mentions and other platform activity.</:subtitle>
+          <:actions>
+            <button
+              :if={@unread_count > 0}
+              type="button"
+              phx-click="mark_all_read"
+              class="rounded-full border border-black/10 px-4 py-2 text-sm font-semibold text-ink transition hover:bg-surface"
+            >
+              Mark all read
+            </button>
+          </:actions>
+        </.page_header>
 
-        <section class="mt-6 rounded-[1.75rem] border border-black/5 bg-white p-6 shadow-sm sm:p-8">
+        <section class="rounded-3xl border border-black/5 bg-white p-6 shadow-card sm:p-8">
           <div class="flex flex-wrap items-end justify-between gap-4">
             <div>
-              <p class="text-sm font-semibold uppercase tracking-wider text-primary">
-                Inbox
-              </p>
-              <h2 class="mt-2 text-2xl font-semibold text-ink">
-                {@unread_count} unread
-              </h2>
+              <p class="text-sm font-semibold uppercase tracking-wider text-primary">Inbox</p>
+              <h2 class="mt-2 text-2xl font-semibold text-ink">{@unread_count} unread</h2>
             </div>
           </div>
 
@@ -98,10 +96,8 @@ defmodule WasomiWeb.NotificationsLive do
               id={"notification-#{notification.id}"}
               class={[
                 "flex flex-wrap items-start justify-between gap-4 px-5 py-4 transition sm:px-6",
-                unread?(notification) &&
-                  "bg-mint/20",
-                !unread?(notification) &&
-                  "bg-white"
+                unread?(notification) && "bg-mint/20",
+                !unread?(notification) && "bg-white"
               ]}
             >
               <div class="min-w-0 flex-1">
@@ -113,9 +109,7 @@ defmodule WasomiWeb.NotificationsLive do
                   ]}>
                     {status_label(notification)}
                   </span>
-                  <span class="text-xs text-muted">
-                    {format_datetime(notification.inserted_at)}
-                  </span>
+                  <span class="text-xs text-muted">{format_datetime(notification.inserted_at)}</span>
                 </div>
                 <h3 class="mt-2 text-base font-semibold text-ink">{notification.title}</h3>
                 <p class="mt-1 text-sm leading-5 text-body">{notification.body}</p>
@@ -150,18 +144,17 @@ defmodule WasomiWeb.NotificationsLive do
             </span>
             <h3 class="mt-5 text-xl font-semibold text-ink">Nothing to catch up on.</h3>
             <p class="mx-auto mt-2 max-w-lg text-body">
-              Course updates and learning reminders will appear here when there is something new.
+              New student payments, channel mentions and platform activity will show up here.
             </p>
           </div>
         </section>
       </div>
-    </.student_layout>
+    </.admin_layout>
     """
   end
 
   defp refresh_notifications(socket) do
-    user = socket.assigns.current_user
-    notifications = Notifications.list_for_user(user)
+    notifications = Notifications.list_for_user(socket.assigns.current_user)
 
     socket
     |> assign(:notifications, notifications)
@@ -170,13 +163,10 @@ defmodule WasomiWeb.NotificationsLive do
 
   defp unread?(notification), do: is_nil(notification.read_at)
 
-  defp status_label(notification) do
-    if unread?(notification), do: "Unread", else: "Read"
-  end
+  defp status_label(notification), do: if(unread?(notification), do: "Unread", else: "Read")
 
-  defp format_datetime(%DateTime{} = datetime) do
-    Calendar.strftime(datetime, "%b %-d, %Y at %-I:%M %p")
-  end
+  defp format_datetime(%DateTime{} = datetime),
+    do: Calendar.strftime(datetime, "%b %-d, %Y at %-I:%M %p")
 
   defp format_datetime(_datetime), do: "Date unavailable"
 end

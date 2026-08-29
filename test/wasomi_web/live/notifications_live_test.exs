@@ -177,7 +177,9 @@ defmodule WasomiWeb.NotificationsLiveTest do
     assert to == ~p"/learn/courses/#{course.slug}?#{%{tab: "discussion", msg: message.id}}"
   end
 
-  test "a channel-mention CTA sends an admin to the preview player", %{conn: conn} do
+  test "a channel-mention CTA in the admin inbox sends an admin to the discussions hub", %{
+    conn: conn
+  } do
     admin = admin_fixture(%{name: "Wasomi Admin"})
     other = Wasomi.AccountsFixtures.user_fixture(%{name: "One Student"})
     course = course_fixture(status: :published, title: "Admin mention course")
@@ -201,7 +203,7 @@ defmodule WasomiWeb.NotificationsLiveTest do
       Wasomi.Notifications.list_for_user(admin)
       |> Enum.filter(&(&1.kind == :channel_mention))
 
-    {:ok, view, _html} = live(log_in_user(conn, admin), ~p"/notifications")
+    {:ok, view, _html} = live(log_in_user(conn, admin), ~p"/admin/notifications")
 
     assert {:error, {:live_redirect, %{to: to}}} =
              view

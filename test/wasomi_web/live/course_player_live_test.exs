@@ -953,7 +953,7 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
       course = course_fixture(status: :published)
       conn = build_conn() |> log_in_user(Wasomi.AccountsFixtures.user_fixture())
 
-      assert {:error, {:redirect, %{to: "/"}}} =
+      assert {:error, {:redirect, %{to: "/dashboard"}}} =
                live(conn, ~p"/admin/courses/#{course.slug}/preview")
     end
 

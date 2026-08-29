@@ -47,7 +47,7 @@ defmodule WasomiWeb.Admin.ExportControllerTest do
 
     test "redirects a non-admin learner", %{conn: conn} do
       conn = conn |> log_in_user(user_fixture()) |> get(~p"/admin/exports/enrollments")
-      assert redirected_to(conn) == ~p"/"
+      assert redirected_to(conn) == ~p"/dashboard"
     end
   end
 

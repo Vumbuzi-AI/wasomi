@@ -108,14 +108,6 @@ defmodule WasomiWeb.AdminComponents do
 
         <div class="border-t border-black/5 p-4">
           <.link
-            navigate={~p"/dashboard"}
-            class="sidebar-row group relative mb-2 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-body transition hover:bg-surface hover:text-primary"
-          >
-            <.icon name="hero-arrow-uturn-left" class="h-5 w-5 shrink-0" />
-            <span class="sidebar-label inline-block">Back to learner area</span>
-            <.sidebar_tooltip label="Back to learner area" />
-          </.link>
-          <.link
             navigate={~p"/admin/settings"}
             class="sidebar-row group relative flex items-center gap-3 rounded-2xl bg-surface px-3 py-3 transition hover:bg-mint"
           >

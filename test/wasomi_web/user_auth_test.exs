@@ -241,6 +241,40 @@ defmodule WasomiWeb.UserAuthTest do
     end
   end
 
+  describe "on_mount :redirect_admins_from_learner_area" do
+    test "silently sends admins to /admin", %{conn: conn, user: user} do
+      {:ok, admin} = Accounts.update_user_role(user, :admin)
+      user_token = Accounts.generate_user_session_token(admin)
+      session = conn |> put_session(:user_token, user_token) |> get_session()
+
+      assert {:halt, updated_socket} =
+               UserAuth.on_mount(
+                 :redirect_admins_from_learner_area,
+                 %{},
+                 session,
+                 live_socket()
+               )
+
+      assert {:redirect, %{to: "/admin"}} = updated_socket.redirected
+      assert updated_socket.assigns.flash == %{}
+    end
+
+    test "lets learners through", %{conn: conn, user: user} do
+      user_token = Accounts.generate_user_session_token(user)
+      session = conn |> put_session(:user_token, user_token) |> get_session()
+
+      assert {:cont, updated_socket} =
+               UserAuth.on_mount(
+                 :redirect_admins_from_learner_area,
+                 %{},
+                 session,
+                 %LiveView.Socket{}
+               )
+
+      assert updated_socket.assigns.current_user.id == user.id
+    end
+  end
+
   describe "on_mount :redirect_if_user_is_authenticated" do
     test "redirects if there is an authenticated  user ", %{conn: conn, user: user} do
       user_token = Accounts.generate_user_session_token(user)
@@ -373,7 +407,7 @@ defmodule WasomiWeb.UserAuthTest do
                "Please confirm your email before continuing."
     end
 
-    test "require_admin/2 rejects learners", %{conn: conn, user: user} do
+    test "require_admin/2 quietly returns learners to their own area", %{conn: conn, user: user} do
       conn =
         conn
         |> fetch_flash()
@@ -381,7 +415,8 @@ defmodule WasomiWeb.UserAuthTest do
         |> UserAuth.require_admin([])
 
       assert conn.halted
-      assert redirected_to(conn) == ~p"/"
+      assert redirected_to(conn) == ~p"/dashboard"
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) == nil
     end
 
     test "on_mount :ensure_admin allows administrators", %{conn: conn, user: user} do
@@ -395,13 +430,18 @@ defmodule WasomiWeb.UserAuthTest do
       assert socket.assigns.current_user.role == :admin
     end
 
-    test "on_mount :ensure_admin rejects learners", %{conn: conn, user: user} do
+    test "on_mount :ensure_admin quietly returns learners to their own area", %{
+      conn: conn,
+      user: user
+    } do
       user_token = Accounts.generate_user_session_token(user)
       session = conn |> put_session(:user_token, user_token) |> get_session()
 
-      socket = live_socket()
+      assert {:halt, socket} =
+               UserAuth.on_mount(:ensure_admin, %{}, session, live_socket())
 
-      assert {:halt, _socket} = UserAuth.on_mount(:ensure_admin, %{}, session, socket)
+      assert {:redirect, %{to: "/dashboard"}} = socket.redirected
+      assert Phoenix.Flash.get(socket.assigns.flash, :error) == nil
     end
 
     test "on_mount :ensure_admin redirects unconfirmed administrators to confirmation", %{

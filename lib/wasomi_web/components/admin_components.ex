@@ -115,7 +115,10 @@ defmodule WasomiWeb.AdminComponents do
             <span class="sidebar-label inline-block">Back to learner area</span>
             <.sidebar_tooltip label="Back to learner area" />
           </.link>
-          <div class="sidebar-row group relative flex items-center gap-3 rounded-2xl bg-surface px-3 py-3">
+          <.link
+            navigate={~p"/admin/settings"}
+            class="sidebar-row group relative flex items-center gap-3 rounded-2xl bg-surface px-3 py-3 transition hover:bg-mint"
+          >
             <span class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-mint font-semibold uppercase text-primary">
               {String.first(@current_user.name || @current_user.email)}
             </span>
@@ -125,8 +128,8 @@ defmodule WasomiWeb.AdminComponents do
               </p>
               <p class="truncate text-xs text-muted">{@current_user.email}</p>
             </div>
-            <.sidebar_tooltip label={@current_user.name || @current_user.email} />
-          </div>
+            <.sidebar_tooltip label="Account settings" />
+          </.link>
           <.link
             href={~p"/users/log_out"}
             method="delete"

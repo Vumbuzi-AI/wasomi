@@ -133,6 +133,9 @@ defmodule WasomiWeb.Router do
       on_mount: [{WasomiWeb.UserAuth, :ensure_admin}] do
       live "/", AdminLive.Dashboard, :index
 
+      live "/settings", AdminLive.Settings, :edit
+      live "/settings/confirm_email/:token", AdminLive.Settings, :confirm_email
+
       live "/courses", AdminLive.Courses, :index
       live "/courses/new", AdminLive.Courses, :new
       live "/courses/:slug/edit", AdminLive.Courses, :edit

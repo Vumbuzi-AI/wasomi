@@ -28,25 +28,6 @@ defmodule WasomiWeb.CertificateVerificationLiveTest do
     assert html =~ "March 15, 2026"
   end
 
-  test "verifies a module certificate, showing the module's own title", %{conn: conn} do
-    user = user_fixture(name: "Kevin Otieno")
-    course = course_fixture(title: "GS1 Barcoding Fundamentals")
-    course_module = course_module_fixture(course_id: course.id, title: "Barcode Symbology")
-
-    certificate =
-      certificate_fixture(
-        type: :module,
-        user_id: user.id,
-        course_id: course.id,
-        module_id: course_module.id
-      )
-
-    {:ok, _lv, html} = live(conn, ~p"/certificates/253/#{certificate.gdti}")
-
-    assert html =~ "Verified Wasomi Certificate"
-    assert html =~ "Barcode Symbology"
-  end
-
   test "shows a clear not-verified state for an unrecognized GDTI, not an error page", %{
     conn: conn
   } do

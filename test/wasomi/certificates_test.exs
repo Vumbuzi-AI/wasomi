@@ -48,7 +48,7 @@ defmodule Wasomi.CertificatesTest do
            ) == 0
   end
 
-  test "course completion enqueues and issues a course certificate — module completion doesn't get its own",
+  test "course completion enqueues and issues a course certificate while module completion is ignored",
        context do
     expect_render_and_upload(1)
 
@@ -70,8 +70,7 @@ defmodule Wasomi.CertificatesTest do
                IssueCertificate,
                %{
                  user_id: context.user.id,
-                 type: "course",
-                 scope_id: context.course.id
+                 course_id: context.course.id
                },
                []
              )
@@ -91,8 +90,7 @@ defmodule Wasomi.CertificatesTest do
 
     args = %{
       user_id: context.user.id,
-      type: "module",
-      scope_id: context.module.id
+      course_id: context.course.id
     }
 
     assert :ok = Oban.Testing.perform_job(IssueCertificate, args, [])
@@ -102,7 +100,7 @@ defmodule Wasomi.CertificatesTest do
              from(certificate in Certificate,
                where:
                  certificate.user_id == ^context.user.id and
-                   certificate.module_id == ^context.module.id
+                   certificate.course_id == ^context.course.id
              ),
              :count
            ) == 1
@@ -110,7 +108,7 @@ defmodule Wasomi.CertificatesTest do
 
   test "refuses to issue before the scope is complete", context do
     assert {:error, :incomplete} =
-             Certificates.issue(context.user.id, :module, context.module.id)
+             Certificates.issue(context.user.id, context.course.id)
 
     assert Repo.aggregate(Certificate, :count) == 0
   end
@@ -119,8 +117,7 @@ defmodule Wasomi.CertificatesTest do
     certificate =
       certificate_fixture(
         user_id: context.user.id,
-        course_id: context.course.id,
-        module_id: context.module.id
+        course_id: context.course.id
       )
 
     expect(Wasomi.CertificateStorageMock, :signed_url, fn key, opts ->
@@ -169,14 +166,13 @@ defmodule Wasomi.CertificatesTest do
         certificate_fixture(
           user_id: context.user.id,
           course_id: context.course.id,
-          module_id: context.module.id,
-          type: :module
+          type: :course
         )
 
       assert {:ok, found} = Certificates.verify_gdti(certificate.gdti)
       assert found.id == certificate.id
       assert found.user.id == context.user.id
-      assert found.module.id == context.module.id
+      assert found.course.id == context.course.id
     end
 
     test "returns :not_found for a GDTI that doesn't match any certificate" do
@@ -231,7 +227,7 @@ defmodule Wasomi.CertificatesTest do
       complete_lecture_via_progress!(context.user, context.lecture)
 
     assert {:ok, _certificate, :created} =
-             Certificates.issue(context.user.id, :course, context.course.id)
+             Certificates.issue(context.user.id, context.course.id)
   end
 
   test "issue/3 refuses to issue a new certificate when the course has certificates disabled",
@@ -245,7 +241,7 @@ defmodule Wasomi.CertificatesTest do
       complete_lecture_via_progress!(context.user, context.lecture)
 
     assert {:error, :certificates_disabled} =
-             Certificates.issue(context.user.id, :course, context.course.id)
+             Certificates.issue(context.user.id, context.course.id)
 
     assert Repo.aggregate(Certificate, :count) == 0
   end
@@ -268,8 +264,7 @@ defmodule Wasomi.CertificatesTest do
                IssueCertificate,
                %{
                  user_id: context.user.id,
-                 type: "course",
-                 scope_id: context.course.id
+                 course_id: context.course.id
                },
                []
              )

@@ -142,6 +142,8 @@ defmodule WasomiWeb.Router do
       live "/students", AdminLive.Students, :index
       live "/students/:id", AdminLive.StudentShow, :show
 
+      live "/invitations", AdminLive.Invitations, :index
+
       live "/mentors", AdminLive.Mentors, :index
       live "/mentors/new", AdminLive.Mentors, :new
       live "/mentors/:id/edit", AdminLive.Mentors, :edit
@@ -172,6 +174,7 @@ defmodule WasomiWeb.Router do
     live_session :current_user,
       on_mount: [{WasomiWeb.UserAuth, :mount_current_user}] do
       live "/users/confirm", UserConfirmationInstructionsLive, :new
+      live "/admin-invitations/accept/:token", AdminInvitationAcceptLive, :show
     end
   end
 end

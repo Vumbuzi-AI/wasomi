@@ -7,7 +7,7 @@ defmodule Wasomi.Accounts do
   require Logger
   alias Wasomi.Repo
 
-  alias Wasomi.Accounts.{AuditEvent, User, UserNotifier, UserToken}
+  alias Wasomi.Accounts.{AdminInvitation, AuditEvent, User, UserNotifier, UserToken}
   alias Wasomi.Paginate
 
   @confirmation_resend_cooldown_minutes 15
@@ -280,6 +280,166 @@ defmodule Wasomi.Accounts do
   Suggests an email typo correction if the domain closely resembles a known provider.
   """
   defdelegate suggest_email_typo(email), to: Wasomi.Accounts.EmailTypo, as: :suggest
+
+  ## Admin invitations
+
+  @doc "Sends an admin-invitation email; `url` must embed the raw accept token."
+  defdelegate deliver_admin_invitation(email, invited_by_name, url), to: UserNotifier
+
+  @doc "All invitations, newest first, with the inviter/acceptee preloaded."
+  def list_admin_invitations do
+    AdminInvitation
+    |> order_by([i], desc: i.inserted_at, desc: i.id)
+    |> preload([:invited_by, :accepted_by])
+    |> Repo.all()
+  end
+
+  @doc "Fetches one invitation by id, raising if it does not exist."
+  def get_admin_invitation!(id), do: Repo.get!(AdminInvitation, id)
+
+  @doc """
+  The display state of an invitation: `:accepted`, `:revoked`, `:expired`
+  (pending but past `expires_at`), or `:pending`.
+  """
+  def admin_invitation_state(%AdminInvitation{status: :pending, expires_at: expires_at}) do
+    if DateTime.compare(expires_at, DateTime.utc_now()) == :lt, do: :expired, else: :pending
+  end
+
+  def admin_invitation_state(%AdminInvitation{status: status}), do: status
+
+  @doc """
+  Creates a pending admin invitation for `email` from `invited_by`.
+
+  Returns `{:ok, {invitation, raw_token}}` — the raw token goes in the accept
+  link. `{:error, :already_admin}` if the email already belongs to an admin,
+  `{:error, :already_invited}` if a live invite exists, or `{:error, changeset}`.
+  """
+  def invite_admin(email, %User{} = invited_by) do
+    email = email |> to_string() |> String.trim() |> String.downcase()
+
+    cond do
+      match?(%User{role: :admin}, get_user_by_email(email)) ->
+        {:error, :already_admin}
+
+      pending_admin_invitation_for(email) ->
+        {:error, :already_invited}
+
+      true ->
+        {changeset, raw_token} = AdminInvitation.build(email, invited_by)
+
+        case Repo.insert(changeset) do
+          {:ok, invitation} ->
+            log_invite("CREATED", email, invited_by_id: invited_by.id)
+            {:ok, {invitation, raw_token}}
+
+          {:error, %Ecto.Changeset{errors: [email: {_, [constraint: :unique] ++ _}]}} ->
+            {:error, :already_invited}
+
+          {:error, changeset} ->
+            {:error, changeset}
+        end
+    end
+  end
+
+  @doc "Rotates the token and extends the expiry of a pending invitation."
+  def resend_admin_invitation(%AdminInvitation{status: :pending} = invitation) do
+    {changeset, raw_token} = AdminInvitation.refresh(invitation)
+
+    with {:ok, invitation} <- Repo.update(changeset) do
+      log_invite("RESENT", invitation.email, id: invitation.id)
+      {:ok, {invitation, raw_token}}
+    end
+  end
+
+  def resend_admin_invitation(%AdminInvitation{}), do: {:error, :not_pending}
+
+  @doc "Revokes a pending invitation so its link stops working."
+  def revoke_admin_invitation(%AdminInvitation{status: :pending} = invitation) do
+    with {:ok, invitation} <- invitation |> AdminInvitation.revoke_changeset() |> Repo.update() do
+      log_invite("REVOKED", invitation.email, id: invitation.id)
+      {:ok, invitation}
+    end
+  end
+
+  def revoke_admin_invitation(%AdminInvitation{}), do: {:error, :not_pending}
+
+  @doc "The pending, unexpired invitation for a raw token, or `nil`."
+  def get_pending_admin_invitation_by_token(raw_token) when is_binary(raw_token) do
+    hashed = AdminInvitation.hash_token(raw_token)
+
+    Repo.one(
+      from i in AdminInvitation,
+        where: i.token == ^hashed and i.status == :pending and i.expires_at > ^DateTime.utc_now()
+    )
+  end
+
+  def get_pending_admin_invitation_by_token(_), do: nil
+
+  @doc """
+  Accepts an invitation: promotes the matching account to admin, or creates a
+  new admin account from `attrs` (`name`, `password`, `password_confirmation`)
+  when the email is not registered yet. Returns `{:ok, user}` or
+  `{:error, :invalid | changeset}`.
+  """
+  def accept_admin_invitation(raw_token, attrs \\ %{}) do
+    case get_pending_admin_invitation_by_token(raw_token) do
+      nil ->
+        {:error, :invalid}
+
+      %AdminInvitation{} = invitation ->
+        Repo.transaction(fn ->
+          user =
+            case get_user_by_email(invitation.email) do
+              %User{} = existing -> promote_existing_admin(existing)
+              nil -> create_invited_admin(invitation.email, attrs)
+            end
+
+          {:ok, _} =
+            invitation
+            |> AdminInvitation.accept_changeset(user)
+            |> Repo.update()
+
+          log_invite("ACCEPTED", invitation.email, id: invitation.id, user_id: user.id)
+          user
+        end)
+    end
+  rescue
+    e in Ecto.InvalidChangesetError -> {:error, e.changeset}
+  end
+
+  defp promote_existing_admin(%User{role: :admin} = user), do: user
+
+  defp promote_existing_admin(%User{} = user) do
+    {:ok, user} = user |> User.role_changeset(%{role: :admin}) |> Repo.update()
+    user
+  end
+
+  defp create_invited_admin(email, attrs) do
+    attrs = attrs |> Map.new(fn {k, v} -> {to_string(k), v} end) |> Map.put("email", email)
+
+    with {:ok, user} <- %User{} |> User.registration_changeset(attrs) |> Repo.insert(),
+         {:ok, user} <- user |> User.role_changeset(%{role: :admin}) |> Repo.update() do
+      # The invite email already proved control of the address.
+      user |> User.confirm_changeset() |> Repo.update!()
+    else
+      {:error, changeset} ->
+        raise Ecto.InvalidChangesetError, action: :insert, changeset: changeset
+    end
+  end
+
+  defp pending_admin_invitation_for(email) do
+    Repo.one(
+      from i in AdminInvitation,
+        where: i.email == ^email and i.status == :pending and i.expires_at > ^DateTime.utc_now(),
+        limit: 1
+    )
+  end
+
+  defp log_invite(event, email, meta) do
+    domain = email |> String.split("@") |> List.last()
+    meta_str = Enum.map_join(meta, " ", fn {k, v} -> "#{k}=#{v}" end)
+    Logger.info("AUDIT event=ADMIN.INVITE_#{event} email_domain=#{domain} #{meta_str}")
+  end
 
   ## User registration
 

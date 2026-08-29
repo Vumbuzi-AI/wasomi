@@ -110,6 +110,7 @@ defmodule WasomiWeb.Router do
       live "/courses-taken", CoursesTakenLive, :index
       live "/certificates", CertificatesLive, :index
       live "/refer", ReferLive, :index
+      live "/receipts", ReceiptsLive, :index
       live "/courses/:slug/checkout", CheckoutLive, :show
       live "/learn/courses/:slug", CoursePlayerLive, :show
       live "/learn/study", StudyHubLive, :index
@@ -119,6 +120,7 @@ defmodule WasomiWeb.Router do
     get "/learn/resources/:id/download", ResourceController, :download
     get "/certificates/:id/download", CertificateController, :download
     get "/certificates/:id/preview", CertificateController, :preview
+    get "/receipts/:id/download", ReceiptController, :download
     get "/payments/paystack/callback", PaystackCallbackController, :show
   end
 

@@ -4,7 +4,6 @@ defmodule WasomiWeb.DashboardLiveTest do
   import Phoenix.LiveViewTest
   import Wasomi.CatalogFixtures
   import Wasomi.EnrollmentsFixtures
-  import Wasomi.PaymentsFixtures
 
   alias Wasomi.Learning
 
@@ -122,40 +121,11 @@ defmodule WasomiWeb.DashboardLiveTest do
     assert has_element?(view, "#dashboard-course-#{course.id}", "Continue learning")
   end
 
-  test "shows successful payment receipts but not pending or failed attempts", %{
-    conn: conn,
-    user: user
-  } do
-    course = course_fixture(status: :published, title: "Receipt course")
-    enrollment = enrollment_fixture(user_id: user.id, course_id: course.id, status: :active)
+  test "no longer carries the payment receipts section (moved to /receipts)", %{conn: conn} do
+    {:ok, _view, html} = live(conn, ~p"/dashboard")
 
-    successful =
-      payment_fixture(
-        user_id: user.id,
-        course_id: course.id,
-        enrollment_id: enrollment.id,
-        amount_minor: 125_000,
-        currency: "KES",
-        provider_reference: "KBI-RECEIPT-PAID",
-        status: :successful
-      )
-
-    pending =
-      payment_fixture(
-        user_id: user.id,
-        course_id: course.id,
-        enrollment_id: enrollment.id,
-        provider_reference: "KBI-RECEIPT-PENDING",
-        status: :pending
-      )
-
-    {:ok, view, html} = live(conn, ~p"/dashboard")
-
-    assert has_element?(view, "#payment-receipt-#{successful.id}")
-    refute has_element?(view, "#payment-receipt-#{pending.id}")
-    assert html =~ "KBI-RECEIPT-PAID"
-    assert html =~ "KES"
-    refute html =~ "KBI-RECEIPT-PENDING"
+    refute html =~ ~s(id="dashboard-receipts")
+    refute html =~ "Payment receipts"
   end
 
   defp admin_fixture(attrs \\ %{}) do

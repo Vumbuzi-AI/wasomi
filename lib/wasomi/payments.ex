@@ -31,6 +31,23 @@ defmodule Wasomi.Payments do
     |> Repo.all()
   end
 
+  @doc """
+  A `Wasomi.Paginate.Page` of the same receipts as `list_receipts_for_user/1`,
+  plus `:page` / `:page_size` (default 10).
+  """
+  def list_receipts_for_user_page(%User{id: user_id}, opts \\ []) do
+    page = Keyword.get(opts, :page, 1)
+    page_size = Keyword.get(opts, :page_size, 10)
+
+    result =
+      Payment
+      |> where([p], p.user_id == ^user_id and p.status == :successful)
+      |> order_by([p], desc: p.paid_at, desc: p.id)
+      |> Paginate.paginate(page, page_size)
+
+    %{result | entries: Repo.preload(result.entries, :course)}
+  end
+
   def format_amount(%Payment{amount_minor: amount, currency: currency}) do
     format_minor(amount, currency)
   end
@@ -234,6 +251,9 @@ defmodule Wasomi.Payments do
   end
 
   def get_payment!(id), do: Repo.get!(Payment, id)
+
+  @doc "Fetches a payment by id, or `nil` if it doesn't exist."
+  def get_payment(id), do: Repo.get(Payment, id)
   def get_payment_by_reference(reference), do: Repo.get_by(Payment, provider_reference: reference)
 
   def create_payment(attrs \\ %{}) do

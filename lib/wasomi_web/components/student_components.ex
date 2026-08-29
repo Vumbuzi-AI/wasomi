@@ -28,6 +28,7 @@ defmodule WasomiWeb.StudentComponents do
       path: "/discussions"
     },
     %{key: :certificates, label: "Certificates", icon: "hero-trophy", path: "/certificates"},
+    %{key: :receipts, label: "Receipts", icon: "hero-receipt-percent", path: "/receipts"},
     %{key: :notifications, label: "Notifications", icon: "hero-bell", path: "/notifications"},
     %{key: :browse, label: "Browse catalog", icon: "hero-magnifying-glass", path: "/catalog"},
     %{key: :refer, label: "Refer a friend", icon: "hero-user-plus", path: "/refer"},

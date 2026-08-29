@@ -259,14 +259,26 @@ defmodule Wasomi.Enrollments do
   def enroll_free_course(nil, %Course{}), do: {:error, :unauthenticated}
 
   def enroll_free_course(%User{} = user, %Course{is_free: true} = course) do
-    Repo.transaction(fn ->
-      with {:ok, enrollment} <- create_pending_enrollment(user, course),
-           {:ok, active_enrollment} <- activate_enrollment(enrollment) do
-        active_enrollment
-      else
-        {:error, reason} -> Repo.rollback(reason)
-      end
-    end)
+    # Captured before the transaction so a re-enrolment (idempotent) doesn't
+    # fire a second notification/email. Post-commit and best-effort, like
+    # `grant_access/3`.
+    already_enrolled? = can_access_course?(user, course)
+
+    result =
+      Repo.transaction(fn ->
+        with {:ok, enrollment} <- create_pending_enrollment(user, course),
+             {:ok, active_enrollment} <- activate_enrollment(enrollment) do
+          active_enrollment
+        else
+          {:error, reason} -> Repo.rollback(reason)
+        end
+      end)
+
+    with false <- already_enrolled?, {:ok, enrollment} <- result do
+      Notifications.deliver_enrollment_granted(enrollment)
+    end
+
+    result
   end
 
   def enroll_free_course(%User{}, %Course{}), do: {:error, :course_not_free}

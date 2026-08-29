@@ -3,6 +3,7 @@ defmodule Wasomi.PaymentsTest do
   use Oban.Testing, repo: Wasomi.Repo
 
   import Mox
+  import Swoosh.TestAssertions
   import Wasomi.AccountsFixtures
   import Wasomi.CatalogFixtures
   import Wasomi.PaymentsFixtures
@@ -100,9 +101,9 @@ defmodule Wasomi.PaymentsTest do
     refute Enrollments.can_access_course?(user, course)
   end
 
-  test "duplicate processing is idempotent and does not verify twice" do
+  test "duplicate processing is idempotent, does not verify twice, and receipts the learner once" do
     user = user_fixture()
-    course = course_fixture(price_minor: 80_000, currency: "KES")
+    course = course_fixture(price_minor: 80_000, currency: "KES", title: "Paid Course")
     {:ok, %{payment: payment}} = Payments.create_pending_checkout(user, course)
 
     expect(Wasomi.Payments.ProviderMock, :verify, 1, fn _reference ->
@@ -113,6 +114,12 @@ defmodule Wasomi.PaymentsTest do
     assert {:ok, second} = Payments.process_paystack_reference(payment.provider_reference)
     assert first.payment.id == second.payment.id
     assert first.enrollment.id == second.enrollment.id
+
+    assert [%{kind: :enrollment_granted}] = Wasomi.Notifications.list_for_user(user)
+
+    receipt_subject = "Your Wasomi receipt for #{course.title}"
+    assert_email_sent(subject: receipt_subject)
+    refute_email_sent(subject: ^receipt_subject)
   end
 
   test "amount mismatch is rejected without granting access" do

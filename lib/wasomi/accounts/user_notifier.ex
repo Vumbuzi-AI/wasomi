@@ -269,6 +269,46 @@ defmodule Wasomi.Accounts.UserNotifier do
   end
 
   @doc """
+  Confirms a completed course payment to the learner, ecommerce-receipt
+  style — a one-line order summary plus a pointer to the downloadable PDF
+  receipt. Expects `payment` with `:user` and `:course` preloaded.
+  """
+  def deliver_payment_receipt(payment) do
+    name = recipient_name(payment.user)
+    base = WasomiWeb.Endpoint.url()
+
+    deliver(payment.user.email, "Your Wasomi receipt for #{payment.course.title}", %{
+      title: "Payment confirmed — you're enrolled",
+      intro: Template.rich(["Hi ", {:bold, name}, ","]),
+      body: [
+        Template.rich([
+          "Thanks for your payment. You now have full access to \"",
+          {:bold, payment.course.title},
+          "\"."
+        ]),
+        Template.rich([
+          {:bold, payment.course.title},
+          " — ",
+          {:bold, Wasomi.Payments.format_amount(payment)},
+          ", paid via ",
+          provider_name(payment.provider),
+          on_date(payment.paid_at),
+          "."
+        ]),
+        "A full PDF receipt is available any time from your Receipts page."
+      ],
+      cta: %{label: "Start learning now", url: "#{base}/learn/courses/#{payment.course.slug}"}
+    })
+  end
+
+  defp provider_name(:paystack), do: "Paystack"
+  defp provider_name(:mpesa), do: "M-Pesa"
+  defp provider_name(other), do: other |> to_string() |> String.capitalize()
+
+  defp on_date(%DateTime{} = at), do: " on " <> Calendar.strftime(at, "%B %-d, %Y")
+  defp on_date(_), do: ""
+
+  @doc """
   Tells an active member about a new course-channel announcement.
   """
   def deliver_channel_announcement(user, course, excerpt) do

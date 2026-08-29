@@ -5,6 +5,8 @@ defmodule Wasomi.Payments do
 
   import Ecto.Query, warn: false
 
+  require Logger
+
   alias Ecto.Multi
   alias Wasomi.Accounts.User
   alias Wasomi.Catalog.Course
@@ -449,7 +451,7 @@ defmodule Wasomi.Payments do
           |> repo.one!()
 
         if locked.status == :successful do
-          {:ok, locked}
+          {:ok, %{payment: locked, newly_confirmed?: false}}
         else
           locked
           |> Payment.changeset(%{
@@ -463,27 +465,50 @@ defmodule Wasomi.Payments do
               )
           })
           |> repo.update()
+          |> case do
+            {:ok, updated} -> {:ok, %{payment: updated, newly_confirmed?: true}}
+            {:error, _} = error -> error
+          end
         end
       end)
-      |> Multi.run(:enrollment, fn _repo, %{payment: completed_payment} ->
+      |> Multi.run(:enrollment, fn _repo, %{payment: %{payment: completed_payment}} ->
         enrollment = Repo.get!(Wasomi.Enrollments.Enrollment, completed_payment.enrollment_id)
         Enrollments.activate_enrollment(enrollment)
       end)
       |> Repo.transaction()
 
     case result do
-      {:ok, %{payment: payment, enrollment: enrollment}} ->
+      {:ok,
+       %{payment: %{payment: payment, newly_confirmed?: newly_confirmed?}, enrollment: enrollment}} ->
         Phoenix.PubSub.broadcast(
           Wasomi.PubSub,
           "user:#{payment.user_id}",
           {:payment_confirmed, enrollment}
         )
 
+        # Only on the transition to :successful — a webhook/reconciliation
+        # retry that finds the payment already confirmed must not re-notify.
+        if newly_confirmed?, do: notify_learner_of_payment(payment)
+
         {:ok, %{payment: payment, enrollment: enrollment}}
 
       {:error, _step, reason, _changes} ->
         {:error, reason}
     end
+  end
+
+  # Best-effort learner receipt/notification — the payment and enrollment are
+  # already committed, so a failure here is logged, never propagated.
+  defp notify_learner_of_payment(payment) do
+    Wasomi.Notifications.deliver_payment_confirmed(payment)
+  rescue
+    error ->
+      Logger.error(
+        "Failed to notify learner of payment #{payment.id}: " <>
+          Exception.format(:error, error, __STACKTRACE__)
+      )
+
+      :error
   end
 
   defp mark_failed(reference, verification) do

@@ -1329,4 +1329,15 @@ defmodule WasomiWeb.HomeComponents do
     </footer>
     """
   end
+
+  @doc """
+  Mount point for the GS1 Kenya chatbot widget. The `ZebraChat` JS hook
+  injects the vendor `<script>` into `<body>` once, so it survives LiveView
+  navigation and never blocks first render.
+  """
+  def zebra_chat_embed(assigns) do
+    ~H"""
+    <div id="zebra-chat-embed" phx-hook="ZebraChat"></div>
+    """
+  end
 end

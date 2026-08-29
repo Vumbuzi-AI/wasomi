@@ -2668,6 +2668,23 @@ Hooks.Confetti = {
   },
 };
 
+// Loads the GS1 Kenya chatbot widget once, into <body> so it outlives
+// LiveView navigation. Injected client-side (not a template <script>) so it
+// never blocks first render and a load failure stays contained.
+Hooks.ZebraChat = {
+  mounted() {
+    if (document.getElementById("gs1-chatbot-embed")) return;
+    const script = document.createElement("script");
+    script.id = "gs1-chatbot-embed";
+    script.src = "https://gs1kenya.org/embed/chatbot.js";
+    script.async = true;
+    script.dataset.productId = "5";
+    script.dataset.apiKey = "public";
+    script.dataset.apiBase = "https://gs1kenya.org";
+    document.body.appendChild(script);
+  },
+};
+
 let csrfToken = document
   .querySelector("meta[name='csrf-token']")
   .getAttribute("content");

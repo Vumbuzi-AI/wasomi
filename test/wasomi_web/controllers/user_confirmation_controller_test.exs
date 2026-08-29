@@ -67,7 +67,7 @@ defmodule WasomiWeb.UserConfirmationControllerTest do
       conn = post(conn, ~p"/users/confirm/#{token}")
 
       assert redirected_to(conn) == ~p"/dashboard"
-      assert Phoenix.Flash.get(conn.assigns.flash, :info) =~ "Email confirmed"
+      refute Phoenix.Flash.get(conn.assigns.flash, :info)
       assert get_session(conn, :user_token)
       assert Accounts.get_user!(user.id).confirmed_at
       refute Repo.get_by(Accounts.UserToken, user_id: user.id, context: "confirm")

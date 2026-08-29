@@ -22,9 +22,7 @@ defmodule WasomiWeb.UserConfirmationController do
   def confirm(conn, %{"token" => token}) do
     case Accounts.confirm_user(token, UserAuth.audit_request_attrs(conn)) do
       {:ok, user} ->
-        conn
-        |> put_flash(:info, "Email confirmed. Welcome to Wasomi.")
-        |> UserAuth.log_in_user(user)
+        UserAuth.log_in_user(conn, user)
 
       :error ->
         handle_invalid_confirmation_link(conn)

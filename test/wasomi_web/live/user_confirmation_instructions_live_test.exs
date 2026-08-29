@@ -46,7 +46,9 @@ defmodule WasomiWeb.UserConfirmationInstructionsLiveTest do
         |> follow_redirect(conn, ~p"/users/register?name=#{user.name}&email=#{user.email}")
 
       assert html =~ "Create your account"
-      assert html =~ user.name
+      # The single `name` param is split back onto the first/last name fields.
+      assert html =~ ~s(value="#{user.first_name}")
+      assert html =~ ~s(value="#{user.last_name}")
       assert html =~ user.email
     end
 

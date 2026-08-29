@@ -180,6 +180,20 @@ defmodule WasomiWeb.UserAuth do
     end
   end
 
+  # Sends a confirmed learner who has not yet been through the one-time
+  # onboarding step to `/welcome`. Runs after `:ensure_authenticated`, so
+  # `current_user` is already assigned; existing accounts were backfilled and
+  # admins are exempt.
+  def on_mount(:ensure_onboarded, _params, _session, socket) do
+    case socket.assigns[:current_user] do
+      %{role: :learner, onboarding_completed_at: nil} ->
+        {:halt, Phoenix.LiveView.redirect(socket, to: ~p"/welcome")}
+
+      _ ->
+        {:cont, socket}
+    end
+  end
+
   def on_mount(:redirect_if_user_is_authenticated, _params, session, socket) do
     socket = mount_current_user(socket, session)
 

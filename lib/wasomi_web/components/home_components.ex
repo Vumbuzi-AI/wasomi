@@ -1014,11 +1014,13 @@ defmodule WasomiWeb.HomeComponents do
   attr :course, :map, required: true
   attr :image_class, :string, default: "h-56"
   attr :title_class, :string, default: "text-ink"
+  attr :href, :string, default: nil
+  attr :status_badge, :string, default: nil
 
   def course_card(assigns) do
     ~H"""
     <a
-      href={"/courses/#{@course.slug}"}
+      href={@href || "/courses/#{@course.slug}"}
       class="group block overflow-hidden rounded-3xl border border-black/5 bg-white shadow-sm transition duration-300 hover:-translate-y-1 hover:shadow-xl"
     >
       <div class="overflow-hidden bg-mint">
@@ -1035,7 +1037,13 @@ defmodule WasomiWeb.HomeComponents do
             Course
           </span>
           <div class="text-lg font-semibold text-ink">
-            {Catalog.format_price(@course)}
+            <span
+              :if={@status_badge}
+              class="rounded-full bg-dark px-3 py-1 text-sm font-medium text-white"
+            >
+              {@status_badge}
+            </span>
+            <span :if={!@status_badge}>{Catalog.format_price(@course)}</span>
           </div>
         </div>
         <h3 class={["mt-4 text-lg font-medium", @title_class]}>{@course.title}</h3>
@@ -1073,6 +1081,58 @@ defmodule WasomiWeb.HomeComponents do
       </div>
     </a>
     """
+  end
+
+  @doc """
+  Catalog filter row: an All / Free / Paid segmented control, plus an
+  optional "hide courses I've taken" toggle (rendered only when
+  `:toggle_enrolled_href` is given — i.e. for a signed-in learner).
+
+  `:price_href` is a 1-arg function mapping `"all" | "free" | "paid"` to the
+  patch path; each LiveView supplies it so this component stays route-agnostic.
+  """
+  attr :price, :string, default: "all"
+  attr :price_href, :any, required: true
+  attr :hide_enrolled, :boolean, default: false
+  attr :toggle_enrolled_href, :string, default: nil
+
+  def catalog_filters(assigns) do
+    ~H"""
+    <div class="flex flex-wrap items-center gap-2">
+      <.link
+        :for={{value, label} <- [{"all", "All"}, {"free", "Free"}, {"paid", "Paid"}]}
+        patch={@price_href.(value)}
+        class={catalog_filter_pill(@price == value)}
+      >
+        {label}
+      </.link>
+
+      <.link
+        :if={@toggle_enrolled_href}
+        patch={@toggle_enrolled_href}
+        class={[
+          "inline-flex items-center gap-1.5",
+          catalog_filter_pill(@hide_enrolled)
+        ]}
+      >
+        <.icon
+          name={if @hide_enrolled, do: "hero-check-circle-mini", else: "hero-eye-slash-mini"}
+          class="h-4 w-4"
+        /> Hide courses I've taken
+      </.link>
+    </div>
+    """
+  end
+
+  # Matches the admin course/payment filter pills (`filter_pill_class/1`).
+  defp catalog_filter_pill(active?) do
+    [
+      "rounded-full px-4 py-2 text-sm font-medium transition",
+      if(active?,
+        do: "bg-ink text-white",
+        else: "border border-black/10 bg-white text-body hover:border-primary hover:text-primary"
+      )
+    ]
   end
 
   defp format_duration(seconds) when is_integer(seconds) and seconds > 0 do

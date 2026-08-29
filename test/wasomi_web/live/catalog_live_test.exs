@@ -32,7 +32,15 @@ defmodule WasomiWeb.CatalogLiveTest do
     assert html =~ course_module.title
     assert html =~ lecture.title
     refute html =~ lecture.video_asset_id
-    assert html =~ "Create account"
+    # anon CTA is action-first and routes through the auth wall to checkout
+    assert html =~ "Enroll &amp; Pay"
+    assert html =~ ~s(href="/courses/#{course.slug}/checkout")
+    refute html =~ "Create account"
+
+    # following that CTA bounces an anon visitor to sign in, with the
+    # checkout path remembered for after they authenticate
+    assert {:error, {:redirect, %{to: "/users/log_in"}}} =
+             live(conn, ~p"/courses/#{course.slug}/checkout")
   end
 
   test "renders a local thumbnail as an absolute social image URL", %{conn: conn} do
@@ -86,5 +94,46 @@ defmodule WasomiWeb.CatalogLiveTest do
 
     assert html =~ "Free"
     assert html =~ "Enroll for Free"
+  end
+
+  test "the public catalog price filter narrows to free or paid courses", %{conn: conn} do
+    free = course_fixture(status: :published, title: "Zero Cost", is_free: true, price_minor: nil)
+
+    paid =
+      course_fixture(status: :published, title: "Premium", is_free: false, price_minor: 9000)
+
+    {:ok, _view, html} = live(conn, ~p"/courses?price=free")
+    assert html =~ free.title
+    refute html =~ paid.title
+
+    {:ok, _view, html} = live(conn, ~p"/courses?price=paid")
+    assert html =~ paid.title
+    refute html =~ free.title
+  end
+
+  describe "course detail shell" do
+    test "an anonymous visitor gets the public marketing header", %{conn: conn} do
+      course = course_fixture(status: :published, title: "Public Storefront")
+
+      {:ok, _view, html} = live(conn, ~p"/courses/#{course.slug}")
+
+      assert html =~ ~s(id="nav-toggle")
+      refute html =~ ~s(id="student-sidebar")
+    end
+
+    test "a signed-in learner gets the learner sidebar shell", %{conn: conn} do
+      course = course_fixture(status: :published, title: "In-App View")
+      conn = log_in_user(conn, Wasomi.AccountsFixtures.user_fixture())
+
+      {:ok, _view, html} = live(conn, ~p"/courses/#{course.slug}")
+
+      assert html =~ ~s(id="student-sidebar")
+      refute html =~ ~s(id="nav-toggle")
+      assert html =~ course.title
+      assert html =~ "Back to all courses"
+      # the back link stays inside the authenticated portal, not the public catalog
+      assert html =~ ~s(href="/catalog")
+      refute html =~ ~s(href="/courses")
+    end
   end
 end

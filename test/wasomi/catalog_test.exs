@@ -27,6 +27,23 @@ defmodule Wasomi.CatalogTest do
       assert Catalog.list_courses() == [course]
     end
 
+    test "list_courses_page/1 filters by price and excludes given ids" do
+      free = course_fixture(status: :published, is_free: true, price_minor: nil)
+      paid = course_fixture(status: :published, is_free: false, price_minor: 5000)
+
+      free_only = Catalog.list_courses_page(status: :published, price: "free")
+      assert Enum.map(free_only.entries, & &1.id) == [free.id]
+
+      paid_only = Catalog.list_courses_page(status: :published, price: "paid")
+      assert Enum.map(paid_only.entries, & &1.id) == [paid.id]
+
+      all = Catalog.list_courses_page(status: :published, price: "all")
+      assert MapSet.new(all.entries, & &1.id) == MapSet.new([free.id, paid.id])
+
+      without_free = Catalog.list_courses_page(status: :published, exclude_ids: [free.id])
+      assert Enum.map(without_free.entries, & &1.id) == [paid.id]
+    end
+
     test "list_courses/0 orders newest first, so a just-created course leads the list" do
       first = course_fixture(slug: "first-course")
       second = course_fixture(slug: "second-course")

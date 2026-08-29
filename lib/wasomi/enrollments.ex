@@ -41,6 +41,20 @@ defmodule Wasomi.Enrollments do
   end
 
   @doc """
+  The set of course ids a learner has active access to — a lightweight
+  companion to `list_active_for_user/1` for callers that only need to know
+  "which courses does this learner already have?" (e.g. a catalog filter).
+  """
+  def active_course_ids(%User{id: user_id}) do
+    Enrollment
+    |> where([e], e.user_id == ^user_id and e.status == :active)
+    |> select([e], e.course_id)
+    |> Repo.all()
+  end
+
+  def active_course_ids(_user), do: []
+
+  @doc """
   Counts active enrollments across all courses.
   """
   def count_active do

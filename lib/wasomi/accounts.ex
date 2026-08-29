@@ -4,6 +4,7 @@ defmodule Wasomi.Accounts do
   """
 
   import Ecto.Query, warn: false
+  require Logger
   alias Wasomi.Repo
 
   alias Wasomi.Accounts.{User, UserNotifier, UserToken}
@@ -164,6 +165,110 @@ defmodule Wasomi.Accounts do
   """
   def change_user_registration(%User{} = user, attrs \\ %{}) do
     User.registration_changeset(user, attrs, hash_password: false, validate_email: false)
+  end
+
+  ## Magic-link login
+
+  @magic_link_cooldown_seconds 60
+  @magic_link_max_per_hour 5
+
+  @doc """
+  Emails a one-time login link to `email` if it belongs to a user.
+
+  Always returns `:ok` — it never reveals whether the address is registered.
+  Rate-limited per account (a #{@magic_link_cooldown_seconds}s cooldown and
+  #{@magic_link_max_per_hour}/hour); over the limit it silently sends nothing.
+  `login_url_fun` receives the raw token.
+  """
+  def deliver_magic_link(email, login_url_fun)
+      when is_binary(email) and is_function(login_url_fun, 1) do
+    normalized = email |> String.trim() |> String.downcase()
+
+    case get_user_by_email(normalized) do
+      %User{} = user ->
+        if magic_link_allowed?(user) do
+          {encoded_token, user_token} = UserToken.build_email_token(user, "login")
+          Repo.insert!(user_token)
+          UserNotifier.deliver_magic_link(user, login_url_fun.(encoded_token))
+          log_magic_link("SENT", normalized, user_id: user.id)
+        else
+          log_magic_link("RATE_LIMITED", normalized, user_id: user.id)
+        end
+
+      nil ->
+        log_magic_link("NO_ACCOUNT", normalized, [])
+    end
+
+    :ok
+  end
+
+  @doc "The user for a valid, unconsumed magic-link token (does not consume it), or `nil`."
+  def get_user_by_magic_token(token) when is_binary(token) do
+    case UserToken.verify_login_token_query(token) do
+      {:ok, query} -> Repo.one(query)
+      :error -> nil
+    end
+  end
+
+  def get_user_by_magic_token(_), do: nil
+
+  @doc """
+  Consumes a magic-link token: confirms the account if needed, deletes every
+  `"login"` token for that user, and returns `{:ok, user}`. `:error` if the
+  token is invalid, expired, or already used.
+  """
+  def login_user_by_magic_token(token) when is_binary(token) do
+    with {:ok, query} <- UserToken.verify_login_token_query(token),
+         %User{} = user <- Repo.one(query) do
+      {:ok, %{user: user}} =
+        Ecto.Multi.new()
+        |> Ecto.Multi.run(:user, fn _repo, _ ->
+          if user.confirmed_at,
+            do: {:ok, user},
+            else: Repo.update(User.confirm_changeset(user))
+        end)
+        |> Ecto.Multi.delete_all(
+          :tokens,
+          UserToken.by_user_and_contexts_query(user, ["login"])
+        )
+        |> Repo.transaction()
+
+      log_magic_link("CONSUMED", user.email, user_id: user.id)
+      {:ok, user}
+    else
+      _ -> :error
+    end
+  end
+
+  def login_user_by_magic_token(_), do: :error
+
+  defp magic_link_allowed?(%User{} = user) do
+    recent =
+      UserToken
+      |> where([t], t.user_id == ^user.id and t.context == "login")
+      |> where([t], t.inserted_at > ago(1, "hour"))
+      |> order_by([t], desc: t.inserted_at)
+      |> Repo.all()
+
+    cond do
+      length(recent) >= @magic_link_max_per_hour ->
+        false
+
+      recent == [] ->
+        true
+
+      DateTime.diff(DateTime.utc_now(), hd(recent).inserted_at) < @magic_link_cooldown_seconds ->
+        false
+
+      true ->
+        true
+    end
+  end
+
+  defp log_magic_link(event, email, meta) do
+    domain = email |> String.split("@") |> List.last()
+    meta_str = Enum.map_join(meta, " ", fn {k, v} -> "#{k}=#{v}" end)
+    Logger.info("AUDIT event=AUTH.MAGIC_LINK_#{event} email_domain=#{domain} #{meta_str}")
   end
 
   ## Settings

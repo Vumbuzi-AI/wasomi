@@ -6,10 +6,19 @@ defmodule Wasomi.Accounts do
   import Ecto.Query, warn: false
   alias Wasomi.Repo
 
-  alias Wasomi.Accounts.{User, UserNotifier, UserToken}
+  alias Wasomi.Accounts.{AuditEvent, User, UserNotifier, UserToken}
   alias Wasomi.Paginate
 
   @confirmation_resend_cooldown_minutes 15
+  @sensitive_audit_keys MapSet.new(~w(
+    _csrf_token
+    current_password
+    password
+    password_confirmation
+    remember_me
+    token
+    user_token
+  ))
 
   ## Database getters
 
@@ -62,6 +71,79 @@ defmodule Wasomi.Accounts do
 
   """
   def get_user!(id), do: Repo.get!(User, id)
+
+  @doc """
+  Records an append-only account audit event.
+
+  Metadata is sanitized before insert: known secret-bearing keys are dropped
+  recursively and long strings are capped so request payloads cannot bloat the
+  row or leak credentials into the audit trail.
+  """
+  def record_account_audit_event(user_or_nil, event, attrs \\ [])
+
+  def record_account_audit_event(%User{} = user, event, attrs) do
+    attrs
+    |> audit_attrs_to_keyword()
+    |> Keyword.put(:user_id, user.id)
+    |> insert_account_audit_event(event)
+  end
+
+  def record_account_audit_event(nil, event, attrs) do
+    attrs
+    |> audit_attrs_to_keyword()
+    |> insert_account_audit_event(event)
+  end
+
+  @doc """
+  Lists audit events for one account, newest first.
+
+  `:limit` is clamped to `1..200`; a non-integer is ignored and the default
+  (50) is used.
+  """
+  def list_account_audit_events(%User{} = user, opts \\ []) do
+    limit =
+      case Keyword.get(opts, :limit, 50) do
+        limit when is_integer(limit) -> limit |> max(1) |> min(200)
+        _ -> 50
+      end
+
+    AuditEvent
+    |> where([event], event.user_id == ^user.id)
+    |> order_by([event], desc: event.inserted_at, desc: event.id)
+    |> limit(^limit)
+    |> Repo.all()
+  end
+
+  @doc """
+  Returns pseudonymised, safe-to-store metadata for an attempted email address.
+
+  The raw address is never persisted. `email_fingerprint` is a keyed HMAC
+  (not a bare hash): it lets repeated attempts against the same address be
+  correlated, but a database-only compromise cannot confirm which address a
+  fingerprint belongs to without also holding the app secret. `email_domain`
+  is kept in the clear because it carries operational value (spotting a
+  targeted domain) at low individual-privacy cost.
+  """
+  def audit_email_metadata(email) when is_binary(email) do
+    normalized = email |> String.trim() |> String.downcase()
+
+    %{
+      "email_fingerprint" => email_fingerprint(normalized),
+      "email_domain" => email_domain(normalized)
+    }
+  end
+
+  def audit_email_metadata(_email), do: %{}
+
+  defp email_fingerprint(normalized_email) do
+    :hmac
+    |> :crypto.mac(
+      :sha256,
+      Application.fetch_env!(:wasomi, :audit_fingerprint_key),
+      normalized_email
+    )
+    |> Base.encode16(case: :lower)
+  end
 
   @doc """
   Returns the list of users, newest first, optionally filtered.
@@ -123,9 +205,24 @@ defmodule Wasomi.Accounts do
   Updates a user's role through the administrative changeset.
   """
   def update_user_role(%User{} = user, role) do
-    user
-    |> User.role_changeset(%{role: role})
-    |> Repo.update()
+    old_role = user.role
+    changeset = User.role_changeset(user, %{role: role})
+
+    if Map.has_key?(changeset.changes, :role) do
+      Ecto.Multi.new()
+      |> Ecto.Multi.update(:user, changeset)
+      |> put_account_audit_event(:audit_event, user, :role_changed,
+        metadata: %{old_role: old_role, new_role: role}
+      )
+      |> Repo.transaction()
+      |> case do
+        {:ok, %{user: user}} -> {:ok, user}
+        {:error, :user, changeset, _} -> {:error, changeset}
+        {:error, :audit_event, changeset, _} -> raise_account_audit_failure!(changeset)
+      end
+    else
+      Repo.update(changeset)
+    end
   end
 
   @doc """
@@ -148,9 +245,17 @@ defmodule Wasomi.Accounts do
 
   """
   def register_user(attrs) do
-    %User{}
-    |> User.registration_changeset(attrs)
-    |> Repo.insert()
+    Ecto.Multi.new()
+    |> Ecto.Multi.insert(:user, User.registration_changeset(%User{}, attrs))
+    |> Ecto.Multi.insert(:audit_event, fn %{user: user} ->
+      account_audit_event_changeset(user, :registered)
+    end)
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{user: user}} -> {:ok, user}
+      {:error, :user, changeset, _} -> {:error, changeset}
+      {:error, :audit_event, changeset, _} -> raise_account_audit_failure!(changeset)
+    end
   end
 
   @doc """
@@ -228,6 +333,12 @@ defmodule Wasomi.Accounts do
     Ecto.Multi.new()
     |> Ecto.Multi.update(:user, changeset)
     |> Ecto.Multi.delete_all(:tokens, UserToken.by_user_and_contexts_query(user, [context]))
+    |> put_account_audit_event(:audit_event, user, :email_changed,
+      metadata: %{
+        old_email: audit_email_metadata(user.email),
+        new_email: audit_email_metadata(email)
+      }
+    )
   end
 
   @doc ~S"""
@@ -281,10 +392,12 @@ defmodule Wasomi.Accounts do
     Ecto.Multi.new()
     |> Ecto.Multi.update(:user, changeset)
     |> Ecto.Multi.delete_all(:tokens, UserToken.by_user_and_contexts_query(user, :all))
+    |> put_account_audit_event(:audit_event, user, :password_changed)
     |> Repo.transaction()
     |> case do
       {:ok, %{user: user}} -> {:ok, user}
       {:error, :user, changeset, _} -> {:error, changeset}
+      {:error, :audit_event, changeset, _} -> raise_account_audit_failure!(changeset)
     end
   end
 
@@ -315,9 +428,29 @@ defmodule Wasomi.Accounts do
 
   """
   def update_user_profile(%User{} = user, attrs) do
-    user
-    |> User.profile_changeset(attrs)
-    |> Repo.update()
+    changeset = User.profile_changeset(user, attrs)
+    changed_fields = Map.keys(changeset.changes)
+
+    multi =
+      Ecto.Multi.new()
+      |> Ecto.Multi.update(:user, changeset)
+
+    multi =
+      if changed_fields == [] do
+        multi
+      else
+        put_account_audit_event(multi, :audit_event, user, :profile_updated,
+          metadata: %{changed_fields: changed_fields}
+        )
+      end
+
+    multi
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{user: user}} -> {:ok, user}
+      {:error, :user, changeset, _} -> {:error, changeset}
+      {:error, :audit_event, changeset, _} -> raise_account_audit_failure!(changeset)
+    end
   end
 
   ## Session
@@ -422,6 +555,7 @@ defmodule Wasomi.Accounts do
     Ecto.Multi.new()
     |> Ecto.Multi.update(:user, User.confirm_changeset(user))
     |> Ecto.Multi.delete_all(:tokens, UserToken.by_user_and_contexts_query(user, ["confirm"]))
+    |> put_account_audit_event(:audit_event, user, :email_confirmed)
   end
 
   ## Reset password
@@ -479,10 +613,108 @@ defmodule Wasomi.Accounts do
     Ecto.Multi.new()
     |> Ecto.Multi.update(:user, User.password_changeset(user, attrs))
     |> Ecto.Multi.delete_all(:tokens, UserToken.by_user_and_contexts_query(user, :all))
+    |> put_account_audit_event(:audit_event, user, :password_reset)
     |> Repo.transaction()
     |> case do
       {:ok, %{user: user}} -> {:ok, user}
       {:error, :user, changeset, _} -> {:error, changeset}
+      {:error, :audit_event, changeset, _} -> raise_account_audit_failure!(changeset)
     end
   end
+
+  defp insert_account_audit_event(attrs, event) do
+    attrs
+    |> account_audit_event_attrs(event)
+    |> then(&AuditEvent.changeset(%AuditEvent{}, &1))
+    |> Repo.insert()
+  end
+
+  defp put_account_audit_event(multi, name, user, event, attrs \\ []) do
+    Ecto.Multi.insert(multi, name, fn _changes ->
+      account_audit_event_changeset(user, event, attrs)
+    end)
+  end
+
+  defp account_audit_event_changeset(user_or_nil, event, attrs \\ []) do
+    user_or_nil
+    |> account_audit_event_attrs(event, attrs)
+    |> then(&AuditEvent.changeset(%AuditEvent{}, &1))
+  end
+
+  defp account_audit_event_attrs(%User{} = user, event, attrs) do
+    attrs
+    |> Keyword.put(:user_id, user.id)
+    |> account_audit_event_attrs(event)
+  end
+
+  defp account_audit_event_attrs(nil, event, attrs) do
+    account_audit_event_attrs(attrs, event)
+  end
+
+  defp account_audit_event_attrs(attrs, event) do
+    attrs = audit_attrs_to_keyword(attrs)
+    metadata = attrs |> Keyword.get(:metadata, %{}) |> scrub_audit_metadata()
+
+    %{
+      event: event,
+      metadata: metadata,
+      ip_address: attrs |> Keyword.get(:ip_address) |> blank_to_nil(),
+      user_agent: attrs |> Keyword.get(:user_agent) |> truncate_string(512),
+      user_id: Keyword.get(attrs, :user_id)
+    }
+  end
+
+  defp scrub_audit_metadata(metadata) when is_map(metadata) do
+    Enum.reduce(metadata, %{}, fn {key, value}, acc ->
+      key = to_string(key)
+
+      if MapSet.member?(@sensitive_audit_keys, String.downcase(key)) do
+        acc
+      else
+        Map.put(acc, key, scrub_audit_value(value))
+      end
+    end)
+  end
+
+  defp scrub_audit_metadata(_metadata), do: %{}
+
+  defp scrub_audit_value(nil), do: nil
+  defp scrub_audit_value(value) when is_boolean(value), do: value
+  defp scrub_audit_value(value) when is_number(value), do: value
+  defp scrub_audit_value(value) when is_binary(value), do: truncate_string(value, 512)
+  defp scrub_audit_value(value) when is_atom(value), do: Atom.to_string(value)
+  # A struct (%DateTime{}, a schema, …) is never an intended metadata value —
+  # recursing would expose its internal fields. Drop it rather than serialise.
+  defp scrub_audit_value(%_{}), do: "[filtered]"
+  defp scrub_audit_value(value) when is_map(value), do: scrub_audit_metadata(value)
+  defp scrub_audit_value(value) when is_list(value), do: Enum.map(value, &scrub_audit_value/1)
+  defp scrub_audit_value(_value), do: "[filtered]"
+
+  defp audit_attrs_to_keyword(attrs) when is_map(attrs), do: Map.to_list(attrs)
+  defp audit_attrs_to_keyword(attrs) when is_list(attrs), do: attrs
+  defp audit_attrs_to_keyword(_attrs), do: []
+
+  # An audit-event insert failing inside an account-change transaction is a
+  # system fault, not user-correctable input — surface it loudly instead of
+  # returning an `AuditEvent` changeset that callers would mistake for a
+  # validation error on the account form.
+  defp raise_account_audit_failure!(changeset) do
+    raise "account audit event could not be recorded: #{inspect(changeset.errors)}"
+  end
+
+  defp email_domain(email) do
+    case String.split(email, "@", parts: 2) do
+      [_local, domain] -> domain
+      _ -> nil
+    end
+  end
+
+  defp truncate_string(nil, _max_length), do: nil
+
+  defp truncate_string(value, max_length) when is_binary(value) do
+    String.slice(value, 0, max_length)
+  end
+
+  defp blank_to_nil(value) when value in ["", nil], do: nil
+  defp blank_to_nil(value), do: value
 end

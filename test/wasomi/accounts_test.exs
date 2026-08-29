@@ -5,7 +5,7 @@ defmodule Wasomi.AccountsTest do
 
   import Wasomi.AccountsFixtures
   import Swoosh.TestAssertions
-  alias Wasomi.Accounts.{Countries, User, UserToken}
+  alias Wasomi.Accounts.{AuditEvent, Countries, User, UserToken}
 
   describe "get_user_by_email/1" do
     test "does not return the user if the email does not exist" do
@@ -99,6 +99,11 @@ defmodule Wasomi.AccountsTest do
       assert is_nil(user.confirmed_at)
       assert is_nil(user.password)
       assert user.role == :learner
+
+      assert [%AuditEvent{event: :registered, user_id: user_id}] =
+               Accounts.list_account_audit_events(user)
+
+      assert user_id == user.id
     end
 
     test "does not allow registration to set an admin role" do
@@ -227,6 +232,14 @@ defmodule Wasomi.AccountsTest do
       assert changed_user.confirmed_at
       assert changed_user.confirmed_at != user.confirmed_at
       refute Repo.get_by(UserToken, user_id: user.id)
+
+      assert %AuditEvent{event: :email_changed, metadata: metadata} =
+               Accounts.list_account_audit_events(user) |> List.first()
+
+      assert metadata["old_email"]["email_fingerprint"]
+      assert metadata["new_email"]["email_fingerprint"]
+      refute inspect(metadata) =~ user.email
+      refute inspect(metadata) =~ email
     end
 
     test "does not update email with invalid token", %{user: user} do
@@ -309,6 +322,9 @@ defmodule Wasomi.AccountsTest do
 
       assert is_nil(user.password)
       assert Accounts.get_user_by_email_and_password(user.email, "new valid password")
+
+      assert %AuditEvent{event: :password_changed} =
+               Accounts.list_account_audit_events(user) |> List.first()
     end
 
     test "deletes all tokens for the given user", %{user: user} do
@@ -320,6 +336,142 @@ defmodule Wasomi.AccountsTest do
         })
 
       refute Repo.get_by(UserToken, user_id: user.id)
+    end
+  end
+
+  describe "account audit events" do
+    test "records request metadata and sanitizes sensitive metadata" do
+      user = user_fixture()
+
+      assert {:ok, audit_event} =
+               Accounts.record_account_audit_event(user, :profile_updated, %{
+                 ip_address: "127.0.0.1",
+                 user_agent: String.duplicate("browser", 120),
+                 metadata: %{
+                   changed_fields: [:bio, :country],
+                   password: "secret",
+                   Password: "also-secret",
+                   nested: %{token: "secret-token", kept: "safe"}
+                 }
+               })
+
+      assert audit_event.user_id == user.id
+      assert audit_event.event == :profile_updated
+      assert audit_event.ip_address == "127.0.0.1"
+      assert String.length(audit_event.user_agent) == 512
+      assert audit_event.metadata["changed_fields"] == ["bio", "country"]
+      assert audit_event.metadata["nested"] == %{"kept" => "safe"}
+      refute Map.has_key?(audit_event.metadata, "password")
+      refute Map.has_key?(audit_event.metadata, "Password")
+      refute inspect(audit_event.metadata) =~ "secret-token"
+    end
+
+    test "does not record profile audit events when nothing changes" do
+      user = user_fixture()
+      audit_event_count = user |> Accounts.list_account_audit_events() |> length()
+
+      assert {:ok, _user} = Accounts.update_user_profile(user, %{})
+
+      assert length(Accounts.list_account_audit_events(user)) == audit_event_count
+    end
+
+    test "records failed login attempts without a user or raw email" do
+      attempted_email = "Learner+Mistyped@Example.COM"
+
+      assert {:ok, audit_event} =
+               Accounts.record_account_audit_event(nil, :login_failed,
+                 metadata:
+                   attempted_email
+                   |> Accounts.audit_email_metadata()
+                   |> Map.put("reason", "invalid_credentials")
+               )
+
+      assert audit_event.user_id == nil
+      assert audit_event.event == :login_failed
+      assert audit_event.metadata["reason"] == "invalid_credentials"
+      assert audit_event.metadata["email_domain"] == "example.com"
+      assert audit_event.metadata["email_fingerprint"]
+      refute inspect(audit_event.metadata) =~ attempted_email
+      refute inspect(audit_event.metadata) =~ "Learner"
+    end
+
+    test "lists audit events for a user newest first with a bounded limit" do
+      user = user_fixture()
+      other_user = user_fixture()
+
+      {:ok, older} = Accounts.record_account_audit_event(user, :login_succeeded)
+      {:ok, newer} = Accounts.record_account_audit_event(user, :logout)
+      {:ok, _other} = Accounts.record_account_audit_event(other_user, :login_succeeded)
+
+      assert [^newer] = Accounts.list_account_audit_events(user, limit: 1)
+      assert [_event] = Accounts.list_account_audit_events(user, limit: -1)
+      assert Enum.any?(Accounts.list_account_audit_events(user), &(&1.id == older.id))
+      refute Enum.any?(Accounts.list_account_audit_events(user), &(&1.user_id == other_user.id))
+    end
+
+    test "role changes are audited with old and new roles" do
+      user = user_fixture()
+
+      assert {:ok, admin} = Accounts.update_user_role(user, :admin)
+      assert admin.role == :admin
+
+      assert %AuditEvent{event: :role_changed, metadata: metadata} =
+               Accounts.list_account_audit_events(user) |> List.first()
+
+      assert metadata == %{"old_role" => "learner", "new_role" => "admin"}
+    end
+
+    test "does not record role audit events when the role does not change" do
+      user = user_fixture()
+      audit_event_count = user |> Accounts.list_account_audit_events() |> length()
+
+      assert {:ok, unchanged_user} = Accounts.update_user_role(user, :learner)
+      assert unchanged_user.role == :learner
+
+      assert length(Accounts.list_account_audit_events(user)) == audit_event_count
+    end
+
+    test "confirming an email records an :email_confirmed event" do
+      user = user_fixture(confirmed: false)
+
+      token =
+        extract_user_token(fn url ->
+          Accounts.deliver_user_confirmation_instructions(user, url)
+        end)
+
+      assert {:ok, _confirmed} = Accounts.confirm_user(token)
+
+      assert %AuditEvent{event: :email_confirmed, user_id: user_id} =
+               Accounts.list_account_audit_events(user) |> List.first()
+
+      assert user_id == user.id
+    end
+
+    test "resetting a password via token records a :password_reset event" do
+      user = user_fixture()
+
+      assert {:ok, _updated} =
+               Accounts.reset_user_password(user, %{password: "a brand new password"})
+
+      assert %AuditEvent{event: :password_reset, user_id: user_id} =
+               Accounts.list_account_audit_events(user) |> List.first()
+
+      assert user_id == user.id
+    end
+
+    test "updating a profile records a :profile_updated event listing the changed fields" do
+      user = user_fixture()
+
+      assert {:ok, _updated} =
+               Accounts.update_user_profile(user, %{
+                 "bio" => "Learning GS1.",
+                 "country" => "Kenya"
+               })
+
+      assert %AuditEvent{event: :profile_updated, metadata: metadata} =
+               Accounts.list_account_audit_events(user) |> List.first()
+
+      assert Enum.sort(metadata["changed_fields"]) == ["bio", "country"]
     end
   end
 

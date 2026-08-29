@@ -3,6 +3,7 @@ defmodule WasomiWeb.UserSessionControllerTest do
 
   import Wasomi.AccountsFixtures
   alias Wasomi.Accounts
+  alias Wasomi.Accounts.AuditEvent
 
   setup do
     %{user: user_fixture()}
@@ -11,12 +12,23 @@ defmodule WasomiWeb.UserSessionControllerTest do
   describe "POST /users/log_in" do
     test "logs the user in", %{conn: conn, user: user} do
       conn =
-        post(conn, ~p"/users/log_in", %{
+        conn
+        |> put_req_header("user-agent", "WasomiBrowser/1.0")
+        |> post(~p"/users/log_in", %{
           "user" => %{"email" => user.email, "password" => valid_user_password()}
         })
 
       assert get_session(conn, :user_token)
       assert redirected_to(conn) == ~p"/dashboard"
+
+      assert %AuditEvent{
+               event: :login_succeeded,
+               user_id: user_id,
+               ip_address: "127.0.0.1",
+               user_agent: "WasomiBrowser/1.0"
+             } = Accounts.list_account_audit_events(user) |> List.first()
+
+      assert user_id == user.id
     end
 
     test "logs the user in with remember me", %{conn: conn, user: user} do
@@ -59,6 +71,15 @@ defmodule WasomiWeb.UserSessionControllerTest do
 
       assert Phoenix.Flash.get(conn.assigns.flash, :error) =~
                "Please confirm your email address before logging in"
+
+      assert %AuditEvent{event: :login_failed, user_id: user_id, metadata: metadata} =
+               Wasomi.Repo.get_by!(AuditEvent, event: :login_failed)
+
+      assert user_id == user.id
+      assert metadata["reason"] == "unconfirmed"
+      assert metadata["email_fingerprint"]
+      assert metadata["email_domain"] == "example.com"
+      refute inspect(metadata) =~ user.email
     end
 
     test "preserves a `+`-tagged email through the unconfirmed-login redirect", %{conn: conn} do
@@ -103,13 +124,31 @@ defmodule WasomiWeb.UserSessionControllerTest do
     end
 
     test "redirects to login page with invalid credentials", %{conn: conn} do
+      email = "invalid@email.com"
+
       conn =
-        post(conn, ~p"/users/log_in", %{
-          "user" => %{"email" => "invalid@email.com", "password" => "invalid_password"}
+        conn
+        |> put_req_header("user-agent", "WasomiBrowser/2.0")
+        |> post(~p"/users/log_in", %{
+          "user" => %{"email" => email, "password" => "invalid_password"}
         })
 
       assert Phoenix.Flash.get(conn.assigns.flash, :error) == "Invalid email or password"
       assert redirected_to(conn) == ~p"/users/log_in"
+
+      assert %AuditEvent{
+               event: :login_failed,
+               user_id: nil,
+               metadata: metadata,
+               ip_address: "127.0.0.1",
+               user_agent: "WasomiBrowser/2.0"
+             } = Wasomi.Repo.get_by!(AuditEvent, event: :login_failed)
+
+      assert metadata["reason"] == "invalid_credentials"
+      assert metadata["email_fingerprint"]
+      assert metadata["email_domain"] == "email.com"
+      refute inspect(metadata) =~ email
+      refute inspect(metadata) =~ "invalid_password"
     end
 
     test "renders error when security verification fails", %{conn: conn, user: user} do
@@ -147,6 +186,13 @@ defmodule WasomiWeb.UserSessionControllerTest do
       assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "Security verification failed"
       assert redirected_to(conn) == ~p"/users/log_in"
       refute get_session(conn, :user_token)
+
+      assert %AuditEvent{
+               event: :login_failed,
+               user_id: nil,
+               metadata: %{"reason" => "captcha_failed"}
+             } =
+               Wasomi.Repo.get_by!(AuditEvent, event: :login_failed)
     end
 
     test "redirects to the v2 fallback instead of a dead end when v3's score is too low", %{
@@ -191,6 +237,9 @@ defmodule WasomiWeb.UserSessionControllerTest do
 
       assert redirected_to(conn) == ~p"/users/log_in?show_recaptcha_v2=true"
       refute get_session(conn, :user_token)
+
+      assert %AuditEvent{event: :login_failed, metadata: %{"reason" => "captcha_low_score"}} =
+               Wasomi.Repo.get_by!(AuditEvent, event: :login_failed)
     end
   end
 
@@ -199,6 +248,11 @@ defmodule WasomiWeb.UserSessionControllerTest do
       conn = conn |> log_in_user(user) |> delete(~p"/users/log_out")
       assert redirected_to(conn) == ~p"/"
       refute get_session(conn, :user_token)
+
+      assert %AuditEvent{event: :logout, user_id: user_id} =
+               Accounts.list_account_audit_events(user) |> List.first()
+
+      assert user_id == user.id
     end
 
     test "succeeds even if the user is not logged in", %{conn: conn} do

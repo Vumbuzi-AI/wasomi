@@ -38,6 +38,9 @@ defmodule Wasomi.Accounts.User do
         :personal_interest
       ]
 
+    field :last_signed_in_at, :utc_datetime
+    field :onboarding_completed_at, :utc_datetime
+
     timestamps(type: :utc_datetime)
   end
 
@@ -635,6 +638,16 @@ defmodule Wasomi.Accounts.User do
   def confirm_changeset(user) do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
     change(user, confirmed_at: now)
+  end
+
+  @doc false
+  def sign_in_changeset(user) do
+    change(user, last_signed_in_at: DateTime.utc_now() |> DateTime.truncate(:second))
+  end
+
+  @doc false
+  def onboarding_completed_changeset(user) do
+    change(user, onboarding_completed_at: DateTime.utc_now() |> DateTime.truncate(:second))
   end
 
   @doc """

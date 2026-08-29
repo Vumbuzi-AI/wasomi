@@ -28,6 +28,7 @@ defmodule WasomiWeb.UserAuth do
   def log_in_user(conn, user, params \\ %{}) do
     token = Accounts.generate_user_session_token(user)
     user_return_to = get_session(conn, :user_return_to)
+    Accounts.record_user_sign_in(user)
     :ok = record_account_audit_event(conn, user, :login_succeeded)
 
     conn

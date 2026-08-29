@@ -40,6 +40,14 @@ defmodule WasomiWeb.UserAuthTest do
       assert user_id == user.id
     end
 
+    test "records the sign-in on the user record", %{conn: conn, user: user} do
+      assert is_nil(user.last_signed_in_at)
+
+      UserAuth.log_in_user(conn, user)
+
+      assert %DateTime{} = Accounts.get_user!(user.id).last_signed_in_at
+    end
+
     test "redirects administrators to the admin area", %{conn: conn, user: user} do
       {:ok, admin} = Accounts.update_user_role(user, :admin)
 

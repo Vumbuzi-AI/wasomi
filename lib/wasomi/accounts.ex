@@ -684,6 +684,32 @@ defmodule Wasomi.Accounts do
   defp truthy_param?(value), do: value in [true, "true", "on", "1", 1]
   defp blank?(value), do: is_nil(value) or (is_binary(value) and String.trim(value) == "")
 
+  @doc """
+  Stamps `last_signed_in_at` on the user. Called from the login flow to
+  keep a login-recency signal; callers ignore the result.
+  """
+  def record_user_sign_in(%User{} = user) do
+    user
+    |> User.sign_in_changeset()
+    |> Repo.update()
+  end
+
+  @doc """
+  Marks the one-time first-run onboarding as done, whether the learner
+  completed or skipped it.
+  """
+  def complete_user_onboarding(%User{} = user) do
+    user
+    |> User.onboarding_completed_changeset()
+    |> Repo.update()
+  end
+
+  @doc """
+  Whether the learner has been through (or skipped) first-run onboarding.
+  """
+  def onboarding_completed?(%User{onboarding_completed_at: nil}), do: false
+  def onboarding_completed?(%User{}), do: true
+
   ## Session
 
   @doc """

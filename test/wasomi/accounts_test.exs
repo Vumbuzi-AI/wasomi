@@ -1298,6 +1298,38 @@ defmodule Wasomi.AccountsTest do
     end
   end
 
+  describe "record_user_sign_in/1" do
+    test "stamps last_signed_in_at" do
+      user = user_fixture()
+      assert is_nil(user.last_signed_in_at)
+
+      {:ok, updated} = Accounts.record_user_sign_in(user)
+
+      assert %DateTime{} = updated.last_signed_in_at
+      assert Accounts.get_user!(user.id).last_signed_in_at == updated.last_signed_in_at
+    end
+  end
+
+  describe "onboarding" do
+    setup do
+      {:ok, user} = valid_user_attributes() |> Accounts.register_user()
+      %{user: user}
+    end
+
+    test "a fresh account has not completed onboarding", %{user: user} do
+      assert is_nil(user.onboarding_completed_at)
+      refute Accounts.onboarding_completed?(user)
+    end
+
+    test "complete_user_onboarding/1 stamps onboarding_completed_at once", %{user: user} do
+      {:ok, done} = Accounts.complete_user_onboarding(user)
+
+      assert %DateTime{} = done.onboarding_completed_at
+      assert Accounts.onboarding_completed?(done)
+      assert Accounts.get_user!(user.id).onboarding_completed_at == done.onboarding_completed_at
+    end
+  end
+
   describe "list_users_page/1" do
     test "paginates, newest first" do
       Enum.each(1..3, fn n -> user_fixture(name: "User #{n}") end)

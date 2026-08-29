@@ -281,8 +281,44 @@ defmodule WasomiWeb.UserSettingsLiveTest do
     test "renders the profile section", %{conn: conn} do
       {:ok, _lv, html} = live(conn, ~p"/users/settings")
 
-      assert html =~ "Save Profile"
+      assert html =~ "Profile basics"
       assert html =~ "other learner ever sees this"
+      # The save bar only appears once there are unsaved changes.
+      refute html =~ "unsaved profile changes"
+    end
+
+    test "shows an unsaved-changes bar while the form is dirty, then hides it after saving", %{
+      conn: conn,
+      user: user
+    } do
+      {:ok, view, _html} = live(conn, ~p"/users/settings")
+
+      html =
+        view
+        |> form("#profile_form", user: %{"headline" => "Warehouse Ops Lead"})
+        |> render_change()
+
+      assert html =~ "unsaved profile changes"
+
+      html =
+        render_submit(view, "save_profile", %{"user" => %{"headline" => "Warehouse Ops Lead"}})
+
+      refute html =~ "unsaved profile changes"
+      assert Accounts.get_user!(user.id).headline == "Warehouse Ops Lead"
+    end
+
+    test "discard resets the form and clears the unsaved-changes bar", %{conn: conn, user: user} do
+      {:ok, view, _html} = live(conn, ~p"/users/settings")
+
+      view
+      |> form("#profile_form", user: %{"headline" => "Temporary"})
+      |> render_change()
+
+      html = view |> element("button", "Discard") |> render_click()
+
+      refute html =~ "unsaved profile changes"
+      refute html =~ "Temporary"
+      assert is_nil(Accounts.get_user!(user.id).headline)
     end
 
     test "updates every profile field", %{conn: conn, user: user} do

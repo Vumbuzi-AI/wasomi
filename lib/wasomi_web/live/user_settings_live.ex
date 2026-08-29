@@ -74,6 +74,11 @@ defmodule WasomiWeb.UserSettingsLive do
                   </div>
 
                   <div class="space-y-6">
+                    <div class="grid gap-6 sm:grid-cols-2">
+                      <.input field={@profile_form[:first_name]} type="text" label="First name" />
+                      <.input field={@profile_form[:last_name]} type="text" label="Last name" />
+                    </div>
+
                     <.input
                       field={@profile_form[:headline]}
                       type="text"
@@ -133,14 +138,30 @@ defmodule WasomiWeb.UserSettingsLive do
                       />
                     </div>
                   </div>
-
-                  <div class="pt-2">
-                    <.button phx-disable-with="Saving..." class="rounded-full bg-ink px-5">
-                      Save Profile
-                    </.button>
-                  </div>
                 </div>
               </section>
+
+              <div
+                :if={@profile_dirty}
+                class="sticky bottom-0 z-40 -mx-6 -mb-6 mt-8 flex items-center justify-between gap-4 rounded-b-3xl border-t border-black/10 bg-white/95 px-6 py-3 shadow-[0_-4px_16px_rgba(0,0,0,0.06)] backdrop-blur sm:-mx-8 sm:-mb-8 sm:px-8"
+              >
+                <div class="flex items-center gap-2 text-sm font-medium text-ink">
+                  <.icon name="hero-exclamation-circle" class="h-4 w-4 shrink-0 text-amber-500" />
+                  <span>You have unsaved profile changes.</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <button
+                    type="button"
+                    phx-click="discard_profile"
+                    class="rounded-full px-4 py-2 text-sm font-medium text-muted transition hover:text-ink"
+                  >
+                    Discard
+                  </button>
+                  <.button phx-disable-with="Saving..." class="rounded-full bg-ink px-5">
+                    Save profile
+                  </.button>
+                </div>
+              </div>
             </.form>
 
             <section id="settings-public-panel" class={settings_panel_class(@settings_tab, :public)}>
@@ -626,6 +647,7 @@ defmodule WasomiWeb.UserSettingsLive do
       |> assign(:profile_form, to_form(profile_changeset))
       |> assign(:public_profile_slug_suggestions, public_profile_suggestions)
       |> assign(:public_profile_form, to_form(public_profile_changeset))
+      |> assign(:profile_dirty, false)
       |> assign_public_profile_url()
       |> assign_saved_public_profile_url()
       |> allow_upload(:avatar,
@@ -717,7 +739,24 @@ defmodule WasomiWeb.UserSettingsLive do
       |> Accounts.change_user_profile(user_params)
       |> Map.put(:action, :validate)
 
-    {:noreply, socket |> assign(:profile_form, to_form(changeset)) |> assign_avatar_url()}
+    {:noreply,
+     socket
+     |> assign(:profile_form, to_form(changeset))
+     |> assign_avatar_url()
+     |> assign_profile_dirty()}
+  end
+
+  def handle_event("discard_profile", _params, socket) do
+    socket =
+      Enum.reduce(socket.assigns.uploads.avatar.entries, socket, fn entry, socket ->
+        cancel_upload(socket, :avatar, entry.ref)
+      end)
+
+    {:noreply,
+     socket
+     |> assign(:profile_form, to_form(Accounts.change_user_profile(socket.assigns.current_user)))
+     |> assign(:profile_dirty, false)
+     |> assign_avatar_url()}
   end
 
   def handle_event("save_profile", %{"user" => user_params}, socket) do
@@ -786,15 +825,22 @@ defmodule WasomiWeb.UserSettingsLive do
         cancel_upload(socket, :avatar, entry.ref)
       end)
 
-    {:noreply, socket |> assign(:profile_form, to_form(changeset)) |> assign_avatar_url()}
+    {:noreply,
+     socket
+     |> assign(:profile_form, to_form(changeset))
+     |> assign_avatar_url()
+     |> assign_profile_dirty()}
   end
 
   def handle_event("cancel-avatar-upload", %{"ref" => ref}, socket) do
-    {:noreply, socket |> cancel_upload(:avatar, ref) |> assign_avatar_url()}
+    {:noreply,
+     socket |> cancel_upload(:avatar, ref) |> assign_avatar_url() |> assign_profile_dirty()}
   end
 
   def handle_avatar_progress(:avatar, entry, socket) do
-    if entry.done?, do: {:noreply, assign_avatar_url(socket)}, else: {:noreply, socket}
+    if entry.done?,
+      do: {:noreply, socket |> assign_avatar_url() |> assign_profile_dirty()},
+      else: {:noreply, socket}
   end
 
   defp save_profile(socket, user_params) do
@@ -805,11 +851,20 @@ defmodule WasomiWeb.UserSettingsLive do
          |> put_flash(:info, "Profile saved.")
          |> assign(:current_user, user)
          |> assign(:profile_form, to_form(Accounts.change_user_profile(user)))
+         |> assign(:profile_dirty, false)
          |> assign_avatar_url()}
 
       {:error, changeset} ->
-        {:noreply, assign(socket, :profile_form, to_form(changeset))}
+        {:noreply, socket |> assign(:profile_form, to_form(changeset)) |> assign_profile_dirty()}
     end
+  end
+
+  # The profile form is "dirty" once the changeset carries a cast change (Ecto
+  # drops fields typed then reverted) or an avatar upload is pending.
+  defp assign_profile_dirty(socket) do
+    changeset = socket.assigns.profile_form.source
+    dirty? = changeset.changes != %{} or socket.assigns.uploads.avatar.entries != []
+    assign(socket, :profile_dirty, dirty?)
   end
 
   defp missing_public_url_flash(socket) do

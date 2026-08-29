@@ -290,7 +290,12 @@ defmodule Wasomi.Accounts.UserNotifier do
     })
   end
 
-  defp recipient_name(%{name: name}) when is_binary(name) and byte_size(name) > 0, do: name
+  defp recipient_name(%{first_name: first}) when is_binary(first) and byte_size(first) > 0,
+    do: first
+
+  defp recipient_name(%{name: name}) when is_binary(name) and byte_size(name) > 0,
+    do: name |> String.split() |> List.first()
+
   defp recipient_name(%{email: email}) when is_binary(email), do: email
   defp recipient_name(_), do: "there"
 end

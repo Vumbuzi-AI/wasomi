@@ -56,8 +56,46 @@ defmodule Wasomi.AccountsTest do
       assert %{
                password: ["can't be blank"],
                email: ["can't be blank"],
-               name: ["can't be blank"]
+               first_name: ["can't be blank"],
+               last_name: ["can't be blank"]
              } = errors_on(changeset)
+    end
+
+    test "collects a first and last name and derives the full name" do
+      {:ok, user} =
+        Accounts.register_user(
+          valid_user_attributes(first_name: "  Amina ", last_name: " Otieno ", name: nil)
+        )
+
+      assert user.first_name == "Amina"
+      assert user.last_name == "Otieno"
+      assert user.name == "Amina Otieno"
+    end
+
+    test "still accepts a single legacy name and splits it" do
+      {:ok, user} =
+        Accounts.register_user(valid_user_attributes(name: "Grace Wanjiru Mbeki"))
+
+      assert user.first_name == "Grace"
+      assert user.last_name == "Wanjiru Mbeki"
+      assert user.name == "Grace Wanjiru Mbeki"
+    end
+
+    test "rejects single-character name parts" do
+      {:error, changeset} =
+        Accounts.register_user(valid_user_attributes(first_name: "A", last_name: "B", name: nil))
+
+      assert "should be at least 2 character(s)" in errors_on(changeset).first_name
+      assert "should be at least 2 character(s)" in errors_on(changeset).last_name
+    end
+
+    test "requires a last name even when a first name is given" do
+      {:error, changeset} =
+        Accounts.register_user(
+          valid_user_attributes(first_name: "Amina", last_name: "", name: nil)
+        )
+
+      assert "can't be blank" in errors_on(changeset).last_name
     end
 
     test "validates email and password when given" do
@@ -159,7 +197,9 @@ defmodule Wasomi.AccountsTest do
   describe "change_user_registration/2" do
     test "returns a changeset" do
       assert %Ecto.Changeset{} = changeset = Accounts.change_user_registration(%User{})
-      assert Enum.sort(changeset.required) == Enum.sort([:name, :password, :email])
+
+      assert Enum.sort(changeset.required) ==
+               Enum.sort([:first_name, :last_name, :password, :email])
     end
 
     test "allows fields to be set" do
@@ -1001,6 +1041,35 @@ defmodule Wasomi.AccountsTest do
 
       assert updated.email == user.email
       assert updated.role == user.role
+    end
+
+    test "updates first and last name and re-derives the full name", %{user: user} do
+      {:ok, updated} =
+        Accounts.update_user_profile(user, %{"first_name" => " Amina ", "last_name" => "Otieno"})
+
+      assert updated.first_name == "Amina"
+      assert updated.last_name == "Otieno"
+      assert updated.name == "Amina Otieno"
+    end
+
+    test "re-derives the full name when only the first name changes", %{user: user} do
+      {:ok, user} =
+        Accounts.update_user_profile(user, %{"first_name" => "Grace", "last_name" => "Wanjiru"})
+
+      {:ok, updated} = Accounts.update_user_profile(user, %{"first_name" => "Gracie"})
+
+      assert updated.name == "Gracie Wanjiru"
+    end
+
+    test "rejects a blank last name", %{user: user} do
+      {:error, changeset} = Accounts.update_user_profile(user, %{"last_name" => ""})
+      assert "can't be blank" in errors_on(changeset).last_name
+    end
+
+    test "leaves the name untouched when only biodata fields change", %{user: user} do
+      original = user.name
+      {:ok, updated} = Accounts.update_user_profile(user, %{"bio" => "Hello."})
+      assert updated.name == original
     end
   end
 

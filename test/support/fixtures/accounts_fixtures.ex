@@ -13,15 +13,34 @@ defmodule Wasomi.AccountsFixtures do
   def valid_user_password, do: "hello world!"
 
   def valid_user_attributes(attrs \\ %{}) do
+    attrs = Enum.into(attrs, %{})
+    {name, attrs} = Map.pop(attrs, :name, "Test User")
+    {first, last} = split_name(name)
+
     attrs =
       Enum.into(attrs, %{
-        name: "Test User",
+        first_name: first,
+        last_name: last,
         email: unique_user_email(),
         password: valid_user_password()
       })
 
     Map.put_new(attrs, :password_confirmation, attrs.password)
   end
+
+  defp split_name(nil), do: {"Test", "User"}
+
+  defp split_name(name) do
+    case String.split(name, ~r/\s+/, parts: 2, trim: true) do
+      [first, last] -> {pad_name(first), pad_name(last)}
+      [first] -> {pad_name(first), "Learner"}
+      _ -> {"Test", "User"}
+    end
+  end
+
+  # Names must be >= 2 chars; keep short/numeric fixture tokens ("User 1") valid.
+  defp pad_name(part) when byte_size(part) >= 2, do: part
+  defp pad_name(part), do: part <> part
 
   @doc """
   Registers a test user, confirmed by default (`confirmed: false` to opt

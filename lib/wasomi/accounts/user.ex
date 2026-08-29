@@ -6,6 +6,8 @@ defmodule Wasomi.Accounts.User do
 
   schema "users" do
     field :name, :string
+    field :first_name, :string
+    field :last_name, :string
     field :email, :string
     field :phone, :string
     field :password, :string, virtual: true, redact: true
@@ -126,7 +128,19 @@ defmodule Wasomi.Accounts.User do
   """
   def registration_changeset(user, attrs, opts \\ []) do
     user
-    |> cast(attrs, [:name, :email, :password, :password_confirmation, :phone])
+    |> cast(attrs, [
+      :name,
+      :first_name,
+      :last_name,
+      :email,
+      :password,
+      :password_confirmation,
+      :phone
+    ])
+    |> normalize_names()
+    |> validate_required([:first_name, :last_name])
+    |> validate_length(:first_name, min: 2, max: 80)
+    |> validate_length(:last_name, min: 2, max: 80)
     |> validate_name()
     |> validate_email(opts)
     |> validate_confirmation(:password, message: "does not match password")
@@ -192,6 +206,61 @@ defmodule Wasomi.Accounts.User do
 
   defp normalize_phone_input(value), do: value
 
+  # Accepts either `first_name` + `last_name` (the signup / settings forms) or
+  # a single `name` (seeds, fixtures, legacy callers) and keeps all three in
+  # sync: `name` is the canonical display/certificate string.
+  defp normalize_names(changeset) do
+    changeset =
+      changeset
+      |> trim_change(:first_name)
+      |> trim_change(:last_name)
+      |> trim_change(:name)
+
+    cond do
+      name_part_changed?(changeset, :first_name) or name_part_changed?(changeset, :last_name) ->
+        first = get_field(changeset, :first_name)
+        last = get_field(changeset, :last_name)
+
+        if is_binary(first) and is_binary(last) do
+          put_change(changeset, :name, String.trim(first <> " " <> last))
+        else
+          changeset
+        end
+
+      is_binary(get_change(changeset, :name)) and get_change(changeset, :name) != "" ->
+        case String.split(get_change(changeset, :name), ~r/\s+/, parts: 2, trim: true) do
+          [f, l] -> changeset |> put_change(:first_name, f) |> put_change(:last_name, l)
+          [f] -> put_change(changeset, :first_name, f)
+          _ -> changeset
+        end
+
+      true ->
+        changeset
+    end
+  end
+
+  defp name_part_changed?(changeset, field), do: match?({:ok, _}, fetch_change(changeset, field))
+
+  # A user always has a name once registered — so on the profile form we only
+  # object when an existing name field is *edited* to blank, never when it is
+  # simply absent from the params.
+  defp reject_blank_name_change(changeset, fields) do
+    Enum.reduce(fields, changeset, fn field, cs ->
+      case fetch_change(cs, field) do
+        {:ok, value} when is_binary(value) and value != "" -> cs
+        {:ok, _blank} -> add_error(cs, field, "can't be blank")
+        :error -> cs
+      end
+    end)
+  end
+
+  defp trim_change(changeset, field) do
+    update_change(changeset, field, fn
+      value when is_binary(value) -> String.trim(value)
+      value -> value
+    end)
+  end
+
   @doc """
   Changes a user's role through an explicit administrative code path.
 
@@ -206,9 +275,10 @@ defmodule Wasomi.Accounts.User do
   end
 
   @doc """
-  A user changeset for editing the learner's private profile: headline,
-  bio, country, organization, industry, occupation, experience level,
-  learning goal, and avatar.
+  A user changeset for editing the learner's private profile: first and
+  last name, headline, bio, country, organization, industry, occupation,
+  experience level, learning goal, and avatar. `name` is kept in sync from
+  first/last as the canonical display/certificate string.
 
   This is a self-editable, private surface — none of these fields are
   required, and none are exposed to other learners through any existing
@@ -221,6 +291,8 @@ defmodule Wasomi.Accounts.User do
   def profile_changeset(user, attrs) do
     user
     |> cast(blank_selects_to_nil(attrs), [
+      :first_name,
+      :last_name,
       :headline,
       :bio,
       :country,
@@ -231,6 +303,11 @@ defmodule Wasomi.Accounts.User do
       :learning_goal,
       :avatar_key
     ])
+    |> normalize_names()
+    |> reject_blank_name_change([:first_name, :last_name])
+    |> validate_length(:first_name, min: 2, max: 80)
+    |> validate_length(:last_name, min: 2, max: 80)
+    |> validate_length(:name, min: 2, max: 160)
     |> validate_length(:headline, max: @headline_max_length)
     |> validate_length(:bio, max: @bio_max_length)
     |> validate_length(:organization, max: @organization_max_length)
@@ -432,10 +509,10 @@ defmodule Wasomi.Accounts.User do
     end
   end
 
+  # `name` is derived from `first_name`/`last_name` in `normalize_names/1`,
+  # which are themselves required — so here we only bound the length.
   defp validate_name(changeset) do
-    changeset
-    |> validate_required([:name])
-    |> validate_length(:name, min: 2, max: 160)
+    validate_length(changeset, :name, min: 2, max: 160)
   end
 
   @doc """

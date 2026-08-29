@@ -409,16 +409,66 @@ defmodule Wasomi.AccountsTest do
       refute Enum.any?(Accounts.list_account_audit_events(user), &(&1.user_id == other_user.id))
     end
 
-    test "role changes are audited with old and new roles" do
+    test "role changes are audited with old and new roles, and the acting admin" do
       user = user_fixture()
+      admin = user_fixture()
 
-      assert {:ok, admin} = Accounts.update_user_role(user, :admin)
-      assert admin.role == :admin
+      assert {:ok, promoted} = Accounts.update_user_role(user, :admin, actor_id: admin.id)
+      assert promoted.role == :admin
 
-      assert %AuditEvent{event: :role_changed, metadata: metadata} =
+      assert %AuditEvent{event: :role_changed, metadata: metadata, actor_id: actor_id} =
                Accounts.list_account_audit_events(user) |> List.first()
 
       assert metadata == %{"old_role" => "learner", "new_role" => "admin"}
+      assert actor_id == admin.id
+    end
+
+    test "self-service events record the subject but no actor" do
+      user = user_fixture()
+
+      {:ok, _} =
+        Accounts.update_user_password(user, valid_user_password(), %{
+          password: "a fresh long password"
+        })
+
+      assert %AuditEvent{event: :password_changed, user_id: user_id, actor_id: nil} =
+               Accounts.list_account_audit_events(user) |> List.first()
+
+      assert user_id == user.id
+    end
+
+    test "an invalid event is logged and returns :error but never raises" do
+      user = user_fixture()
+      before = Accounts.list_account_audit_events(user)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, _} = Accounts.record_account_audit_event(user, :not_a_real_event, [])
+        end)
+
+      assert log =~ "account audit event"
+      assert log =~ "not_a_real_event"
+      assert Accounts.list_account_audit_events(user) == before
+    end
+
+    test "an account change still succeeds even when the audit write blows up" do
+      user = user_fixture()
+
+      # Break the table so the post-commit audit insert raises. `do_record`
+      # runs it in its own savepoint, so this doesn't poison the sandbox
+      # transaction, and the mutating call still returns {:ok, _}.
+      Repo.query!("ALTER TABLE account_audit_events RENAME TO account_audit_events_hidden")
+      on_exit(fn -> :ok end)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, updated} = Accounts.update_user_profile(user, %{"bio" => "still saved"})
+          assert updated.bio == "still saved"
+        end)
+
+      assert log =~ "account audit event :profile_updated could not be recorded"
+
+      Repo.query!("ALTER TABLE account_audit_events_hidden RENAME TO account_audit_events")
     end
 
     test "does not record role audit events when the role does not change" do

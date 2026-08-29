@@ -327,10 +327,15 @@ defmodule WasomiWeb.UserAuth do
     :ok
   end
 
-  defp audit_request_attrs(conn) do
+  @doc """
+  Request provenance (`:ip_address`, `:user_agent`, `:request_id`) for an
+  `Accounts.record_account_audit_event/3` call from a controller/plug.
+  """
+  def audit_request_attrs(conn) do
     [
       ip_address: remote_ip(conn),
-      user_agent: conn |> get_req_header("user-agent") |> List.first()
+      user_agent: conn |> get_req_header("user-agent") |> List.first(),
+      request_id: conn |> get_resp_header("x-request-id") |> List.first()
     ]
   end
 

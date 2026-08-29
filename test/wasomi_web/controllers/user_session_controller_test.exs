@@ -25,10 +25,14 @@ defmodule WasomiWeb.UserSessionControllerTest do
                event: :login_succeeded,
                user_id: user_id,
                ip_address: "127.0.0.1",
-               user_agent: "WasomiBrowser/1.0"
+               user_agent: "WasomiBrowser/1.0",
+               request_id: request_id
              } = Accounts.list_account_audit_events(user) |> List.first()
 
       assert user_id == user.id
+      # Plug.RequestId ran in the endpoint pipeline, so the event is
+      # correlatable with the application log line.
+      assert is_binary(request_id) and request_id != ""
     end
 
     test "logs the user in with remember me", %{conn: conn, user: user} do

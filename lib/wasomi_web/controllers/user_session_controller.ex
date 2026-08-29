@@ -80,21 +80,14 @@ defmodule WasomiWeb.UserSessionController do
   end
 
   defp record_failed_login(conn, user, email, reason) do
-    _result =
-      Accounts.record_account_audit_event(user, :login_failed,
-        metadata: Map.put(Accounts.audit_email_metadata(email), "reason", reason),
-        ip_address: remote_ip(conn),
-        user_agent: conn |> get_req_header("user-agent") |> List.first()
+    attrs =
+      Keyword.put(
+        UserAuth.audit_request_attrs(conn),
+        :metadata,
+        Map.put(Accounts.audit_email_metadata(email), "reason", reason)
       )
 
+    _result = Accounts.record_account_audit_event(user, :login_failed, attrs)
     :ok
   end
-
-  # See the note on `WasomiWeb.UserAuth.remote_ip/1`: this is `conn.remote_ip`,
-  # which is the proxy address when the app runs behind one.
-  defp remote_ip(%{remote_ip: remote_ip}) when is_tuple(remote_ip) do
-    remote_ip |> :inet.ntoa() |> to_string()
-  end
-
-  defp remote_ip(_conn), do: nil
 end

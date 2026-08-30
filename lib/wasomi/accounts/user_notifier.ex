@@ -6,7 +6,7 @@ defmodule Wasomi.Accounts.UserNotifier do
 
   # Delivers the email using the application mailer, rendering both the HTML
   # and text bodies from the same branded template so they can't drift apart.
-  defp deliver(recipient, subject, assigns) do
+  defp deliver(recipient, subject, assigns, attachments \\ []) do
     email =
       new()
       |> to(recipient)
@@ -14,6 +14,8 @@ defmodule Wasomi.Accounts.UserNotifier do
       |> subject(subject)
       |> html_body(Template.render(assigns))
       |> text_body(Template.render_text(assigns))
+
+    email = Enum.reduce(attachments, email, fn att, acc -> attachment(acc, att) end)
 
     with {:ok, _metadata} <- Mailer.deliver(email) do
       {:ok, email}
@@ -269,44 +271,49 @@ defmodule Wasomi.Accounts.UserNotifier do
   end
 
   @doc """
-  Confirms a completed course payment to the learner, ecommerce-receipt
-  style — a one-line order summary plus a pointer to the downloadable PDF
-  receipt. Expects `payment` with `:user` and `:course` preloaded.
+  Confirms a course payment to the learner, `pdf` bytes attached when given.
+  Expects `payment` with `:user` and `:course` preloaded.
   """
-  def deliver_payment_receipt(payment) do
+  def deliver_payment_receipt(payment, pdf \\ nil) do
     name = recipient_name(payment.user)
     base = WasomiWeb.Endpoint.url()
 
-    deliver(payment.user.email, "Your Wasomi receipt for #{payment.course.title}", %{
-      title: "Payment confirmed — you're enrolled",
-      intro: Template.rich(["Hi ", {:bold, name}, ","]),
-      body: [
-        Template.rich([
-          "Thanks for your payment. You now have full access to \"",
-          {:bold, payment.course.title},
-          "\"."
-        ]),
-        Template.rich([
-          {:bold, payment.course.title},
-          " — ",
-          {:bold, Wasomi.Payments.format_amount(payment)},
-          ", paid via ",
-          provider_name(payment.provider),
-          on_date(payment.paid_at),
-          "."
-        ]),
-        "A full PDF receipt is available any time from your Receipts page."
-      ],
-      cta: %{label: "Start learning now", url: "#{base}/learn/courses/#{payment.course.slug}"}
-    })
+    receipt_line =
+      if pdf,
+        do: "Your receipt is attached to this email as a PDF, and is also on your Receipts page.",
+        else: "A full PDF receipt is available any time from your Receipts page."
+
+    attachments =
+      if pdf,
+        do: [
+          Swoosh.Attachment.new({:data, pdf},
+            filename: Wasomi.Receipts.filename(payment),
+            content_type: "application/pdf"
+          )
+        ],
+        else: []
+
+    deliver(
+      payment.user.email,
+      "Your Wasomi receipt for #{payment.course.title}",
+      %{
+        title: "Payment confirmed — you're enrolled",
+        intro: Template.rich(["Hi ", {:bold, name}, ","]),
+        body: [
+          Template.rich([
+            "Thanks — your payment of ",
+            {:bold, Wasomi.Payments.format_amount(payment)},
+            " for \"",
+            {:bold, payment.course.title},
+            "\" is confirmed, and you now have full access."
+          ]),
+          receipt_line
+        ],
+        cta: %{label: "Start learning now", url: "#{base}/learn/courses/#{payment.course.slug}"}
+      },
+      attachments
+    )
   end
-
-  defp provider_name(:paystack), do: "Paystack"
-  defp provider_name(:mpesa), do: "M-Pesa"
-  defp provider_name(other), do: other |> to_string() |> String.capitalize()
-
-  defp on_date(%DateTime{} = at), do: " on " <> Calendar.strftime(at, "%B %-d, %Y")
-  defp on_date(_), do: ""
 
   @doc """
   Tells an active member about a new course-channel announcement.

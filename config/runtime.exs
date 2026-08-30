@@ -146,6 +146,12 @@ if config_env() == :prod do
 
   maybe_ipv6 = if System.get_env("ECTO_IPV6") in ~w(true 1), do: [:inet6], else: []
 
+  # Set START_CHROMIC_PDF=false on a host without headless Chrome so the
+  # release still boots (PDF downloads then 503 instead of crash-looping).
+  config :wasomi,
+         :start_chromic_pdf,
+         System.get_env("START_CHROMIC_PDF", "true") not in ~w(false 0)
+
   config :wasomi, Wasomi.Repo,
     # ssl: true,
     url: database_url,

@@ -486,8 +486,7 @@ defmodule Wasomi.Payments do
           {:payment_confirmed, enrollment}
         )
 
-        # Only on the transition to :successful — a webhook/reconciliation
-        # retry that finds the payment already confirmed must not re-notify.
+        # only on the actual :successful transition, so retries don't re-notify
         if newly_confirmed?, do: notify_learner_of_payment(payment)
 
         {:ok, %{payment: payment, enrollment: enrollment}}
@@ -497,8 +496,7 @@ defmodule Wasomi.Payments do
     end
   end
 
-  # Best-effort learner receipt/notification — the payment and enrollment are
-  # already committed, so a failure here is logged, never propagated.
+  # Best-effort — payment and enrollment are already committed.
   defp notify_learner_of_payment(payment) do
     Wasomi.Notifications.deliver_payment_confirmed(payment)
   rescue

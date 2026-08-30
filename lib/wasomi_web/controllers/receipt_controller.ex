@@ -11,7 +11,7 @@ defmodule WasomiWeb.ReceiptController do
         conn |> put_status(:not_found) |> text("Receipt not found")
 
       payment ->
-        case Receipts.pdf_for(user, id) do
+        case Receipts.render_pdf(user, payment) do
           {:ok, pdf} ->
             conn
             |> put_resp_content_type("application/pdf")

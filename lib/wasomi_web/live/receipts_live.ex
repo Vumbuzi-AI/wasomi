@@ -7,8 +7,7 @@ defmodule WasomiWeb.ReceiptsLive do
 
   use WasomiWeb, :live_view
 
-  alias Wasomi.{Payments, Receipts}
-  alias Wasomi.Paginate
+  alias Wasomi.{Paginate, Payments, Receipts}
 
   @impl true
   def mount(_params, _session, socket) do

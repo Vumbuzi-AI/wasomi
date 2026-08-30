@@ -259,9 +259,7 @@ defmodule Wasomi.Enrollments do
   def enroll_free_course(nil, %Course{}), do: {:error, :unauthenticated}
 
   def enroll_free_course(%User{} = user, %Course{is_free: true} = course) do
-    # Captured before the transaction so a re-enrolment (idempotent) doesn't
-    # fire a second notification/email. Post-commit and best-effort, like
-    # `grant_access/3`.
+    # so a repeat enrolment doesn't re-notify
     already_enrolled? = can_access_course?(user, course)
 
     result =

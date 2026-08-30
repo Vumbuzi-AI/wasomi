@@ -39,8 +39,16 @@ defmodule Wasomi.Receipts do
   def pdf_for(%User{} = user, payment_id) do
     case get_for_user(user, payment_id) do
       nil -> {:error, :not_found}
-      payment -> renderer().render(assigns_for(user, payment))
+      payment -> render_pdf(user, payment)
     end
+  end
+
+  @doc """
+  Renders an already-authorised payment (e.g. one just returned by
+  `get_for_user/2`) as receipt PDF bytes, skipping the re-fetch.
+  """
+  def render_pdf(%User{} = user, %Payment{course: %{}} = payment) do
+    renderer().render(assigns_for(user, payment))
   end
 
   @doc "The filename to offer for a receipt download."
@@ -56,7 +64,6 @@ defmodule Wasomi.Receipts do
       issuer_name: Branding.issuer_name(),
       address_lines: Keyword.get(branding, :address_lines, []) |> Enum.reject(&(&1 in [nil, ""])),
       issuer_email: branding[:email],
-      issuer_phone: branding[:phone],
       issuer_website: branding[:website],
       receipt_no: "WSM-" <> String.pad_leading(to_string(payment.id), 5, "0"),
       reference: payment.provider_reference,

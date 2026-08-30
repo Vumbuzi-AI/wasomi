@@ -131,7 +131,12 @@ defmodule Wasomi.NotificationsTest do
     import Swoosh.TestAssertions
     import Wasomi.PaymentsFixtures
 
-    test "creates an in-app notification and a receipt email for the learner" do
+    setup do
+      Mox.stub(Wasomi.ReceiptRendererMock, :render, fn _assigns -> {:ok, "%PDF-1.4 test"} end)
+      :ok
+    end
+
+    test "creates an in-app notification and a receipt email with the PDF attached" do
       learner = user_fixture(%{name: "Ada"})
       course = course_fixture(status: :published, title: "Paid GS1 Course")
 
@@ -149,7 +154,9 @@ defmodule Wasomi.NotificationsTest do
       assert notification.kind == :enrollment_granted
       assert notification.body =~ "Paid GS1 Course"
 
-      assert_email_sent(subject: "Your Wasomi receipt for Paid GS1 Course")
+      assert_received {:email, email}
+      assert email.subject == "Your Wasomi receipt for Paid GS1 Course"
+      assert [%Swoosh.Attachment{content_type: "application/pdf"}] = email.attachments
     end
   end
 

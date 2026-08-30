@@ -214,7 +214,7 @@ defmodule Wasomi.Notifications do
     payment = Repo.preload(payment, [:user, :course])
 
     try do
-      UserNotifier.deliver_payment_receipt(payment)
+      UserNotifier.deliver_payment_receipt(payment, receipt_pdf(payment))
     rescue
       error ->
         Logger.error(
@@ -243,6 +243,16 @@ defmodule Wasomi.Notifications do
 
         {:error, changeset}
     end
+  end
+
+  # Best-effort — a failed render just means no attachment on the email.
+  defp receipt_pdf(%Payment{} = payment) do
+    case Wasomi.Receipts.pdf_for(payment.user, payment.id) do
+      {:ok, bytes} -> bytes
+      _ -> nil
+    end
+  rescue
+    _ -> nil
   end
 
   @doc """

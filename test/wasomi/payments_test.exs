@@ -13,6 +13,13 @@ defmodule Wasomi.PaymentsTest do
 
   setup :verify_on_exit!
 
+  # Paid-enrolment confirmation renders a receipt PDF for the email; keep it
+  # off headless Chrome in tests.
+  setup do
+    stub(Wasomi.ReceiptRendererMock, :render, fn _assigns -> {:ok, "%PDF-1.4 test"} end)
+    :ok
+  end
+
   test "formats displayed money without cents" do
     assert Payments.format_minor(150_050, "KES") == "1,500 KES"
     assert Payments.format_minor(80_000, "KES") == "800 KES"

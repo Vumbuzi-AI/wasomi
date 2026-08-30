@@ -6,7 +6,9 @@ defmodule Wasomi.ReceiptsTest do
   import Wasomi.CatalogFixtures
   import Wasomi.PaymentsFixtures
 
+  alias Wasomi.Payments.Payment
   alias Wasomi.Receipts
+  alias Wasomi.Receipts.Template
 
   setup :verify_on_exit!
 
@@ -115,13 +117,13 @@ defmodule Wasomi.ReceiptsTest do
   end
 
   test "filename/1 is derived from the provider reference" do
-    assert Receipts.filename(%Wasomi.Payments.Payment{provider_reference: "PS_abc 123"}) ==
+    assert Receipts.filename(%Payment{provider_reference: "PS_abc 123"}) ==
              "wasomi-receipt-PS-abc-123.pdf"
   end
 
   test "the template embeds the Outfit @font-face and the receipt content" do
     html =
-      Wasomi.Receipts.Template.render_html(%{
+      Template.render_html(%{
         issuer_name: "GS1 Kenya",
         address_lines: ["Nairobi, Kenya"],
         issuer_email: "info@gs1kenya.org",

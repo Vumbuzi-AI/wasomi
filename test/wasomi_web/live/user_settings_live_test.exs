@@ -1,5 +1,7 @@
 defmodule WasomiWeb.UserSettingsLiveTest do
-  use WasomiWeb.ConnCase, async: true
+  # not async: the avatar tests swap the global :storage_provider app env,
+  # which would race any other test resolving Wasomi.Storage.
+  use WasomiWeb.ConnCase, async: false
 
   alias Wasomi.Accounts
   import Phoenix.LiveViewTest
@@ -23,6 +25,16 @@ defmodule WasomiWeb.UserSettingsLiveTest do
         |> live(~p"/users/settings")
 
       assert html =~ ~s(id="settings-profile-panel" class="block")
+      assert html =~ ~s(id="settings-public-panel" class="hidden")
+      assert html =~ ~s(id="settings-security-panel" class="hidden")
+
+      html =
+        lv
+        |> element("a[href='/users/settings?section=public']", "Public profile")
+        |> render_click()
+
+      assert html =~ ~s(id="settings-profile-panel" class="hidden")
+      assert html =~ ~s(id="settings-public-panel" class="block")
       assert html =~ ~s(id="settings-security-panel" class="hidden")
 
       html =
@@ -31,6 +43,7 @@ defmodule WasomiWeb.UserSettingsLiveTest do
         |> render_click()
 
       assert html =~ ~s(id="settings-profile-panel" class="hidden")
+      assert html =~ ~s(id="settings-public-panel" class="hidden")
       assert html =~ ~s(id="settings-security-panel" class="block")
 
       html =
@@ -39,6 +52,7 @@ defmodule WasomiWeb.UserSettingsLiveTest do
         |> render_click()
 
       assert html =~ ~s(id="settings-profile-panel" class="block")
+      assert html =~ ~s(id="settings-public-panel" class="hidden")
       assert html =~ ~s(id="settings-security-panel" class="hidden")
 
       {:ok, _lv, html} =
@@ -57,6 +71,13 @@ defmodule WasomiWeb.UserSettingsLiveTest do
 
       assert html =~ ~s(id="settings-profile-panel" class="hidden")
       assert html =~ ~s(id="settings-security-panel" class="block")
+
+      {:ok, _lv, html} =
+        conn
+        |> log_in_user(user_fixture())
+        |> live(~p"/users/settings?section=public")
+
+      assert html =~ ~s(id="settings-public-panel" class="block")
     end
 
     test "redirects if user is not logged in", %{conn: conn} do
@@ -375,6 +396,17 @@ defmodule WasomiWeb.UserSettingsLiveTest do
       assert render(view) =~ "larger than the 2 MB limit"
     end
 
+    test "avatar picker is wired through the crop-and-preview processor", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/users/settings")
+
+      assert has_element?(
+               view,
+               "#avatar-upload-processor[phx-hook='ImageUploadProcessor'][data-aspect-ratio='1'][data-crop-title='Crop your profile picture']"
+             )
+
+      assert has_element?(view, "#avatar-upload-processor input[data-role='picker']")
+    end
+
     test "uploading an avatar shows a preview immediately, before saving", %{
       conn: conn,
       user: user
@@ -393,6 +425,7 @@ defmodule WasomiWeb.UserSettingsLiveTest do
       html = render_upload(avatar, "avatar.png")
       assert html =~ "https://cdn.example.test/avatars/#{user.id}/avatar.png"
       assert html =~ ~s(alt="Avatar preview")
+      assert html =~ "Picture ready. Save profile to keep it."
       refute Accounts.get_user!(user.id).avatar_key
     end
 
@@ -490,6 +523,33 @@ defmodule WasomiWeb.UserSettingsLiveTest do
       refute Accounts.get_user!(user.id).avatar_key
     end
 
+    test "a failed avatar preflight does not block saving the rest of the profile", %{
+      conn: conn,
+      user: user
+    } do
+      previous_provider = Application.get_env(:wasomi, :storage_provider)
+      on_exit(fn -> Application.put_env(:wasomi, :storage_provider, previous_provider) end)
+      Application.put_env(:wasomi, :storage_provider, __MODULE__.FailingAvatarStorageMock)
+
+      {:ok, view, _html} = live(conn, ~p"/users/settings")
+
+      avatar =
+        file_input(view, "#profile_form", :avatar, [
+          %{name: "avatar.png", content: "fake-png-bytes", type: "image/png"}
+        ])
+
+      assert {:error, [[_ref, %{reason: _}]]} = render_upload(avatar, "avatar.png")
+
+      html =
+        view
+        |> form("#profile_form", %{"user" => %{"headline" => "Still saved"}})
+        |> render_submit()
+
+      assert html =~ "wasn&#39;t saved"
+      assert Accounts.get_user!(user.id).headline == "Still saved"
+      refute Accounts.get_user!(user.id).avatar_key
+    end
+
     test "renders country as a searchable combobox with East Africa options first", %{
       conn: conn
     } do
@@ -537,6 +597,139 @@ defmodule WasomiWeb.UserSettingsLiveTest do
     end
   end
 
+  describe "update public profile form" do
+    setup %{conn: conn} do
+      user = user_fixture(name: "One Student")
+      %{conn: log_in_user(conn, user), user: user}
+    end
+
+    test "renders public profile section copy and privacy boundaries", %{conn: conn, user: user} do
+      {:ok, view, html} = live(conn, ~p"/users/settings?section=public")
+
+      assert html =~ "Public profile"
+      assert html =~ "Your email and phone stay private"
+      assert html =~ "Certificate PDF downloads remain private"
+      assert html =~ "Your profile link appears here after you save your public profile"
+      assert html =~ "Save Public Profile"
+      assert html =~ "Save your public profile to preview it."
+      assert html =~ "/learners/"
+      assert html =~ ~S|pattern="[a-z0-9]+(-[a-z0-9]+)*"|
+      assert html =~ ~s(value="one-student-#{user.id}")
+      assert html =~ "one-student-#{user.id}"
+      assert html =~ "one-#{user.id}"
+      refute has_element?(view, "a", "Preview Profile")
+
+      assert html =~ "https://www.linkedin.com/in/"
+
+      assert html =~
+               ~S|pattern="(https://(www\.)?linkedin\.com/in/)?[A-Za-z0-9][A-Za-z0-9-]{2,99}/?(\?.*)?"|
+    end
+
+    test "lets learners choose a suggested public profile slug", %{conn: conn, user: user} do
+      {:ok, view, _html} = live(conn, ~p"/users/settings?section=public")
+
+      html =
+        view
+        |> element("button[phx-value-slug='one-#{user.id}']", "one-#{user.id}")
+        |> render_click()
+
+      assert html =~ ~s(value="one-#{user.id}")
+    end
+
+    test "shows the link only as an unsaved preview until the profile is saved", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/users/settings?section=public")
+
+      html =
+        view
+        |> form("#public_profile_form", %{
+          "user" => %{"public_profile_enabled" => "true", "public_profile_slug" => "one-student"}
+        })
+        |> render_change()
+
+      assert html =~ "Your link will be"
+      assert html =~ "once you save."
+      refute has_element?(view, "a[href='/learners/one-student']")
+      refute has_element?(view, "a", "Preview Profile")
+    end
+
+    test "publishes a learner profile and shows the public URL", %{conn: conn, user: user} do
+      {:ok, view, _html} = live(conn, ~p"/users/settings?section=public")
+
+      html =
+        view
+        |> form("#public_profile_form", %{
+          "user" => %{
+            "public_profile_enabled" => "true",
+            "public_profile_slug" => "One Student",
+            "linkedin_url" => "one-student"
+          }
+        })
+        |> render_submit()
+
+      updated = Accounts.get_user!(user.id)
+      assert updated.public_profile_enabled
+      assert updated.public_profile_slug == "one-student"
+      assert updated.linkedin_url == "https://www.linkedin.com/in/one-student"
+      assert html =~ "Public profile settings saved."
+      assert html =~ ~p"/learners/one-student"
+      assert has_element?(view, "a[href='/learners/one-student']", "Preview Profile")
+    end
+
+    test "generates a slug when publishing without one", %{conn: conn, user: user} do
+      {:ok, view, _html} = live(conn, ~p"/users/settings?section=public")
+
+      view
+      |> form("#public_profile_form", %{
+        "user" => %{
+          "public_profile_enabled" => "true",
+          "public_profile_slug" => ""
+        }
+      })
+      |> render_submit()
+
+      assert Accounts.get_user!(user.id).public_profile_slug == "one-student-#{user.id}"
+    end
+
+    test "rejects invalid LinkedIn URLs", %{conn: conn, user: user} do
+      {:ok, view, _html} = live(conn, ~p"/users/settings?section=public")
+
+      html =
+        view
+        |> form("#public_profile_form", %{
+          "user" => %{
+            "public_profile_enabled" => "true",
+            "public_profile_slug" => "one-student",
+            "linkedin_url" => "https://example.com/in/one-student"
+          }
+        })
+        |> render_submit()
+
+      assert html =~ "must be a LinkedIn profile URL"
+      refute Accounts.get_user!(user.id).public_profile_enabled
+    end
+
+    test "validates LinkedIn URLs on change through the server changeset", %{
+      conn: conn,
+      user: user
+    } do
+      {:ok, view, _html} = live(conn, ~p"/users/settings?section=public")
+
+      html =
+        view
+        |> form("#public_profile_form", %{
+          "user" => %{
+            "public_profile_enabled" => "true",
+            "public_profile_slug" => "one-student",
+            "linkedin_url" => "https://example.com/in/one-student"
+          }
+        })
+        |> render_change()
+
+      assert html =~ "must be a LinkedIn profile URL"
+      refute Accounts.get_user!(user.id).public_profile_enabled
+    end
+  end
+
   defmodule AvatarStorageMock do
     def presign_upload(user, _attrs) do
       {:ok,
@@ -559,5 +752,11 @@ defmodule WasomiWeb.UserSettingsLiveTest do
          content_type: "image/png"
        }}
     end
+  end
+
+  defmodule FailingAvatarStorageMock do
+    # Mirrors Wasomi.Storage.R2 when no R2 credentials are configured: the
+    # external preflight fails, leaving the entry stuck in a non-done state.
+    def presign_upload(_user, _attrs), do: {:error, :r2_not_configured}
   end
 end

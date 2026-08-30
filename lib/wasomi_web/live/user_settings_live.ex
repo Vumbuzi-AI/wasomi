@@ -5,6 +5,8 @@ defmodule WasomiWeb.UserSettingsLive do
   alias Wasomi.Accounts.{Countries, User}
 
   @max_avatar_bytes 2_000_000
+  @avatar_failed_msg "That picture couldn't be uploaded, so it wasn't saved. " <>
+                       "Your other changes were saved — please try the picture again."
 
   def render(assigns) do
     ~H"""
@@ -31,6 +33,12 @@ defmodule WasomiWeb.UserSettingsLive do
               class={settings_nav_class(@settings_tab, :profile)}
             >
               <.icon name="hero-identification" class="h-5 w-5" /> Profile
+            </.link>
+            <.link
+              patch={~p"/users/settings?section=public"}
+              class={settings_nav_class(@settings_tab, :public)}
+            >
+              <.icon name="hero-globe-alt" class="h-5 w-5" /> Public profile
             </.link>
             <.link
               patch={~p"/users/settings?section=security"}
@@ -134,6 +142,143 @@ defmodule WasomiWeb.UserSettingsLive do
                 </div>
               </section>
             </.form>
+
+            <section id="settings-public-panel" class={settings_panel_class(@settings_tab, :public)}>
+              <div>
+                <h2 class="text-2xl font-semibold text-ink">Public profile</h2>
+                <p class="mt-2 max-w-2xl text-sm text-body">
+                  Create a shareable learner page with your selected profile details and verified certificates. Your email and phone stay private.
+                </p>
+              </div>
+
+              <.form
+                for={@public_profile_form}
+                id="public_profile_form"
+                phx-submit="save_public_profile"
+                phx-change="validate_public_profile"
+                class="mt-8 max-w-2xl space-y-6"
+              >
+                <div class="rounded-2xl border border-black/5 bg-surface p-5">
+                  <.input
+                    field={@public_profile_form[:public_profile_enabled]}
+                    type="checkbox"
+                    label="Make my learner profile public"
+                  />
+                  <p class="mt-3 text-sm text-body">
+                    Public profiles show your name, avatar, headline, bio, industry, country, LinkedIn link, and certificates. Email, phone, occupation, organization and other account details are never shown.
+                  </p>
+                </div>
+
+                <div>
+                  <.label for={@public_profile_form[:public_profile_slug].id}>
+                    Public profile URL
+                  </.label>
+                  <div class="mt-2 flex min-h-12 overflow-hidden rounded-lg border border-zinc-300 bg-white shadow-sm focus-within:border-zinc-400">
+                    <span class="inline-flex items-center border-r border-zinc-200 bg-surface px-3 text-sm text-muted">
+                      /learners/
+                    </span>
+                    <input
+                      type="text"
+                      id={@public_profile_form[:public_profile_slug].id}
+                      name={@public_profile_form[:public_profile_slug].name}
+                      value={
+                        Phoenix.HTML.Form.normalize_value(
+                          "text",
+                          @public_profile_form[:public_profile_slug].value
+                        )
+                      }
+                      placeholder="your-name"
+                      pattern="[a-z0-9]+(-[a-z0-9]+)*"
+                      class="block min-w-0 flex-1 border-0 text-zinc-900 focus:ring-0 sm:text-sm"
+                    />
+                  </div>
+                  <.error :for={msg <- @public_profile_form[:public_profile_slug].errors}>
+                    {translate_error(msg)}
+                  </.error>
+
+                  <div :if={@public_profile_slug_suggestions != []} class="mt-3 flex flex-wrap gap-2">
+                    <button
+                      :for={slug <- @public_profile_slug_suggestions}
+                      type="button"
+                      phx-click="choose_public_profile_slug"
+                      phx-value-slug={slug}
+                      class="rounded-full border border-black/10 bg-white px-3 py-1.5 text-xs font-semibold text-ink transition hover:border-primary/30 hover:text-primary"
+                    >
+                      {slug}
+                    </button>
+                  </div>
+                </div>
+
+                <p :if={@saved_public_profile_url} class="text-sm text-body">
+                  Your profile link:
+                  <.link
+                    navigate={@saved_public_profile_url}
+                    class="font-semibold text-primary hover:text-ink"
+                  >
+                    {@saved_public_profile_url}
+                  </.link>
+                </p>
+                <p :if={!@saved_public_profile_url && @public_profile_url} class="text-sm text-muted">
+                  Your link will be <span class="font-semibold text-body">{@public_profile_url}</span>
+                  once you save.
+                </p>
+                <p :if={!@saved_public_profile_url && !@public_profile_url} class="text-sm text-body">
+                  Your profile link appears here after you save your public profile.
+                </p>
+
+                <div>
+                  <.label for={@public_profile_form[:linkedin_url].id}>
+                    LinkedIn profile
+                  </.label>
+                  <div class="mt-2 flex min-h-12 overflow-hidden rounded-lg border border-zinc-300 bg-white shadow-sm focus-within:border-zinc-400">
+                    <span class="inline-flex items-center border-r border-zinc-200 bg-surface px-3 text-sm text-muted">
+                      https://www.linkedin.com/in/
+                    </span>
+                    <input
+                      type="text"
+                      id={@public_profile_form[:linkedin_url].id}
+                      name={@public_profile_form[:linkedin_url].name}
+                      value={linkedin_profile_handle(@public_profile_form[:linkedin_url].value)}
+                      placeholder="your-name"
+                      pattern="(https://(www\.)?linkedin\.com/in/)?[A-Za-z0-9][A-Za-z0-9-]{2,99}/?(\?.*)?"
+                      class="block min-w-0 flex-1 border-0 text-zinc-900 focus:ring-0 sm:text-sm"
+                    />
+                  </div>
+                  <.error :for={msg <- @public_profile_form[:linkedin_url].errors}>
+                    {translate_error(msg)}
+                  </.error>
+                </div>
+
+                <div class="rounded-2xl border border-black/5 p-5">
+                  <p class="text-sm font-semibold text-ink">Certificates</p>
+                  <p class="mt-1 text-sm text-body">
+                    Once your profile is public, your earned certificates appear here by default through their verification pages. Certificate PDF downloads remain private to your account.
+                  </p>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-3 pt-2">
+                  <.button phx-disable-with="Saving..." class="rounded-full bg-ink px-5">
+                    Save Public Profile
+                  </.button>
+
+                  <.link
+                    :if={@saved_public_profile_url}
+                    navigate={@saved_public_profile_url}
+                    class="inline-flex min-h-11 items-center justify-center rounded-full border border-black/10 bg-white px-5 text-sm font-semibold text-ink shadow-sm transition hover:border-primary/30 hover:text-primary"
+                  >
+                    Preview Profile
+                  </.link>
+
+                  <span
+                    :if={!@saved_public_profile_url}
+                    title="Save your public profile to preview it."
+                    class="inline-flex min-h-11 cursor-not-allowed items-center justify-center rounded-full border border-black/10 bg-white px-5 text-sm font-semibold text-muted opacity-60"
+                  >
+                    Preview Profile
+                  </span>
+                </div>
+              </.form>
+            </section>
 
             <section
               id="settings-security-panel"
@@ -326,7 +471,7 @@ defmodule WasomiWeb.UserSettingsLive do
 
   defp avatar_upload(assigns) do
     has_image? = assigns.current_url != nil || assigns.upload.entries != []
-    assigns = assign(assigns, :has_image?, has_image?)
+    assigns = assign(assigns, has_image?: has_image?, max_bytes: @max_avatar_bytes)
 
     ~H"""
     <div class="space-y-4">
@@ -334,7 +479,13 @@ defmodule WasomiWeb.UserSettingsLive do
         <div class="grid h-28 w-28 shrink-0 place-items-center overflow-hidden rounded-full border-2 border-zinc-100 bg-zinc-50 shadow-sm sm:h-32 sm:w-32">
           <%= if entry = List.first(@upload.entries) do %>
             <%= if entry.done? && @current_url do %>
-              <img src={@current_url} alt="Avatar preview" class="h-full w-full object-cover" />
+              <img
+                id="avatar-preview-uploaded"
+                phx-hook="ImageRetry"
+                src={@current_url}
+                alt="Avatar preview"
+                class="h-full w-full object-cover"
+              />
             <% else %>
               <.live_img_preview
                 entry={entry}
@@ -344,7 +495,13 @@ defmodule WasomiWeb.UserSettingsLive do
             <% end %>
           <% else %>
             <%= if @current_url do %>
-              <img src={@current_url} alt="Avatar preview" class="h-full w-full object-cover" />
+              <img
+                id="avatar-preview-current"
+                phx-hook="ImageRetry"
+                src={@current_url}
+                alt="Avatar preview"
+                class="h-full w-full object-cover"
+              />
             <% else %>
               <div class="grid place-items-center text-zinc-300">
                 <.icon name="hero-user" class="h-14 w-14" />
@@ -354,10 +511,26 @@ defmodule WasomiWeb.UserSettingsLive do
         </div>
 
         <div class="flex flex-col items-start gap-2.5">
-          <label class="inline-flex cursor-pointer items-center justify-center rounded-xl bg-ink px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-primary">
-            <span>{if @has_image?, do: "Change picture", else: "Upload picture"}</span>
-            <.live_file_input upload={@upload} class="sr-only" />
-          </label>
+          <div
+            id="avatar-upload-processor"
+            phx-hook="ImageUploadProcessor"
+            phx-update="ignore"
+            data-aspect-ratio="1"
+            data-crop-title="Crop your profile picture"
+            data-live-input={@upload.ref}
+            data-max-bytes={@max_bytes}
+          >
+            <label class="inline-flex cursor-pointer items-center justify-center rounded-xl bg-ink px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-primary">
+              <span>{if @has_image?, do: "Change picture", else: "Upload picture"}</span>
+              <input
+                type="file"
+                data-role="picker"
+                accept="image/png,image/jpeg,image/webp"
+                class="sr-only"
+              />
+            </label>
+          </div>
+          <.live_file_input upload={@upload} class="hidden" />
 
           <%= if entry = List.first(@upload.entries) do %>
             <button
@@ -405,6 +578,9 @@ defmodule WasomiWeb.UserSettingsLive do
           <p :for={err <- upload_errors(@upload, entry)} class="text-sm text-rose-600">
             {avatar_upload_error_to_string(err)}
           </p>
+          <p :if={entry.done?} class="text-sm font-medium text-emerald-700">
+            Picture ready. Save profile to keep it.
+          </p>
         </div>
       </div>
     </div>
@@ -429,6 +605,13 @@ defmodule WasomiWeb.UserSettingsLive do
     email_changeset = Accounts.change_user_email(user)
     password_changeset = Accounts.change_user_password(user)
     profile_changeset = Accounts.change_user_profile(user)
+    public_profile_suggestions = Accounts.public_profile_slug_suggestions(user)
+
+    public_profile_changeset =
+      Accounts.change_user_public_profile(
+        user,
+        initial_public_profile_attrs(user, public_profile_suggestions)
+      )
 
     socket =
       socket
@@ -441,6 +624,10 @@ defmodule WasomiWeb.UserSettingsLive do
       |> assign(:trigger_submit, false)
       |> assign(:settings_tab, :profile)
       |> assign(:profile_form, to_form(profile_changeset))
+      |> assign(:public_profile_slug_suggestions, public_profile_suggestions)
+      |> assign(:public_profile_form, to_form(public_profile_changeset))
+      |> assign_public_profile_url()
+      |> assign_saved_public_profile_url()
       |> allow_upload(:avatar,
         accept: ~w(.png .jpg .jpeg .webp),
         max_entries: 1,
@@ -535,8 +722,56 @@ defmodule WasomiWeb.UserSettingsLive do
 
   def handle_event("save_profile", %{"user" => user_params}, socket) do
     case merge_avatar_upload(socket, user_params) do
-      {:ok, user_params} -> save_profile(socket, user_params)
-      {:error, :missing_public_url} -> {:noreply, missing_public_url_flash(socket)}
+      {:ok, socket, user_params} -> save_profile(socket, user_params)
+      {:error, socket, :missing_public_url} -> {:noreply, missing_public_url_flash(socket)}
+    end
+  end
+
+  def handle_event("validate_public_profile", %{"user" => user_params}, socket) do
+    changeset =
+      socket.assigns.current_user
+      |> Accounts.change_user_public_profile(user_params)
+      |> Map.put(:action, :validate)
+
+    {:noreply,
+     socket
+     |> assign(:public_profile_form, to_form(changeset))
+     |> assign_public_profile_url()}
+  end
+
+  def handle_event("choose_public_profile_slug", %{"slug" => slug}, socket) do
+    attrs =
+      socket.assigns.public_profile_form.source
+      |> public_profile_form_attrs()
+      |> Map.put("public_profile_slug", slug)
+
+    changeset =
+      socket.assigns.current_user
+      |> Accounts.change_user_public_profile(attrs)
+      |> Map.put(:action, :validate)
+
+    {:noreply,
+     socket
+     |> assign(:public_profile_form, to_form(changeset))
+     |> assign_public_profile_url()}
+  end
+
+  def handle_event("save_public_profile", %{"user" => user_params}, socket) do
+    case Accounts.update_user_public_profile(socket.assigns.current_user, user_params) do
+      {:ok, user} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Public profile settings saved.")
+         |> assign(:current_user, user)
+         |> assign(:public_profile_form, to_form(Accounts.change_user_public_profile(user)))
+         |> assign_public_profile_url()
+         |> assign_saved_public_profile_url()}
+
+      {:error, changeset} ->
+        {:noreply,
+         socket
+         |> assign(:public_profile_form, to_form(changeset))
+         |> assign_public_profile_url()}
     end
   end
 
@@ -591,6 +826,58 @@ defmodule WasomiWeb.UserSettingsLive do
     assign(socket, :avatar_url, current_avatar_url(socket, changeset))
   end
 
+  defp assign_public_profile_url(socket) do
+    changeset = socket.assigns.public_profile_form.source
+    slug = Ecto.Changeset.get_field(changeset, :public_profile_slug)
+    enabled? = Ecto.Changeset.get_field(changeset, :public_profile_enabled)
+
+    assign(
+      socket,
+      :public_profile_url,
+      if(enabled? and slug not in [nil, ""], do: ~p"/learners/#{slug}", else: nil)
+    )
+  end
+
+  defp initial_public_profile_attrs(user, suggestions) do
+    if user.public_profile_slug in [nil, ""] do
+      %{"public_profile_slug" => List.first(suggestions)}
+    else
+      %{}
+    end
+  end
+
+  defp public_profile_form_attrs(changeset) do
+    %{
+      "public_profile_enabled" => Ecto.Changeset.get_field(changeset, :public_profile_enabled),
+      "public_profile_slug" => Ecto.Changeset.get_field(changeset, :public_profile_slug),
+      "linkedin_url" => Ecto.Changeset.get_field(changeset, :linkedin_url)
+    }
+  end
+
+  defp linkedin_profile_handle(value) when is_binary(value) do
+    uri = URI.parse(value)
+
+    case {uri.scheme, uri.host, String.split(uri.path || "", "/", trim: true)} do
+      {"https", host, ["in", handle]} when host in ["linkedin.com", "www.linkedin.com"] -> handle
+      _ -> value
+    end
+  end
+
+  defp linkedin_profile_handle(_value), do: ""
+
+  defp assign_saved_public_profile_url(socket) do
+    user = socket.assigns.current_user
+
+    assign(
+      socket,
+      :saved_public_profile_url,
+      if(user.public_profile_enabled and user.public_profile_slug not in [nil, ""],
+        do: ~p"/learners/#{user.public_profile_slug}",
+        else: nil
+      )
+    )
+  end
+
   defp current_avatar_url(socket, changeset) do
     pending_avatar_url(socket) || Ecto.Changeset.get_field(changeset, :avatar_key)
   end
@@ -607,10 +894,34 @@ defmodule WasomiWeb.UserSettingsLive do
   end
 
   defp merge_avatar_upload(socket, params) do
+    {socket, avatar_failed?} = drop_incomplete_avatar_entries(socket)
+
     case consume_avatar_upload(socket) do
-      {:ok, url} -> {:ok, Map.put(params, "avatar_key", url)}
-      :no_upload -> {:ok, params}
-      {:error, :missing_public_url} = error -> error
+      {:ok, url} ->
+        {:ok, socket, Map.put(params, "avatar_key", url)}
+
+      :no_upload when avatar_failed? ->
+        {:ok, put_flash(socket, :error, @avatar_failed_msg), params}
+
+      :no_upload ->
+        {:ok, socket, params}
+
+      {:error, :missing_public_url} ->
+        {:error, socket, :missing_public_url}
+    end
+  end
+
+  # Auto-upload entries that fail their external preflight (e.g. R2 credentials
+  # missing in the environment) linger in a non-`done?` state and would make
+  # `consume_uploaded_entries/3` raise on the next submit, crashing the view.
+  # Drop them so a failed picture never blocks saving the rest of the profile.
+  defp drop_incomplete_avatar_entries(socket) do
+    case uploaded_entries(socket, :avatar) do
+      {_done, []} ->
+        {socket, false}
+
+      {_done, [_ | _] = incomplete} ->
+        {Enum.reduce(incomplete, socket, &cancel_upload(&2, :avatar, &1.ref)), true}
     end
   end
 
@@ -662,6 +973,7 @@ defmodule WasomiWeb.UserSettingsLive do
   end
 
   defp settings_tab("profile"), do: :profile
+  defp settings_tab("public"), do: :public
   defp settings_tab("security"), do: :security
   defp settings_tab("account"), do: :security
   defp settings_tab("learning"), do: :profile

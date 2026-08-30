@@ -176,6 +176,28 @@ defmodule Wasomi.Accounts do
   end
 
   @doc """
+  Gets a learner whose public profile is enabled for the given slug.
+  """
+  def get_public_profile_by_slug(slug) when is_binary(slug) do
+    Repo.get_by(User, role: :learner, public_profile_enabled: true, public_profile_slug: slug)
+  end
+
+  def get_public_profile_by_slug(_slug), do: nil
+
+  @public_profile_fields ~w(name avatar_key headline bio linkedin_url industry country)a
+
+  @doc """
+  Projects a user down to only the fields that appear on the public profile
+  page. Contact details (email, phone), account internals (role, hashed
+  password) and private biodata (occupation, organization, learning goal,
+  experience level) are all dropped here so the public LiveView never holds
+  more than it renders.
+  """
+  def public_profile_view(%User{} = user) do
+    Map.take(user, @public_profile_fields)
+  end
+
+  @doc """
   Returns the list of users, newest first, optionally filtered.
 
   ## Options
@@ -470,6 +492,66 @@ defmodule Wasomi.Accounts do
       {:ok, updated}
     end
   end
+
+  @doc """
+  Returns a changeset for public profile visibility and public identity fields.
+  """
+  def change_user_public_profile(%User{} = user, attrs \\ %{}) do
+    User.public_profile_changeset(user, attrs)
+  end
+
+  @doc """
+  Returns readable, collision-resistant public profile slug suggestions.
+  """
+  def public_profile_slug_suggestions(%User{} = user) do
+    words =
+      (user.name || "learner")
+      |> String.downcase()
+      |> String.replace(~r/[^a-z0-9]+/, " ")
+      |> String.split(" ", trim: true)
+
+    bases =
+      [
+        Enum.join(words, "-"),
+        words |> Enum.take(2) |> Enum.join("-"),
+        List.first(words)
+      ]
+      |> Enum.reject(&blank?/1)
+      |> Enum.uniq()
+
+    bases = if bases == [], do: ["learner"], else: bases
+
+    bases
+    |> Enum.map(&"#{&1}-#{user.id}")
+    |> Enum.take(3)
+  end
+
+  @doc """
+  Updates the user's public profile settings.
+  """
+  def update_user_public_profile(%User{} = user, attrs) do
+    user
+    |> User.public_profile_changeset(default_public_profile_slug(user, attrs))
+    |> Repo.update()
+  end
+
+  defp default_public_profile_slug(%User{} = user, attrs) do
+    enabled? =
+      truthy_param?(
+        Map.get(attrs, "public_profile_enabled") || Map.get(attrs, :public_profile_enabled)
+      )
+
+    slug = Map.get(attrs, "public_profile_slug") || Map.get(attrs, :public_profile_slug)
+
+    if enabled? and blank?(slug) do
+      Map.put(attrs, "public_profile_slug", user |> public_profile_slug_suggestions() |> hd())
+    else
+      attrs
+    end
+  end
+
+  defp truthy_param?(value), do: value in [true, "true", "on", "1", 1]
+  defp blank?(value), do: is_nil(value) or (is_binary(value) and String.trim(value) == "")
 
   ## Session
 

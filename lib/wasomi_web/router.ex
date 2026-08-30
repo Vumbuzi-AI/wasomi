@@ -29,6 +29,13 @@ defmodule WasomiWeb.Router do
     get "/landing", PageController, :home
     get "/sitemap.xml", SitemapController, :index
 
+    # Public page, but auth-aware: signed-in learners get the app sidebar
+    # shell; anonymous visitors get the standalone marketing chrome.
+    live_session :learner_public_profile,
+      on_mount: [{WasomiWeb.UserAuth, :mount_current_user}] do
+      live "/learners/:slug", LearnerProfileLive, :show
+    end
+
     # GS1 Digital Link shape (AI(253) = GDTI) — see TODO.md's GDTI
     # decisions. No auth, no on_mount: the result is the same for every
     # visitor regardless of whether they're signed in.

@@ -2013,6 +2013,29 @@ const EYE_OPEN =
 const EYE_CLOSED =
   '<path d="M17.9 17.9A10.6 10.6 0 0 1 12 19c-7 0-11-7-11-7a19.4 19.4 0 0 1 4.2-5.1M9.9 4.2A9.4 9.4 0 0 1 12 4c7 0 11 7 11 7a19.4 19.4 0 0 1-2.6 3.6M14.1 14.1a3 3 0 1 1-4.2-4.2"/><line x1="1" y1="1" x2="23" y2="23"/>';
 
+Hooks.CopyToClipboard = {
+  mounted() {
+    this.el.addEventListener("click", async () => {
+      const text = this.el.dataset.copy || "";
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch (_e) {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        ta.remove();
+      }
+      const original = this.el.dataset.label || this.el.textContent;
+      this.el.textContent = this.el.dataset.done || "Copied!";
+      setTimeout(() => {
+        this.el.textContent = original;
+      }, 1500);
+    });
+  },
+};
+
 Hooks.TogglePassword = {
   mounted() {
     this.input = this.el.querySelector("input");

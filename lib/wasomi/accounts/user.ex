@@ -14,6 +14,7 @@ defmodule Wasomi.Accounts.User do
     field :current_password, :string, virtual: true, redact: true
     field :confirmed_at, :utc_datetime
     field :role, Ecto.Enum, values: [:learner, :admin], default: :learner
+    field :referral_code, :string
     field :bio, :string
     field :country, :string
     field :occupation, :string
@@ -131,6 +132,29 @@ defmodule Wasomi.Accounts.User do
     |> validate_confirmation(:password, message: "does not match password")
     |> validate_password(opts)
     |> validate_optional_phone()
+    |> put_referral_code()
+  end
+
+  # Every learner gets a stable, opaque code at sign-up. `Accounts` retries on
+  # the (astronomically unlikely) unique-index collision.
+  defp put_referral_code(changeset) do
+    if get_field(changeset, :referral_code) do
+      changeset
+    else
+      put_change(changeset, :referral_code, generate_referral_code())
+    end
+  end
+
+  @doc "An 8-char base32 referral code."
+  def generate_referral_code,
+    do: 5 |> :crypto.strong_rand_bytes() |> Base.encode32(padding: false)
+
+  @doc false
+  def referral_code_changeset(user, code) do
+    user
+    |> cast(%{referral_code: code}, [:referral_code])
+    |> validate_required([:referral_code])
+    |> unique_constraint(:referral_code)
   end
 
   @e164_format ~r/^\+[1-9]\d{6,14}$/

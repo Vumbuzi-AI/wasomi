@@ -11,6 +11,7 @@ defmodule WasomiWeb.Router do
     plug :protect_from_forgery
     plug :put_secure_browser_headers
     plug :fetch_current_user
+    plug WasomiWeb.Plugs.ReferralCapture
   end
 
   pipeline :api do
@@ -28,6 +29,7 @@ defmodule WasomiWeb.Router do
     live "/", HomeLive
     get "/landing", PageController, :home
     get "/sitemap.xml", SitemapController, :index
+    get "/join", ReferralController, :join
 
     # Public page, but auth-aware: signed-in learners get the app sidebar
     # shell; anonymous visitors get the standalone marketing chrome.
@@ -99,6 +101,7 @@ defmodule WasomiWeb.Router do
       live "/catalog", CatalogLive.Portal, :index
       live "/courses-taken", CoursesTakenLive, :index
       live "/certificates", CertificatesLive, :index
+      live "/refer", ReferLive, :index
       live "/courses/:slug/checkout", CheckoutLive, :show
       live "/learn/courses/:slug", CoursePlayerLive, :show
       live "/learn/study", StudyHubLive, :index

@@ -83,12 +83,48 @@ defmodule Wasomi.Accounts.User do
   """
   def registration_changeset(user, attrs, opts \\ []) do
     user
-    |> cast(attrs, [:name, :email, :password, :password_confirmation])
+    |> cast(attrs, [:name, :email, :password, :password_confirmation, :phone])
     |> validate_name()
     |> validate_email(opts)
     |> validate_confirmation(:password, message: "does not match password")
     |> validate_password(opts)
+    |> validate_optional_phone()
   end
+
+  @e164_format ~r/^\+[1-9]\d{6,14}$/
+
+  @doc """
+  Casts an optional phone number stored in E.164 form (`+<country><number>`).
+
+  Blank input clears the field; a present value must look like E.164. The
+  `users_phone_must_be_e164` DB check and the `users_phone_index` unique index
+  are surfaced as friendly changeset errors rather than raising.
+  """
+  def validate_optional_phone(changeset) do
+    changeset
+    |> update_change(:phone, &normalize_phone_input/1)
+    |> validate_format(:phone, @e164_format, message: "doesn't look like a valid phone number")
+    |> unique_constraint(:phone,
+      name: :users_phone_index,
+      message: "is already registered to another account"
+    )
+    |> check_constraint(:phone,
+      name: :users_phone_must_be_e164,
+      message: "doesn't look like a valid phone number"
+    )
+  end
+
+  # The JS widget submits clean E.164, but a hand-typed / no-JS / pasted value
+  # can carry spaces, dashes or brackets — strip them so a real number isn't
+  # rejected on formatting alone. A blank result clears the optional field.
+  defp normalize_phone_input(value) when is_binary(value) do
+    case String.replace(value, ~r/[\s()\-.]/, "") do
+      "" -> nil
+      stripped -> stripped
+    end
+  end
+
+  defp normalize_phone_input(value), do: value
 
   @doc """
   Changes a user's role through an explicit administrative code path.

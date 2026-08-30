@@ -253,6 +253,28 @@ defmodule Wasomi.Accounts.UserNotifier do
     })
   end
 
+  @doc """
+  Tells an active member about a new course-channel announcement.
+  """
+  def deliver_channel_announcement(user, course, excerpt) do
+    name = recipient_name(user)
+    url = "#{WasomiWeb.Endpoint.url()}/learn/courses/#{course.slug}?tab=discussion"
+
+    deliver(user.email, "New announcement in #{course.title}", %{
+      title: "New announcement in #{course.title}",
+      intro: Template.rich(["Hi ", {:bold, name}, ","]),
+      body: [
+        Template.rich([
+          "There's a new announcement in the \"",
+          {:bold, course.title},
+          "\" channel:"
+        ]),
+        "“#{excerpt}”"
+      ],
+      cta: %{label: "Open the channel", url: url}
+    })
+  end
+
   defp recipient_name(%{name: name}) when is_binary(name) and byte_size(name) > 0, do: name
   defp recipient_name(%{email: email}) when is_binary(email), do: email
   defp recipient_name(_), do: "there"

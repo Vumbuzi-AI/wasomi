@@ -143,6 +143,75 @@ defmodule WasomiWeb.NotificationsLiveTest do
     assert [%{read_at: %DateTime{}}] = Wasomi.Notifications.list_for_user(user)
   end
 
+  test "a channel-mention CTA deep-links a learner to the message", %{conn: conn, user: user} do
+    admin = admin_fixture()
+    course = course_fixture(status: :published, title: "Mentioned course")
+    module = course_module_fixture(course_id: course.id)
+    lecture_fixture(module_id: module.id)
+    course = Wasomi.Catalog.get_course_by_slug!(course.slug)
+
+    {:ok, _} =
+      Wasomi.Enrollments.grant_access(user, admin, %{
+        "course_id" => course.id,
+        "reason" => "Manual enrollment for a partner scholarship"
+      })
+
+    chan = Wasomi.Channels.get_or_create_for_course(course)
+
+    {:ok, message} =
+      Wasomi.Channels.post_message(admin, chan, "hi @[#{user.name}](user:#{user.id})")
+
+    [notification | _] =
+      Wasomi.Notifications.list_for_user(user)
+      |> Enum.filter(&(&1.kind == :channel_mention))
+
+    {:ok, view, _html} = live(conn, ~p"/notifications")
+
+    assert has_element?(view, "#notification-#{notification.id} button", "Open discussion")
+
+    assert {:error, {:live_redirect, %{to: to}}} =
+             view
+             |> element("#notification-#{notification.id} button", "Open discussion")
+             |> render_click()
+
+    assert to == ~p"/learn/courses/#{course.slug}?#{%{tab: "discussion", msg: message.id}}"
+  end
+
+  test "a channel-mention CTA sends an admin to the preview player", %{conn: conn} do
+    admin = admin_fixture(%{name: "Wasomi Admin"})
+    other = Wasomi.AccountsFixtures.user_fixture(%{name: "One Student"})
+    course = course_fixture(status: :published, title: "Admin mention course")
+    module = course_module_fixture(course_id: course.id)
+    lecture_fixture(module_id: module.id)
+    course = Wasomi.Catalog.get_course_by_slug!(course.slug)
+    admin2 = admin_fixture()
+
+    {:ok, _} =
+      Wasomi.Enrollments.grant_access(other, admin2, %{
+        "course_id" => course.id,
+        "reason" => "Manual enrollment for a partner scholarship"
+      })
+
+    chan = Wasomi.Channels.get_or_create_for_course(course)
+
+    {:ok, message} =
+      Wasomi.Channels.post_message(other, chan, "ping @[Wasomi Admin](user:#{admin.id})")
+
+    [notification | _] =
+      Wasomi.Notifications.list_for_user(admin)
+      |> Enum.filter(&(&1.kind == :channel_mention))
+
+    {:ok, view, _html} = live(log_in_user(conn, admin), ~p"/notifications")
+
+    assert {:error, {:live_redirect, %{to: to}}} =
+             view
+             |> element("#notification-#{notification.id} button", "Open discussion")
+             |> render_click()
+
+    assert to ==
+             ~p"/admin/discussions?#{%{course: course.slug, msg: message.id}}"
+  end
+
   test "cannot dismiss another learner's notification", %{conn: conn} do
     admin = admin_fixture()
     other_learner = Wasomi.AccountsFixtures.user_fixture()

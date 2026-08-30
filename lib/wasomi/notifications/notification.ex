@@ -10,16 +10,18 @@ defmodule Wasomi.Notifications.Notification do
     :reengagement_gone_quiet_2,
     :reengagement_gone_quiet_3
   ]
-  @course_scoped_kinds @reengagement_kinds
+  @channel_kinds [:channel_announcement, :channel_mention]
+  @course_scoped_kinds @reengagement_kinds ++ @channel_kinds
 
   schema "notifications" do
-    field :kind, Ecto.Enum, values: [:enrollment_granted] ++ @reengagement_kinds
+    field :kind, Ecto.Enum, values: [:enrollment_granted] ++ @reengagement_kinds ++ @channel_kinds
 
     field :title, :string
     field :body, :string
     field :read_at, :utc_datetime
     belongs_to :user, Wasomi.Accounts.User
     belongs_to :course, Wasomi.Catalog.Course
+    belongs_to :channel_message, Wasomi.Channels.Message
 
     timestamps(type: :utc_datetime)
   end
@@ -27,11 +29,12 @@ defmodule Wasomi.Notifications.Notification do
   @doc false
   def changeset(notification, attrs) do
     notification
-    |> cast(attrs, [:kind, :title, :body, :read_at, :user_id, :course_id])
+    |> cast(attrs, [:kind, :title, :body, :read_at, :user_id, :course_id, :channel_message_id])
     |> validate_required([:kind, :title, :body, :user_id])
     |> validate_course_scoped_kind()
     |> assoc_constraint(:user)
     |> assoc_constraint(:course)
+    |> assoc_constraint(:channel_message)
   end
 
   # The re-engagement kinds are per-enrollment nudges: a `course_id` is what

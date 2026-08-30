@@ -86,6 +86,124 @@ defmodule Wasomi.Notifications do
   end
 
   @doc """
+  Fans out notifications for a freshly posted course-channel message.
+
+    * Every `@mentioned` member — active learner or alumni — gets an in-app
+      `:channel_mention` notification.
+    * For an announcement, every active (non-alumni) member who wasn't
+      mentioned gets an in-app `:channel_announcement` notification and an
+      email.
+
+  The author is never notified, and alumni get nothing unless they were
+  explicitly mentioned. Anyone in `present_ids` — members currently viewing
+  the channel — is skipped entirely (they already saw the message stream in,
+  the way WhatsApp suppresses a notification while you're in the chat).
+  Best-effort: the message row has already committed.
+  """
+  def deliver_channel_message(message, course, members, present_ids \\ []) do
+    author_name = channel_author_name(message)
+    present = MapSet.new(present_ids)
+    members_by_id = Map.new(members, &{&1.user.id, &1})
+    mention_ids = Enum.uniq(message.mentioned_user_ids || [])
+
+    announced_ids =
+      if message.kind == :announcement do
+        members
+        |> Enum.filter(fn %{user: user, role: role} ->
+          role == :active and user.id != message.user_id and
+            not MapSet.member?(present, user.id)
+        end)
+        |> Enum.map(fn %{user: user} ->
+          case notify_channel(
+                 user,
+                 course,
+                 message,
+                 :channel_announcement,
+                 "New announcement in \"#{course.title}\"",
+                 message.body
+               ) do
+            {:ok, _notification} -> deliver_announcement_email(user, course, message.body)
+            _ -> :ok
+          end
+
+          user.id
+        end)
+      else
+        []
+      end
+      |> MapSet.new()
+
+    mention_ids
+    |> Enum.reject(&(MapSet.member?(announced_ids, &1) or MapSet.member?(present, &1)))
+    |> Enum.each(fn user_id ->
+      case members_by_id do
+        %{^user_id => %{user: user}} ->
+          notify_channel(
+            user,
+            course,
+            message,
+            :channel_mention,
+            "#{author_name} mentioned you in \"#{course.title}\"",
+            message.body
+          )
+
+        _ ->
+          :ok
+      end
+    end)
+
+    :ok
+  end
+
+  defp notify_channel(user, course, message, kind, title, body) do
+    case create_notification(%{
+           user_id: user.id,
+           course_id: course.id,
+           channel_message_id: message.id,
+           kind: kind,
+           title: title,
+           body: channel_excerpt(body)
+         }) do
+      {:ok, notification} ->
+        broadcast(user.id, {:notification_created, notification})
+        {:ok, notification}
+
+      {:error, changeset} ->
+        Logger.error(
+          "Failed to create #{kind} notification for user #{user.id}: #{inspect(changeset)}"
+        )
+
+        {:error, changeset}
+    end
+  end
+
+  defp deliver_announcement_email(user, course, body) do
+    UserNotifier.deliver_channel_announcement(user, course, channel_excerpt(body))
+  rescue
+    error ->
+      Logger.error(
+        "Failed to send channel announcement email for user #{user.id}: " <>
+          Exception.format(:error, error, __STACKTRACE__)
+      )
+
+      :error
+  end
+
+  defp channel_author_name(%{user: %{name: name}}) when is_binary(name) and name != "", do: name
+  defp channel_author_name(_message), do: "Someone"
+
+  @channel_mention_token ~r/@\[([^\]\n]+)\]\(user:\d+\)/
+
+  defp channel_excerpt(text, max \\ 180) do
+    text =
+      text
+      |> to_string()
+      |> then(&Regex.replace(@channel_mention_token, &1, "@\\1"))
+
+    if String.length(text) > max, do: String.slice(text, 0, max) <> "…", else: text
+  end
+
+  @doc """
   Delivers touch `touch` (1, 2, or 3) of the "never started" re-engagement
   sequence for one active enrollment, and records the send marker used for
   idempotency. Email-only in the learner experience for every touch, so
@@ -221,7 +339,9 @@ defmodule Wasomi.Notifications do
          |> Notification.changeset(attrs)
          |> Repo.insert(
            on_conflict: :nothing,
-           conflict_target: [:user_id, :course_id, :kind]
+           conflict_target:
+             {:unsafe_fragment,
+              "(user_id, course_id, kind) WHERE kind NOT IN ('channel_announcement', 'channel_mention')"}
          ) do
       {:ok, %Notification{id: nil}} ->
         {:ok, :already_sent}

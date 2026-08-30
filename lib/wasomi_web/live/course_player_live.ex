@@ -29,7 +29,7 @@ defmodule WasomiWeb.CoursePlayerLive do
 
   use WasomiWeb, :live_view
 
-  alias Wasomi.{Assessments, Catalog, Certificates, Enrollments, Learning}
+  alias Wasomi.{Assessments, Catalog, Certificates, Channels, Enrollments, Learning}
 
   require Logger
 
@@ -50,10 +50,30 @@ defmodule WasomiWeb.CoursePlayerLive do
 
     case authorization do
       {:ok, course} ->
-        if connected?(socket) and not preview? do
-          Learning.subscribe(socket.assigns.current_user)
-          Certificates.subscribe(socket.assigns.current_user)
+        channel = Channels.get_or_create_for_course(course)
+
+        if connected?(socket) do
+          Channels.subscribe(channel)
+
+          unless preview? do
+            Learning.subscribe(socket.assigns.current_user)
+            Certificates.subscribe(socket.assigns.current_user)
+          end
         end
+
+        initial_section =
+          if params["tab"] == "discussion", do: :discussion, else: :lessons
+
+        channel_highlight_message_id = params["msg"]
+
+        if connected?(socket) and initial_section == :discussion and not preview? do
+          Channels.mark_read(socket.assigns.current_user, channel)
+        end
+
+        channel_unread =
+          if preview? or initial_section == :discussion,
+            do: 0,
+            else: Channels.unread_count(socket.assigns.current_user, channel)
 
         quizzes_by_module = Assessments.get_quizzes_by_module(course.id)
 
@@ -74,7 +94,10 @@ defmodule WasomiWeb.CoursePlayerLive do
          |> assign(:quiz_answers, %{})
          |> assign(:quiz_result, nil)
          |> assign(:current_question_index, 0)
-         |> assign(:active_section, :lessons)
+         |> assign(:active_section, initial_section)
+         |> assign(:channel, channel)
+         |> assign(:channel_unread, channel_unread)
+         |> assign(:channel_highlight_message_id, channel_highlight_message_id)
          |> assign(:active_study_tool, nil)
          |> assign(:lesson_tab, :overview)
          |> assign(:preview?, preview?)
@@ -135,7 +158,7 @@ defmodule WasomiWeb.CoursePlayerLive do
          String.downcase(Path.extname(resource.name || "")) == ".pdf")
   end
 
-  @sections ~w(lessons module_quiz)a
+  @sections ~w(lessons module_quiz discussion)a
 
   # Reported by Hooks.CaptureGuard (throttled client-side to one event per
   # 5s per learner). Advisory only: the client is not trustworthy and these
@@ -570,6 +593,16 @@ defmodule WasomiWeb.CoursePlayerLive do
     |> maybe_auto_select_module_quiz()
   end
 
+  defp enter_section(socket, :discussion = section) do
+    if socket.assigns[:channel] && not socket.assigns.preview? do
+      Channels.mark_read(socket.assigns.current_user, socket.assigns.channel)
+    end
+
+    socket
+    |> assign(:active_section, section)
+    |> assign(:channel_unread, 0)
+  end
+
   defp enter_section(socket, section), do: assign(socket, :active_section, section)
 
   # A single-module course has nothing to pick, so skip the module picker and
@@ -698,6 +731,31 @@ defmodule WasomiWeb.CoursePlayerLive do
       when event in [:lecture_completed, :module_completed, :course_completed] do
     {:noreply, refresh_progress(socket)}
   end
+
+  # Presence diffs on the channel topic are for the nested `ChannelLive`, not
+  # the player itself.
+  def handle_info(%Phoenix.Socket.Broadcast{event: "presence_diff"}, socket) do
+    {:noreply, socket}
+  end
+
+  # Channel activity: keep the Discussion tab's unread badge live while the
+  # learner is elsewhere in the player. The nested `ChannelLive` handles its
+  # own rendering when the tab is open.
+  def handle_info({:message_created, message}, socket) do
+    if not socket.assigns.preview? and socket.assigns.active_section != :discussion and
+         message.user_id != socket.assigns.current_user.id do
+      {:noreply, update(socket, :channel_unread, &(&1 + 1))}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  # Everything else on the channel topic (edits, deletes, reactions, typing
+  # pings) is the nested `ChannelLive`'s concern — the player just ignores it.
+  def handle_info({:message_deleted, _id}, socket), do: {:noreply, socket}
+  def handle_info({:message_updated, _message}, socket), do: {:noreply, socket}
+  def handle_info({:message_reacted, _id}, socket), do: {:noreply, socket}
+  def handle_info({:typing, _payload}, socket), do: {:noreply, socket}
 
   # Only celebrate here if the ready certificate belongs to the course this
   # player is currently open on — PubSub is per-user, not per-course, so a
@@ -897,6 +955,34 @@ defmodule WasomiWeb.CoursePlayerLive do
                   Module quiz
                 </button>
                 <button
+                  type="button"
+                  phx-click="select-section"
+                  phx-value-section="discussion"
+                  class={[
+                    "relative inline-flex min-h-20 min-w-[190px] flex-1 items-center justify-start gap-3 rounded-2xl border border-black/80 px-5 py-4 text-left text-sm font-semibold transition",
+                    is_nil(@active_study_tool) && @active_section == :discussion &&
+                      "border-dark bg-white text-primary sm:bg-dark sm:text-white",
+                    (!is_nil(@active_study_tool) || @active_section != :discussion) &&
+                      "text-body hover:border-primary hover:text-primary"
+                  ]}
+                >
+                  <.icon name="hero-chat-bubble-left-right" class="h-6 w-6 shrink-0" />
+                  <span>
+                    <span class="flex items-center gap-2 text-sm">
+                      Discussion
+                      <span
+                        :if={@channel_unread > 0}
+                        class="grid h-5 min-w-5 place-items-center rounded-full bg-primary px-1.5 text-[11px] font-bold leading-none text-white"
+                      >
+                        {min(@channel_unread, 99)}
+                      </span>
+                    </span>
+                    <span class="mt-1 block text-[11px] font-normal leading-snug opacity-90">
+                      Talk with your cohort and course team.
+                    </span>
+                  </span>
+                </button>
+                <button
                   :for={{mode, label, icon, description} <- study_hub_nav_items()}
                   type="button"
                   phx-click="select-study-tool"
@@ -933,6 +1019,21 @@ defmodule WasomiWeb.CoursePlayerLive do
                     @active_study_tool,
                     @study_guide_resource_id
                   )
+              )}
+            </section>
+
+            <section
+              :if={@active_section == :discussion && is_nil(@active_study_tool)}
+              class="mt-8 overflow-hidden rounded-[2rem] bg-white"
+            >
+              {live_render(@socket, WasomiWeb.ChannelLive,
+                id: "course-channel",
+                sticky: true,
+                session: %{
+                  "current_user_id" => @current_user.id,
+                  "course_slug" => @course.slug,
+                  "highlight_message_id" => @channel_highlight_message_id
+                }
               )}
             </section>
 

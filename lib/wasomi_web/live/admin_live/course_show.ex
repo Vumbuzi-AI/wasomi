@@ -337,6 +337,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
     socket
     |> assign(:page_title, course.title)
     |> assign(:course, course)
+    |> assign(:channel_stats, Wasomi.Channels.stats_for_course(course))
     |> assign(:students, students)
     |> assign(:student_count, length(enrollments))
     |> assign(:lecture_count, lecture_count)
@@ -466,6 +467,31 @@ defmodule WasomiWeb.AdminLive.CourseShow do
           <.stat_card label="Modules" value={length(@course.modules)} icon="hero-rectangle-stack" />
           <.stat_card label="Lectures" value={@lecture_count} icon="hero-play-circle" />
         </div>
+
+        <%!-- Cohort channel --%>
+        <section class="flex flex-wrap items-center justify-between gap-4 rounded-3xl border border-black/5 bg-white p-6 shadow-card">
+          <div class="flex items-center gap-3">
+            <span class="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-mint text-primary">
+              <.icon name="hero-chat-bubble-left-right" class="h-5 w-5" />
+            </span>
+            <div>
+              <p class="text-sm font-semibold text-ink">Cohort channel</p>
+              <p class="text-xs text-body">
+                {@channel_stats.message_count}
+                {ngettext("message", "messages", @channel_stats.message_count)}
+                <span :if={@channel_stats.last_activity_at}>
+                  · last activity {format_channel_time(@channel_stats.last_activity_at)}
+                </span>
+              </p>
+            </div>
+          </div>
+          <.link
+            navigate={~p"/admin/discussions?#{%{course: @course.slug}}"}
+            class="inline-flex items-center gap-2 rounded-full border border-ink px-4 py-2 text-sm font-medium text-ink transition hover:bg-ink hover:text-white"
+          >
+            <.icon name="hero-arrow-top-right-on-square" class="h-4 w-4" /> Open channel
+          </.link>
+        </section>
 
         <%!-- Tabs --%>
         <div
@@ -1033,6 +1059,9 @@ defmodule WasomiWeb.AdminLive.CourseShow do
     </.admin_layout>
     """
   end
+
+  defp format_channel_time(%DateTime{} = dt), do: Calendar.strftime(dt, "%b %-d, %Y")
+  defp format_channel_time(_), do: "—"
 
   defp course_detail_tab("students", _current_tab), do: :students
   defp course_detail_tab("curriculum", _current_tab), do: :curriculum

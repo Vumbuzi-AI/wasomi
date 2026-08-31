@@ -21,6 +21,9 @@ defmodule Wasomi.Accounts.User do
     field :headline, :string
     field :organization, :string
     field :industry, :string
+    field :linkedin_url, :string
+    field :public_profile_enabled, :boolean, default: false
+    field :public_profile_slug, :string
     field :experience_level, Ecto.Enum, values: [:student, :entry, :mid, :senior, :lead_executive]
 
     field :learning_goal, Ecto.Enum,
@@ -39,6 +42,45 @@ defmodule Wasomi.Accounts.User do
   @occupation_max_length 160
   @headline_max_length 120
   @organization_max_length 160
+  @linkedin_url_max_length 255
+  @public_profile_slug_max_length 80
+  @linkedin_profile_handle_pattern ~r/^[a-zA-Z0-9][a-zA-Z0-9-]{2,99}$/
+  @reserved_public_profile_slugs ~w(
+    account
+    admin
+    admins
+    administrator
+    api
+    billing
+    catalog
+    certificate
+    certificates
+    checkout
+    courses
+    dashboard
+    dev
+    gs1
+    gs1-kenya
+    help
+    learn
+    learners
+    login
+    notifications
+    payments
+    profile
+    profiles
+    register
+    root
+    settings
+    sign-in
+    sign-up
+    signup
+    support
+    user
+    users
+    wasomi
+    webhooks
+  )
 
   @industries [
     "Technology & Software",
@@ -172,6 +214,183 @@ defmodule Wasomi.Accounts.User do
     |> validate_inclusion(:country, Countries.list(), message: "is not a supported country")
     |> validate_inclusion(:industry, @industries, message: "is not a supported industry")
   end
+
+  @doc """
+  A user changeset for publishing and editing the learner's public profile.
+
+  Public profile details are intentionally narrower than the private profile:
+  contact details such as email and phone are never cast here. Certificates
+  become visible on the public page once the profile itself is public, but
+  only through the existing verification URLs.
+  """
+  def public_profile_changeset(user, attrs) do
+    user
+    |> cast(normalize_public_profile_attrs(attrs), [
+      :public_profile_enabled,
+      :public_profile_slug,
+      :linkedin_url
+    ])
+    |> validate_required_if_public()
+    |> validate_learner_profile()
+    |> validate_length(:public_profile_slug, max: @public_profile_slug_max_length)
+    |> validate_format(:public_profile_slug, ~r/^[a-z0-9]+(?:-[a-z0-9]+)*$/,
+      message: "can only use lowercase letters, numbers, and hyphens"
+    )
+    |> validate_public_profile_slug_not_reserved()
+    |> validate_length(:linkedin_url, max: @linkedin_url_max_length)
+    |> validate_linkedin_url()
+    |> unique_constraint(:public_profile_slug, name: :users_public_profile_slug_unique_index)
+  end
+
+  defp normalize_public_profile_attrs(attrs) do
+    attrs
+    |> trim_string_value(:public_profile_slug)
+    |> trim_string_value("public_profile_slug")
+    |> trim_string_value(:linkedin_url)
+    |> trim_string_value("linkedin_url")
+    |> normalize_slug_value(:public_profile_slug)
+    |> normalize_slug_value("public_profile_slug")
+    |> normalize_linkedin_url_value(:linkedin_url)
+    |> normalize_linkedin_url_value("linkedin_url")
+    |> blank_key_to_nil(:public_profile_slug)
+    |> blank_key_to_nil("public_profile_slug")
+    |> blank_key_to_nil(:linkedin_url)
+    |> blank_key_to_nil("linkedin_url")
+  end
+
+  defp trim_string_value(attrs, key) do
+    case Map.fetch(attrs, key) do
+      {:ok, value} when is_binary(value) -> Map.put(attrs, key, String.trim(value))
+      _ -> attrs
+    end
+  end
+
+  defp normalize_slug_value(attrs, key) do
+    case Map.fetch(attrs, key) do
+      {:ok, value} when is_binary(value) ->
+        slug =
+          value
+          |> String.downcase()
+          |> String.replace(~r/[^a-z0-9]+/, "-")
+          |> String.trim("-")
+
+        Map.put(attrs, key, slug)
+
+      _ ->
+        attrs
+    end
+  end
+
+  defp normalize_linkedin_url_value(attrs, key) do
+    case Map.fetch(attrs, key) do
+      {:ok, value} when is_binary(value) ->
+        case canonical_linkedin_profile_url(value) do
+          {:ok, url} -> Map.put(attrs, key, url)
+          :error -> attrs
+        end
+
+      _ ->
+        attrs
+    end
+  end
+
+  defp canonical_linkedin_profile_url(value) do
+    value = String.trim(value)
+
+    cond do
+      value == "" ->
+        {:ok, ""}
+
+      Regex.match?(@linkedin_profile_handle_pattern, value) ->
+        {:ok, linkedin_profile_url(value)}
+
+      valid_linkedin_profile_url?(URI.parse(value)) ->
+        {:ok, value |> URI.parse() |> linkedin_profile_url_from_uri()}
+
+      repeated_linkedin_profile_prefix?(value) ->
+        value
+        |> String.split("linkedin.com/in/")
+        |> List.last()
+        |> handle_from_pasted_linkedin_tail()
+
+      true ->
+        :error
+    end
+  end
+
+  defp repeated_linkedin_profile_prefix?(value) do
+    value |> String.split("linkedin.com/in/") |> length() > 2
+  end
+
+  defp handle_from_pasted_linkedin_tail(tail) do
+    handle =
+      tail
+      |> String.trim_leading("/")
+      |> String.split(["?", "#"], parts: 2)
+      |> List.first()
+      |> String.trim_trailing("/")
+
+    if Regex.match?(@linkedin_profile_handle_pattern, handle) do
+      {:ok, linkedin_profile_url(handle)}
+    else
+      :error
+    end
+  end
+
+  defp linkedin_profile_url_from_uri(%URI{path: path}) do
+    ["in", handle] = String.split(path, "/", trim: true)
+    linkedin_profile_url(handle)
+  end
+
+  defp linkedin_profile_url(handle), do: "https://www.linkedin.com/in/#{handle}"
+
+  defp validate_required_if_public(changeset) do
+    if get_field(changeset, :public_profile_enabled) do
+      validate_required(changeset, [:public_profile_slug])
+    else
+      changeset
+    end
+  end
+
+  defp validate_learner_profile(changeset) do
+    if get_field(changeset, :public_profile_enabled) and get_field(changeset, :role) != :learner do
+      add_error(changeset, :public_profile_enabled, "is only available to learner accounts")
+    else
+      changeset
+    end
+  end
+
+  defp validate_public_profile_slug_not_reserved(changeset) do
+    validate_change(changeset, :public_profile_slug, fn :public_profile_slug, slug ->
+      if slug in @reserved_public_profile_slugs do
+        [public_profile_slug: "is reserved"]
+      else
+        []
+      end
+    end)
+  end
+
+  defp validate_linkedin_url(changeset) do
+    validate_change(changeset, :linkedin_url, fn :linkedin_url, url ->
+      uri = URI.parse(url)
+
+      if valid_linkedin_profile_url?(uri) do
+        []
+      else
+        [linkedin_url: "must be a LinkedIn profile URL"]
+      end
+    end)
+  end
+
+  defp valid_linkedin_profile_url?(%URI{scheme: "https", host: host, path: path})
+       when host in ["linkedin.com", "www.linkedin.com"] and is_binary(path) do
+    case String.split(path, "/", trim: true) do
+      ["in", handle] -> Regex.match?(@linkedin_profile_handle_pattern, handle)
+      _ -> false
+    end
+  end
+
+  defp valid_linkedin_profile_url?(_uri), do: false
 
   # "" from an unselected <select> is invalid for Ecto.Enum (not "unset") — normalize to nil
   defp blank_selects_to_nil(attrs) do

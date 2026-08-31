@@ -2075,10 +2075,14 @@ const IMAGE_UPLOAD_MAX_ATTEMPTS = 6;
 
 function loadImageFromFile(file) {
   const objectUrl = URL.createObjectURL(file);
+
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve({ img, objectUrl });
-    img.onerror = reject;
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("image load failed"));
+    };
     img.src = objectUrl;
   });
 }
@@ -2118,7 +2122,9 @@ async function compressToLimit(file, maxBytes) {
       }
     }
 
-    return blob ? new File([blob], jpegName(file.name), { type: "image/jpeg" }) : file;
+    return blob
+      ? new File([blob], jpegName(file.name), { type: "image/jpeg" })
+      : file;
   } finally {
     URL.revokeObjectURL(objectUrl);
   }
@@ -2128,7 +2134,7 @@ function compressIfNeeded(file, maxBytes) {
   return file.size > maxBytes ? compressToLimit(file, maxBytes) : Promise.resolve(file);
 }
 
-function buildCropOverlay() {
+function buildCropOverlay(titleText) {
   const root = document.createElement("div");
   root.className = "fixed inset-0 z-[70] flex items-center justify-center bg-zinc-900/70 p-4";
 
@@ -2137,7 +2143,7 @@ function buildCropOverlay() {
 
   const title = document.createElement("p");
   title.className = "text-sm font-semibold text-ink";
-  title.textContent = "Crop to fit the hero banner (16:9)";
+  title.textContent = titleText;
 
   const stage = document.createElement("div");
   stage.className = "max-h-[60vh] overflow-hidden rounded-xl bg-zinc-100";
@@ -2158,8 +2164,9 @@ function buildCropOverlay() {
   const confirmBtn = document.createElement("button");
   confirmBtn.type = "button";
   confirmBtn.textContent = "Apply crop";
+  confirmBtn.disabled = true;
   confirmBtn.className =
-    "rounded-full bg-ink px-4 py-2 text-xs font-semibold text-white hover:bg-primary";
+    "rounded-full bg-ink px-4 py-2 text-xs font-semibold text-white hover:bg-primary disabled:cursor-not-allowed disabled:opacity-50";
 
   actions.append(cancelBtn, confirmBtn);
   panel.append(title, stage, actions);
@@ -2168,9 +2175,9 @@ function buildCropOverlay() {
   return { root, image, cancelBtn, confirmBtn };
 }
 
-function cropToAspectRatio(file, aspectRatio) {
+function cropToAspectRatio(file, aspectRatio, titleText) {
   return new Promise((resolve, reject) => {
-    const overlay = buildCropOverlay();
+    const overlay = buildCropOverlay(titleText);
     document.body.appendChild(overlay.root);
 
     const objectUrl = URL.createObjectURL(file);
@@ -2189,6 +2196,7 @@ function cropToAspectRatio(file, aspectRatio) {
         autoCropArea: 1,
         background: false,
       });
+      overlay.confirmBtn.disabled = false;
     });
     overlay.image.src = objectUrl;
 
@@ -2198,6 +2206,8 @@ function cropToAspectRatio(file, aspectRatio) {
     });
 
     overlay.confirmBtn.addEventListener("click", () => {
+      if (!cropper) return;
+
       cropper.getCroppedCanvas().toBlob(
         (blob) => {
           cleanup();
@@ -2217,30 +2227,47 @@ Hooks.ImageUploadProcessor = {
     // The real LiveView file input lives OUTSIDE this element (this element is
     // phx-update="ignore"); find it by the id LiveView gives it (@upload.ref).
     this.liveInput = document.getElementById(this.el.dataset.liveInput);
-    this.aspectRatio = this.el.dataset.aspectRatio ? Number(this.el.dataset.aspectRatio) : null;
+    this.aspectRatio = this.el.dataset.aspectRatio
+      ? Number(this.el.dataset.aspectRatio)
+      : null;
     this.maxBytes = Number(this.el.dataset.maxBytes);
+    this.cropTitle = this.el.dataset.cropTitle || "Crop image";
     this.onPick = (event) => this.handlePick(event);
-    this.picker.addEventListener("change", this.onPick);
+    // Bind once — a re-mount without a matching destroyed() must not stack a
+    // second listener (which would crop/inject the same file twice).
+    this.picker?.removeEventListener("change", this.onPick);
+    this.picker?.addEventListener("change", this.onPick);
   },
+
   destroyed() {
     this.picker?.removeEventListener("change", this.onPick);
   },
+
   async handlePick(event) {
     const file = event.target.files[0];
     event.target.value = "";
-    if (!file) return;
+    if (!file || this.busy) return;
 
+    this.busy = true;
     try {
-      const cropped = this.aspectRatio ? await cropToAspectRatio(file, this.aspectRatio) : file;
+      const cropped = this.aspectRatio
+        ? await cropToAspectRatio(file, this.aspectRatio, this.cropTitle)
+        : file;
       const processed = await compressIfNeeded(cropped, this.maxBytes);
       this.injectIntoLiveInput(processed);
     } catch (err) {
-      if (err && err.message === "cancelled") return;
-      console.error("Image processing failed, uploading the original file:", err);
-      this.injectIntoLiveInput(file);
+      if (!(err && err.message === "cancelled")) {
+        console.error("Image processing failed, uploading the original file:", err);
+        this.injectIntoLiveInput(file);
+      }
+    } finally {
+      this.busy = false;
     }
   },
+
   injectIntoLiveInput(file) {
+    if (!this.liveInput) return;
+
     const transfer = new DataTransfer();
     transfer.items.add(file);
     this.liveInput.files = transfer.files;

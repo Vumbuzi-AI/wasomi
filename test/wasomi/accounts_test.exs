@@ -1004,6 +1004,231 @@ defmodule Wasomi.AccountsTest do
     end
   end
 
+  describe "change_user_public_profile/2" do
+    test "suggests readable public profile slugs from the learner name" do
+      user = user_fixture(name: "One Student")
+
+      assert Accounts.public_profile_slug_suggestions(user) == [
+               "one-student-#{user.id}",
+               "one-#{user.id}"
+             ]
+    end
+
+    test "does not derive public profile slug suggestions from email when name is blank" do
+      user = %User{id: 123, name: nil, email: "private.email@example.com"}
+
+      assert Accounts.public_profile_slug_suggestions(user) == ["learner-123"]
+    end
+
+    test "requires a slug only when the public profile is enabled" do
+      assert Accounts.change_user_public_profile(%User{}, %{"public_profile_enabled" => "false"}).valid?
+
+      changeset =
+        Accounts.change_user_public_profile(%User{role: :learner}, %{
+          "public_profile_enabled" => "true"
+        })
+
+      assert %{public_profile_slug: ["can't be blank"]} = errors_on(changeset)
+    end
+
+    test "normalizes and validates public profile slugs" do
+      changeset =
+        Accounts.change_user_public_profile(%User{role: :learner}, %{
+          "public_profile_enabled" => "true",
+          "public_profile_slug" => "  One Student!  "
+        })
+
+      assert changeset.valid?
+      assert get_change(changeset, :public_profile_slug) == "one-student"
+    end
+
+    test "rejects reserved public profile slugs after normalization" do
+      changeset =
+        Accounts.change_user_public_profile(%User{role: :learner}, %{
+          "public_profile_enabled" => "true",
+          "public_profile_slug" => "Wasomi"
+        })
+
+      assert %{public_profile_slug: ["is reserved"]} = errors_on(changeset)
+
+      changeset =
+        Accounts.change_user_public_profile(%User{role: :learner}, %{
+          "public_profile_enabled" => "true",
+          "public_profile_slug" => "GS1 Kenya"
+        })
+
+      assert %{public_profile_slug: ["is reserved"]} = errors_on(changeset)
+    end
+
+    test "rejects unsupported LinkedIn URLs" do
+      for url <- [
+            "https://example.com/in/learner",
+            "http://www.linkedin.com/in/learner",
+            "https://www.linkedin.com/company/wasomi",
+            "https://www.linkedin.com/in/",
+            "https://www.linkedin.com/in/one-student/recent-activity",
+            "https://www.linkedin.com/in/one_student"
+          ] do
+        changeset = Accounts.change_user_public_profile(%User{}, %{"linkedin_url" => url})
+
+        assert %{linkedin_url: ["must be a LinkedIn profile URL"]} = errors_on(changeset)
+      end
+    end
+
+    test "accepts LinkedIn profile URLs" do
+      for url <- [
+            "https://linkedin.com/in/one-student",
+            "https://www.linkedin.com/in/one-student",
+            "https://www.linkedin.com/in/one-student/",
+            "https://www.linkedin.com/in/one-student?utm_source=wasomi"
+          ] do
+        changeset = Accounts.change_user_public_profile(%User{}, %{"linkedin_url" => url})
+
+        assert changeset.valid?
+        assert get_change(changeset, :linkedin_url) == "https://www.linkedin.com/in/one-student"
+      end
+    end
+
+    test "accepts LinkedIn handles and repeated pasted profile prefixes" do
+      for url <- [
+            "one-student",
+            "https://www.linkedin.com/in/https://www.linkedin.com/in/one-student"
+          ] do
+        changeset = Accounts.change_user_public_profile(%User{}, %{"linkedin_url" => url})
+
+        assert changeset.valid?
+        assert get_change(changeset, :linkedin_url) == "https://www.linkedin.com/in/one-student"
+      end
+    end
+  end
+
+  describe "update_user_public_profile/2" do
+    setup do
+      %{user: user_fixture(name: "One Student")}
+    end
+
+    test "publishes with a generated stable slug when slug is blank", %{user: user} do
+      {:ok, updated} =
+        Accounts.update_user_public_profile(user, %{
+          "public_profile_enabled" => "true",
+          "public_profile_slug" => ""
+        })
+
+      assert updated.public_profile_enabled
+      assert updated.public_profile_slug == "one-student-#{user.id}"
+    end
+
+    test "persists public profile fields", %{user: user} do
+      {:ok, updated} =
+        Accounts.update_user_public_profile(user, %{
+          "public_profile_enabled" => "true",
+          "public_profile_slug" => "one-student",
+          "linkedin_url" => "https://www.linkedin.com/in/one-student"
+        })
+
+      assert updated.public_profile_enabled
+      assert updated.public_profile_slug == "one-student"
+      assert updated.linkedin_url == "https://www.linkedin.com/in/one-student"
+    end
+
+    test "unpublishes while keeping the learner's slug reserved", %{user: user} do
+      {:ok, user} =
+        Accounts.update_user_public_profile(user, %{
+          "public_profile_enabled" => "true",
+          "public_profile_slug" => "one-student"
+        })
+
+      {:ok, updated} =
+        Accounts.update_user_public_profile(user, %{"public_profile_enabled" => "false"})
+
+      refute updated.public_profile_enabled
+      assert updated.public_profile_slug == "one-student"
+      assert Accounts.get_public_profile_by_slug("one-student") == nil
+    end
+
+    test "does not expose admin users through learner public profile lookup" do
+      {:ok, admin} = user_fixture() |> Accounts.update_user_role(:admin)
+
+      {:error, changeset} =
+        Accounts.update_user_public_profile(admin, %{
+          "public_profile_enabled" => "true",
+          "public_profile_slug" => "admin-profile"
+        })
+
+      assert %{public_profile_enabled: ["is only available to learner accounts"]} =
+               errors_on(changeset)
+
+      assert Accounts.get_public_profile_by_slug("admin-profile") == nil
+    end
+
+    test "rejects duplicate public profile slugs", %{user: user} do
+      other = user_fixture(name: "Other Student")
+
+      {:ok, _other} =
+        Accounts.update_user_public_profile(other, %{
+          "public_profile_enabled" => "true",
+          "public_profile_slug" => "shared-profile"
+        })
+
+      {:error, changeset} =
+        Accounts.update_user_public_profile(user, %{
+          "public_profile_enabled" => "true",
+          "public_profile_slug" => "shared-profile"
+        })
+
+      assert %{public_profile_slug: ["has already been taken"]} = errors_on(changeset)
+    end
+
+    test "does not cast private account fields", %{user: user} do
+      {:ok, updated} =
+        Accounts.update_user_public_profile(user, %{
+          "public_profile_enabled" => "true",
+          "public_profile_slug" => "safe-profile",
+          "email" => "published@example.com",
+          "phone" => "254700000000"
+        })
+
+      assert updated.email == user.email
+      assert updated.phone == user.phone
+    end
+  end
+
+  describe "public_profile_view/1" do
+    test "exposes only the whitelisted public fields" do
+      user =
+        user_fixture(name: "Jane Doe", email: "jane@example.com", phone: "+254700000001")
+        |> then(fn u ->
+          {:ok, u} =
+            Accounts.update_user_profile(u, %{
+              "headline" => "Analyst",
+              "bio" => "Bio",
+              "country" => "Kenya",
+              "organization" => "Acme",
+              "industry" => "Technology & Software",
+              "occupation" => "Lead",
+              "avatar_key" => "https://cdn.test/a.png"
+            })
+
+          u
+        end)
+
+      view = Accounts.public_profile_view(user)
+
+      assert Map.keys(view) |> Enum.sort() ==
+               ~w(avatar_key bio country headline industry linkedin_url name)a
+
+      assert view.name == "Jane Doe"
+      assert view.country == "Kenya"
+      assert view.industry == "Technology & Software"
+      refute Map.has_key?(view, :email)
+      refute Map.has_key?(view, :phone)
+      refute Map.has_key?(view, :occupation)
+      refute Map.has_key?(view, :organization)
+      refute Map.has_key?(view, :hashed_password)
+      refute Map.has_key?(view, :role)
+    end
+  end
+
   describe "list_users_page/1" do
     test "paginates, newest first" do
       Enum.each(1..3, fn n -> user_fixture(name: "User #{n}") end)

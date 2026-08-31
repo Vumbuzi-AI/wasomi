@@ -22,6 +22,7 @@ defmodule Wasomi.Application do
       # Start to serve requests, typically the last entry
       WasomiWeb.Endpoint
     ]
+
     children =
       [
         WasomiWeb.Telemetry,

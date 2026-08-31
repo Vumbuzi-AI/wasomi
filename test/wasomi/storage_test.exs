@@ -111,6 +111,17 @@ defmodule Wasomi.StorageTest do
                "size" => 5_000_000,
                "max_image_bytes" => 50_000_000
              })
+
+    # The landing-image cropper hands back a JPEG regardless of the source type.
+    for content_type <- ["image/jpeg", nil] do
+      assert {:ok, %{kind: :image, content_type: "image/jpeg"}} =
+               R2.presign_upload(nil, %{
+                 "filename" => "hero.jpg",
+                 "content_type" => content_type,
+                 "size" => 250_000,
+                 "max_image_bytes" => 5_000_000
+               })
+    end
   end
 
   test "R2 accepts a PNG upload within the size limit" do

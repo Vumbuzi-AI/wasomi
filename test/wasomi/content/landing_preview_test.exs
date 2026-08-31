@@ -5,9 +5,11 @@ defmodule Wasomi.Content.LandingPreviewTest do
   alias Wasomi.Content.LandingPreview
 
   defp images do
-    Map.new(LandingImage.slots(), fn slot ->
+    LandingImage.slots()
+    |> Map.new(fn slot ->
       {slot, %{url: LandingImage.default_path(slot), alt: LandingImage.default_alt(slot)}}
     end)
+    |> Map.update!(:hero, &[&1])
   end
 
   test "renders a standalone document with the hero image for the hero slot" do
@@ -31,7 +33,7 @@ defmodule Wasomi.Content.LandingPreviewTest do
   end
 
   test "a not-yet-saved override URL is reflected in the rendered document" do
-    images = Map.put(images(), :hero, %{url: "https://cdn.example.test/pending.png", alt: ""})
+    images = Map.put(images(), :hero, [%{url: "https://cdn.example.test/pending.png", alt: ""}])
 
     html = LandingPreview.render_html(:hero, images)
 

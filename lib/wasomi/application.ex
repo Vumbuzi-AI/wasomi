@@ -5,6 +5,21 @@ defmodule Wasomi.Application do
 
   use Application
 
+  require Logger
+
+  @chrome_executables [
+    "chromium-browser",
+    "chromium",
+    "google-chrome",
+    "chrome",
+    "chrome.exe",
+    "/usr/bin/chromium-browser",
+    "/usr/bin/chromium",
+    "/usr/bin/google-chrome",
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium"
+  ]
+
   @impl true
   def start(_type, _args) do
     children =
@@ -38,9 +53,30 @@ defmodule Wasomi.Application do
   # so neither CI nor a browser-less dev box has to run Chrome.
   defp chromic_pdf_child do
     if Application.get_env(:wasomi, :start_chromic_pdf, false) do
-      [{ChromicPDF, Application.get_env(:wasomi, :chromic_pdf_options, [])}]
+      options = Application.get_env(:wasomi, :chromic_pdf_options, [])
+
+      case chrome_executable(options) do
+        nil ->
+          Logger.warning("""
+          ChromicPDF is enabled, but Chrome/Chromium is not installed or executable. \
+          Starting Wasomi without PDF rendering. Set CHROME_EXECUTABLE to the browser path \
+          or install Chrome/Chromium to enable certificates and receipts.
+          """)
+
+          []
+
+        executable ->
+          [{ChromicPDF, Keyword.put(options, :chrome_executable, executable)}]
+      end
     else
       []
+    end
+  end
+
+  defp chrome_executable(options) do
+    case Keyword.get(options, :chrome_executable) do
+      nil -> Enum.find_value(@chrome_executables, &System.find_executable/1)
+      executable -> System.find_executable(executable)
     end
   end
 

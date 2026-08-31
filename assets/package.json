@@ -2,5 +2,6 @@
   "dependencies": {
     "chart.js": "^4.5.1",
     "cropperjs": "^1.6.3"
+    "intl-tel-input": "25.3.1"
   }
 }

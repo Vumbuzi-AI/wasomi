@@ -23,6 +23,7 @@ import { LiveSocket } from "phoenix_live_view";
 import topbar from "../vendor/topbar";
 import Chart from "chart.js/auto";
 import Cropper from "cropperjs";
+import intlTelInput from "intl-tel-input/intlTelInputWithUtils";
 
 const Hooks = {};
 
@@ -2770,6 +2771,71 @@ Hooks.Recaptcha = {
     if (this.handleFormSubmit) {
       this.el.removeEventListener("submit", this.handleFormSubmit);
     }
+  },
+};
+
+// International phone entry: country picker + dial-code prefix + format/validate
+// (intl-tel-input, with libphonenumber utils bundled). The visible <input> and
+// the plugin's injected country dropdown live inside a phx-update="ignore"
+// wrapper so morphdom never clobbers them; the E.164 value is mirrored into a
+// sibling hidden <input> that the LiveView form actually submits.
+Hooks.PhoneInput = {
+  mounted() {
+    this.field = this.el.querySelector("input[type='tel']");
+    this.hidden = document.getElementById(this.el.dataset.hiddenInput);
+    if (!this.field || !this.hidden) return;
+
+    try {
+      this.iti = intlTelInput(this.field, {
+        initialCountry: this.el.dataset.initialCountry || "ke",
+        countryOrder: ["ke", "ug", "tz", "rw", "et"],
+        separateDialCode: true,
+        nationalMode: false,
+        autoPlaceholder: "aggressive",
+      });
+    } catch (err) {
+      // Degrade to a plain (unvalidated, un-submitted) tel field rather than
+      // wedging the signup form — phone is optional.
+      console.error("intl-tel-input failed to initialise:", err);
+      return;
+    }
+
+    // Seed from whatever the server already holds (E.164), e.g. after a
+    // failed submit re-renders the form.
+    if (this.hidden.value) this.iti.setNumber(this.hidden.value);
+
+    this.sync = () => {
+      const typed = this.field.value.trim();
+      let e164 = "";
+      try {
+        e164 = typed === "" ? "" : this.iti.getNumber() || "";
+      } catch (_err) {
+        e164 = "";
+      }
+
+      if (this.hidden.value !== e164) {
+        this.hidden.value = e164;
+        this.hidden.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+
+      this.el.classList.toggle(
+        "phone-invalid",
+        typed !== "" && !this.iti.isValidNumber(),
+      );
+    };
+
+    ["input", "blur", "countrychange"].forEach((evt) =>
+      this.field.addEventListener(evt, this.sync),
+    );
+  },
+
+  destroyed() {
+    if (this.field && this.sync) {
+      ["input", "blur", "countrychange"].forEach((evt) =>
+        this.field.removeEventListener(evt, this.sync),
+      );
+    }
+    this.iti?.destroy();
   },
 };
 

@@ -38,6 +38,21 @@ defmodule Wasomi.Accounts.UserNotifier do
   end
 
   @doc """
+  Invites someone to become a Wasomi admin. `url` is the one-time accept link.
+  """
+  def deliver_admin_invitation(email, invited_by_name, url) do
+    deliver(email, "You're invited to the Wasomi admin team", %{
+      title: "Join the Wasomi admin team",
+      intro: "Hi there,",
+      body: [
+        "#{invited_by_name} has invited you to be an admin on Wasomi Business Institute.",
+        "Click the button below to accept. This link expires in 7 days."
+      ],
+      cta: %{label: "Accept invitation", url: url}
+    })
+  end
+
+  @doc """
   Emails a one-time magic login link. `url` carries the raw login token.
   """
   def deliver_magic_link(user, url) do

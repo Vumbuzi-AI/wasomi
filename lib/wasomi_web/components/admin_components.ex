@@ -30,6 +30,12 @@ defmodule WasomiWeb.AdminComponents do
     },
     %{key: :mentors, label: "Mentors", icon: "hero-user-group", path: "/admin/mentors"},
     %{key: :students, label: "Students", icon: "hero-users", path: "/admin/students"},
+    %{
+      key: :invitations,
+      label: "Admin invitations",
+      icon: "hero-user-plus",
+      path: "/admin/invitations"
+    },
     %{key: :payments, label: "Payments", icon: "hero-banknotes", path: "/admin/payments"},
     %{key: :analytics, label: "Analytics", icon: "hero-chart-bar", path: "/admin/analytics"},
     %{

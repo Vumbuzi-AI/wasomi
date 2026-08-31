@@ -1,0 +1,43 @@
+<.auth_shell active={:login} back_to={~p"/users/log_in"} back_label="Cancel">
+  <h1 class="mt-8 text-4xl font-semibold text-dark">Log in to Wasomi</h1>
+  <p class="mt-2 text-body">
+    Logging in as <span class="font-semibold text-dark">{@pending_user.email}</span>.
+  </p>
+
+  <.form
+    for={%{}}
+    id="magic_link_login_form"
+    action={~p"/users/log_in/#{@token}"}
+    method="post"
+    class="mt-8 space-y-5"
+  >
+    <label class="flex items-center gap-2.5 text-sm font-medium text-dark">
+      <input
+        type="checkbox"
+        name="remember_me"
+        value="true"
+        checked
+        class="h-4 w-4 rounded border-black/20 text-primary focus:ring-primary/30"
+      /> Keep me signed in
+    </label>
+
+    <button
+      type="submit"
+      phx-disable-with="Signing in..."
+      class="group inline-flex w-full items-center justify-center gap-2 rounded-full bg-slate-100 px-6 py-3.5 font-semibold text-dark transition hover:bg-dark hover:text-white"
+    >
+      Log me in
+      <svg
+        class="h-4 w-4"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" />
+      </svg>
+    </button>
+  </.form>
+</.auth_shell>

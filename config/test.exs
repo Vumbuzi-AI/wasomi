@@ -63,6 +63,9 @@ config :wasomi, Oban, testing: :manual, queues: false, plugins: false
 # tree entry to keep CI from requiring a browser.
 config :wasomi, :start_chromic_pdf, false
 
+# Run channel message side effects inline so tests can assert on them.
+config :wasomi, :channel_side_effects, :sync
+
 # Disable swoosh api client as it is only required for production adapters
 config :swoosh, :api_client, false
 

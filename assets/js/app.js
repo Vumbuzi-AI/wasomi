@@ -22,6 +22,8 @@ import { Socket } from "phoenix";
 import { LiveSocket } from "phoenix_live_view";
 import topbar from "../vendor/topbar";
 import Chart from "chart.js/auto";
+import Cropper from "cropperjs";
+import intlTelInput from "intl-tel-input/intlTelInputWithUtils";
 
 const Hooks = {};
 
@@ -1620,19 +1622,75 @@ Hooks.ScaledPreview = {
   designWidth: 1280,
   maxHeight: 600,
 
-  // The template hashes the preview content into this element's id, so any
-  // real change is a fresh mounted() (node replacement), never a patch —
-  // avoids an in-place `srcdoc` update orphaning this listener.
+  // Two modes. With `data-fixed-aspect` (height ÷ width): the iframe is
+  // phx-update="ignore" and sized/scaled here from container width alone;
+  // its document rides on `data-srcdoc` (which LiveView patches) and
+  // updated() re-pushes it — real-time, no scrollHeight measurement.
+  // Without it: the legacy path that measures the rendered content and is
+  // remounted per change via a content-hashed id (per-step slot preview).
   mounted() {
     this.iframe = this.el.querySelector("iframe");
-    this.iframe.style.width = `${this.designWidth}px`;
     this.iframe.style.border = "0";
     this.iframe.style.transformOrigin = "top left";
-    this.iframe.addEventListener("load", () => this.scheduleFit());
+    this.iframe.style.width = `${this.designWidth}px`;
 
-    this.ro = new ResizeObserver(() => this.scheduleFit());
-    this.ro.observe(this.el);
+    this.fixedAspect = this.el.dataset.fixedAspect
+      ? Number(this.el.dataset.fixedAspect)
+      : null;
+
+    if (this.fixedAspect) {
+      this.iframe.style.height = `${Math.round(this.designWidth * this.fixedAspect)}px`;
+      this.renderDoc();
+      this.fitFixed();
+      this.ro = new ResizeObserver(() => this.fitFixed());
+      this.ro.observe(this.el);
+    } else {
+      this.iframe.addEventListener("load", () => this.onFrameLoad());
+      this.ro = new ResizeObserver(() => this.scheduleFit());
+      this.ro.observe(this.el);
+      this.scheduleFit();
+    }
+  },
+
+  updated() {
+    if (this.fixedAspect) {
+      this.renderDoc();
+      this.fitFixed();
+    }
+  },
+
+  renderDoc() {
+    const doc = this.el.dataset.srcdoc || "";
+    if (doc !== this._lastDoc) {
+      this.iframe.srcdoc = doc;
+      this._lastDoc = doc;
+    }
+  },
+
+  fitFixed() {
+    const width = this.el.clientWidth;
+    if (!width) return;
+    const scale = width / this.designWidth;
+    this.iframe.style.transform = `scale(${scale})`;
+    this.el.style.height = `${Math.round(this.designWidth * this.fixedAspect * scale)}px`;
+  },
+
+  // Legacy measured path (per-step slot preview): re-fit whenever an inner
+  // image loads (they can 404 briefly post-upload) or the body reflows.
+  onFrameLoad() {
     this.scheduleFit();
+    try {
+      const doc = this.iframe.contentDocument;
+      doc.querySelectorAll("img").forEach((img) => {
+        img.addEventListener("load", () => this.scheduleFit());
+      });
+      if (doc.body) {
+        this.innerRo = new ResizeObserver(() => this.scheduleFit());
+        this.innerRo.observe(doc.body);
+      }
+    } catch {
+      // cross-origin somehow — nothing to observe
+    }
   },
 
   // Dimensions can be 0 for a frame or two right after "load"/ResizeObserver
@@ -1669,6 +1727,7 @@ Hooks.ScaledPreview = {
 
   destroyed() {
     if (this.ro) this.ro.disconnect();
+    if (this.innerRo) this.innerRo.disconnect();
   },
 };
 
@@ -1902,10 +1961,80 @@ Hooks.RevealOnScroll = {
   },
 };
 
+// Crossfades between `[data-hero-slide]` images on an interval, with
+// `[data-hero-dot]` buttons to jump directly to one (only mounted when
+// there's more than one hero image — see HomeComponents.hero/1).
+Hooks.HeroCarousel = {
+  mounted() {
+    this.slides = Array.from(this.el.querySelectorAll("[data-hero-slide]"));
+    this.dots = Array.from(this.el.querySelectorAll("[data-hero-dot]"));
+    this.active = 0;
+
+    // `animate-image-in`'s `forwards` fill-mode pins slide 0's opacity to 1
+    // permanently once the entrance animation finishes, which would fight
+    // every later crossfade — drop it the moment that one-time job is done.
+    this.slides[0].addEventListener(
+      "animationend",
+      () => this.slides[0].classList.remove("animate-image-in"),
+      { once: true },
+    );
+
+    this.dots.forEach((dot, index) => {
+      dot.addEventListener("click", () => this.goTo(index));
+    });
+
+    this.timer = setInterval(() => this.goTo(this.active + 1), 5500);
+  },
+
+  goTo(index) {
+    const next = ((index % this.slides.length) + this.slides.length) % this.slides.length;
+    if (next === this.active) return;
+
+    this.slides[this.active].classList.replace("opacity-100", "opacity-0");
+    this.slides[next].classList.replace("opacity-0", "opacity-100");
+
+    this.dots[this.active].classList.replace("w-6", "w-2");
+    this.dots[this.active].classList.replace("bg-white", "bg-white/40");
+    this.dots[next].classList.replace("w-2", "w-6");
+    this.dots[next].classList.replace("bg-white/40", "bg-white");
+
+    this.active = next;
+    clearInterval(this.timer);
+    this.timer = setInterval(() => this.goTo(this.active + 1), 5500);
+  },
+
+  destroyed() {
+    clearInterval(this.timer);
+  },
+};
+
 const EYE_OPEN =
   '<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"/><circle cx="12" cy="12" r="3"/>';
 const EYE_CLOSED =
   '<path d="M17.9 17.9A10.6 10.6 0 0 1 12 19c-7 0-11-7-11-7a19.4 19.4 0 0 1 4.2-5.1M9.9 4.2A9.4 9.4 0 0 1 12 4c7 0 11 7 11 7a19.4 19.4 0 0 1-2.6 3.6M14.1 14.1a3 3 0 1 1-4.2-4.2"/><line x1="1" y1="1" x2="23" y2="23"/>';
+
+Hooks.CopyToClipboard = {
+  mounted() {
+    this.el.addEventListener("click", async () => {
+      const text = this.el.dataset.copy || "";
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch (_e) {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        ta.remove();
+      }
+      const original = this.el.dataset.label || this.el.textContent;
+      this.el.textContent = this.el.dataset.done || "Copied!";
+      setTimeout(() => {
+        this.el.textContent = original;
+      }, 1500);
+    });
+  },
+};
 
 Hooks.TogglePassword = {
   mounted() {
@@ -1959,6 +2088,213 @@ Hooks.QuizCountdown = {
     if (remainingMs <= 0) {
       window.clearInterval(this.timer);
     }
+  },
+};
+
+// A picked file is cropped/compressed client-side, then injected into the
+// real live_file_input via DataTransfer — so LiveView's upload (incl. its
+// max_file_size check) only ever sees the processed result.
+const IMAGE_UPLOAD_MAX_ATTEMPTS = 6;
+
+function loadImageFromFile(file) {
+  const objectUrl = URL.createObjectURL(file);
+
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve({ img, objectUrl });
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("image load failed"));
+    };
+    img.src = objectUrl;
+  });
+}
+
+function canvasToBlob(canvas, type, quality) {
+  return new Promise((resolve) => canvas.toBlob(resolve, type, quality));
+}
+
+function jpegName(name) {
+  return name.replace(/\.[^.]+$/, "") + ".jpg";
+}
+
+// Re-encodes as JPEG at decreasing quality, then falls back to shrinking
+// dimensions, until the result fits under maxBytes (or attempts run out).
+async function compressToLimit(file, maxBytes) {
+  const { img, objectUrl } = await loadImageFromFile(file);
+  try {
+    let width = img.naturalWidth;
+    let height = img.naturalHeight;
+    let quality = 0.85;
+    let blob = null;
+
+    for (let attempt = 0; attempt < IMAGE_UPLOAD_MAX_ATTEMPTS; attempt++) {
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+      blob = await canvasToBlob(canvas, "image/jpeg", quality);
+
+      if (!blob || blob.size <= maxBytes) break;
+
+      if (quality > 0.5) {
+        quality -= 0.1;
+      } else {
+        width = Math.round(width * 0.85);
+        height = Math.round(height * 0.85);
+      }
+    }
+
+    return blob
+      ? new File([blob], jpegName(file.name), { type: "image/jpeg" })
+      : file;
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+function compressIfNeeded(file, maxBytes) {
+  return file.size > maxBytes ? compressToLimit(file, maxBytes) : Promise.resolve(file);
+}
+
+function buildCropOverlay(titleText) {
+  const root = document.createElement("div");
+  root.className = "fixed inset-0 z-[70] flex items-center justify-center bg-zinc-900/70 p-4";
+
+  const panel = document.createElement("div");
+  panel.className = "flex w-full max-w-lg flex-col gap-4 rounded-2xl bg-white p-5 shadow-lg";
+
+  const title = document.createElement("p");
+  title.className = "text-sm font-semibold text-ink";
+  title.textContent = titleText;
+
+  const stage = document.createElement("div");
+  stage.className = "max-h-[60vh] overflow-hidden rounded-xl bg-zinc-100";
+
+  const image = document.createElement("img");
+  image.className = "block max-w-full";
+  stage.appendChild(image);
+
+  const actions = document.createElement("div");
+  actions.className = "flex justify-end gap-2";
+
+  const cancelBtn = document.createElement("button");
+  cancelBtn.type = "button";
+  cancelBtn.textContent = "Cancel";
+  cancelBtn.className =
+    "rounded-full border border-black/10 px-4 py-2 text-xs font-semibold text-muted hover:bg-surface hover:text-ink";
+
+  const confirmBtn = document.createElement("button");
+  confirmBtn.type = "button";
+  confirmBtn.textContent = "Apply crop";
+  confirmBtn.disabled = true;
+  confirmBtn.className =
+    "rounded-full bg-ink px-4 py-2 text-xs font-semibold text-white hover:bg-primary disabled:cursor-not-allowed disabled:opacity-50";
+
+  actions.append(cancelBtn, confirmBtn);
+  panel.append(title, stage, actions);
+  root.appendChild(panel);
+
+  return { root, image, cancelBtn, confirmBtn };
+}
+
+function cropToAspectRatio(file, aspectRatio, titleText) {
+  return new Promise((resolve, reject) => {
+    const overlay = buildCropOverlay(titleText);
+    document.body.appendChild(overlay.root);
+
+    const objectUrl = URL.createObjectURL(file);
+    let cropper;
+
+    const cleanup = () => {
+      if (cropper) cropper.destroy();
+      URL.revokeObjectURL(objectUrl);
+      overlay.root.remove();
+    };
+
+    overlay.image.addEventListener("load", () => {
+      cropper = new Cropper(overlay.image, {
+        aspectRatio,
+        viewMode: 1,
+        autoCropArea: 1,
+        background: false,
+      });
+      overlay.confirmBtn.disabled = false;
+    });
+    overlay.image.src = objectUrl;
+
+    overlay.cancelBtn.addEventListener("click", () => {
+      cleanup();
+      reject(new Error("cancelled"));
+    });
+
+    overlay.confirmBtn.addEventListener("click", () => {
+      if (!cropper) return;
+
+      cropper.getCroppedCanvas().toBlob(
+        (blob) => {
+          cleanup();
+          if (!blob) return reject(new Error("crop failed"));
+          resolve(new File([blob], jpegName(file.name), { type: "image/jpeg" }));
+        },
+        "image/jpeg",
+        0.92,
+      );
+    });
+  });
+}
+
+Hooks.ImageUploadProcessor = {
+  mounted() {
+    this.picker = this.el.querySelector('[data-role="picker"]');
+    // The real LiveView file input lives OUTSIDE this element (this element is
+    // phx-update="ignore"); find it by the id LiveView gives it (@upload.ref).
+    this.liveInput = document.getElementById(this.el.dataset.liveInput);
+    this.aspectRatio = this.el.dataset.aspectRatio
+      ? Number(this.el.dataset.aspectRatio)
+      : null;
+    this.maxBytes = Number(this.el.dataset.maxBytes);
+    this.cropTitle = this.el.dataset.cropTitle || "Crop image";
+    this.onPick = (event) => this.handlePick(event);
+    // Bind once — a re-mount without a matching destroyed() must not stack a
+    // second listener (which would crop/inject the same file twice).
+    this.picker?.removeEventListener("change", this.onPick);
+    this.picker?.addEventListener("change", this.onPick);
+  },
+
+  destroyed() {
+    this.picker?.removeEventListener("change", this.onPick);
+  },
+
+  async handlePick(event) {
+    const file = event.target.files[0];
+    event.target.value = "";
+    if (!file || this.busy) return;
+
+    this.busy = true;
+    try {
+      const cropped = this.aspectRatio
+        ? await cropToAspectRatio(file, this.aspectRatio, this.cropTitle)
+        : file;
+      const processed = await compressIfNeeded(cropped, this.maxBytes);
+      this.injectIntoLiveInput(processed);
+    } catch (err) {
+      if (!(err && err.message === "cancelled")) {
+        console.error("Image processing failed, uploading the original file:", err);
+        this.injectIntoLiveInput(file);
+      }
+    } finally {
+      this.busy = false;
+    }
+  },
+
+  injectIntoLiveInput(file) {
+    if (!this.liveInput) return;
+
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    this.liveInput.files = transfer.files;
+    this.liveInput.dispatchEvent(new Event("change", { bubbles: true }));
   },
 };
 
@@ -2488,6 +2824,71 @@ Hooks.Recaptcha = {
   },
 };
 
+// International phone entry: country picker + dial-code prefix + format/validate
+// (intl-tel-input, with libphonenumber utils bundled). The visible <input> and
+// the plugin's injected country dropdown live inside a phx-update="ignore"
+// wrapper so morphdom never clobbers them; the E.164 value is mirrored into a
+// sibling hidden <input> that the LiveView form actually submits.
+Hooks.PhoneInput = {
+  mounted() {
+    this.field = this.el.querySelector("input[type='tel']");
+    this.hidden = document.getElementById(this.el.dataset.hiddenInput);
+    if (!this.field || !this.hidden) return;
+
+    try {
+      this.iti = intlTelInput(this.field, {
+        initialCountry: this.el.dataset.initialCountry || "ke",
+        countryOrder: ["ke", "ug", "tz", "rw", "et"],
+        separateDialCode: true,
+        nationalMode: false,
+        autoPlaceholder: "aggressive",
+      });
+    } catch (err) {
+      // Degrade to a plain (unvalidated, un-submitted) tel field rather than
+      // wedging the signup form — phone is optional.
+      console.error("intl-tel-input failed to initialise:", err);
+      return;
+    }
+
+    // Seed from whatever the server already holds (E.164), e.g. after a
+    // failed submit re-renders the form.
+    if (this.hidden.value) this.iti.setNumber(this.hidden.value);
+
+    this.sync = () => {
+      const typed = this.field.value.trim();
+      let e164 = "";
+      try {
+        e164 = typed === "" ? "" : this.iti.getNumber() || "";
+      } catch (_err) {
+        e164 = "";
+      }
+
+      if (this.hidden.value !== e164) {
+        this.hidden.value = e164;
+        this.hidden.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+
+      this.el.classList.toggle(
+        "phone-invalid",
+        typed !== "" && !this.iti.isValidNumber(),
+      );
+    };
+
+    ["input", "blur", "countrychange"].forEach((evt) =>
+      this.field.addEventListener(evt, this.sync),
+    );
+  },
+
+  destroyed() {
+    if (this.field && this.sync) {
+      ["input", "blur", "countrychange"].forEach((evt) =>
+        this.field.removeEventListener(evt, this.sync),
+      );
+    }
+    this.iti?.destroy();
+  },
+};
+
 // searchable dropdown, filters client-side, no server round trip. Not phx-update=ignore
 // on purpose: needs to stay patchable so validation errors actually render
 Hooks.SearchableSelect = {
@@ -2685,6 +3086,285 @@ Hooks.ZebraChat = {
   },
 };
 
+// Keeps the course-channel message list pinned to the newest message,
+// unless the reader has scrolled up to read history. Every method guards
+// `this.el` and swallows errors — a throw here would abort the view's
+// join/update patch and break all further DOM updates for the panel.
+Hooks.ChannelScroll = {
+  mounted() {
+    this.stick();
+    // Jump to and briefly highlight a message linked from a notification.
+    this.handleEvent("channel:highlight", ({ id }) => {
+      window.setTimeout(() => {
+        const el = document.getElementById(`messages-${id}`);
+        if (!el) return;
+        el.scrollIntoView({ block: "center", behavior: "smooth" });
+        el.classList.add("rounded-xl", "ring-2", "ring-primary", "ring-offset-2");
+        window.setTimeout(
+          () =>
+            el.classList.remove(
+              "rounded-xl",
+              "ring-2",
+              "ring-primary",
+              "ring-offset-2",
+            ),
+          2600,
+        );
+      }, 80);
+    });
+  },
+  updated() {
+    this.stick();
+  },
+  stick() {
+    try {
+      const el = this.el;
+      if (!el) return;
+      const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      if (distanceFromBottom < 160) el.scrollTop = el.scrollHeight;
+    } catch (_error) {
+      /* never let scroll bookkeeping break the view */
+    }
+  },
+};
+
+// Channel composer: @mention typeahead + typing indicator.
+//
+// Mentionable people come as `data-mention-users` JSON (`[{id, name}]`, where
+// id may be "all"). While editing, the field shows friendly `@Name`; a hidden
+// map remembers name -> id, and on submit `@Name` is rewritten to the stable
+// token `@[Name](user:ID)` the server resolves. `@all` stays literal. The
+// dropdown is body-mounted and fixed-positioned so it can't be clipped or
+// disturbed by LiveView DOM patches.
+const MENTION_QUERY = /(?:^|\s)@([\p{L}\p{N}._-]*)$/u;
+const MENTION_TOKEN = /@\[([^\]\n]+)\]\(user:([\w]+)\)/g;
+
+Hooks.ChannelComposer = {
+  mounted() {
+    this.input = this.el.querySelector("#course-channel-input");
+    if (!this.input) return;
+
+    this.users = safeParse(this.el.dataset.mentionUsers);
+    this.mentionMap = new Map();
+    this.active = 0;
+    this.matches = [];
+    this.queryStart = null;
+
+    this.menu = document.createElement("ul");
+    this.menu.setAttribute("role", "listbox");
+    this.menu.className =
+      "fixed z-[70] max-h-56 w-72 overflow-y-auto rounded-xl border border-black/10 bg-white py-1 text-sm shadow-xl";
+    this.menu.hidden = true;
+    document.body.appendChild(this.menu);
+
+    this.onInput = () => this.handleInput();
+    this.onKeyDown = (event) => this.onKey(event);
+    this.onBlur = () => window.setTimeout(() => this.close(), 150);
+    this.onSubmit = () => this.encodeMentions();
+    this.onInsertEmoji = (event) => this.insertText((event.detail || {}).emoji || "");
+    this.reposition = () => (this.menu.hidden ? null : this.render());
+
+    this.input.addEventListener("input", this.onInput);
+    this.input.addEventListener("keyup", this.onInput);
+    this.input.addEventListener("click", () => this.handleInput());
+    this.input.addEventListener("keydown", this.onKeyDown);
+    this.input.addEventListener("blur", this.onBlur);
+    this.input.addEventListener("wasomi:insert-emoji", this.onInsertEmoji);
+    this.el.addEventListener("submit", this.onSubmit, true);
+    window.addEventListener("scroll", this.reposition, true);
+    window.addEventListener("resize", this.reposition);
+
+    // Clear the composer after a successful send (the textarea is uncontrolled,
+    // so the server can't reset it via re-render).
+    this.handleEvent("channel:reset-composer", () => {
+      this.input.value = "";
+      this.mentionMap.clear();
+      this.close();
+    });
+
+    // Insert a mention chosen from the members panel.
+    this.handleEvent("channel:insert-mention", ({ id, name }) => {
+      this.insertMention({ id: String(id), name }, this.input.value.length);
+    });
+
+    this.decodeTokens();
+  },
+  updated() {
+    this.users = safeParse(this.el.dataset.mentionUsers);
+  },
+  destroyed() {
+    this.input?.removeEventListener("input", this.onInput);
+    this.input?.removeEventListener("keyup", this.onInput);
+    this.input?.removeEventListener("keydown", this.onKeyDown);
+    this.input?.removeEventListener("blur", this.onBlur);
+    this.input?.removeEventListener("wasomi:insert-emoji", this.onInsertEmoji);
+    this.el.removeEventListener("submit", this.onSubmit, true);
+    window.removeEventListener("scroll", this.reposition, true);
+    window.removeEventListener("resize", this.reposition);
+    this.menu?.remove();
+  },
+  insertText(text) {
+    if (!text) return;
+    const start = this.input.selectionStart ?? this.input.value.length;
+    const end = this.input.selectionEnd ?? start;
+    const value = this.input.value;
+    this.input.value = value.slice(0, start) + text + value.slice(end);
+    const caret = start + text.length;
+    this.input.focus();
+    this.input.setSelectionRange(caret, caret);
+    this.input.dispatchEvent(new Event("input", { bubbles: true }));
+  },
+  insertMention(user, at) {
+    const value = this.input.value;
+    const needsSpace = at > 0 && !/\s$/.test(value.slice(0, at));
+    const label = `${needsSpace ? " " : ""}@${user.name} `;
+    this.input.value = value.slice(0, at) + label + value.slice(at);
+    if (String(user.id) !== "all") this.mentionMap.set(user.name, user);
+    const caret = at + label.length;
+    this.input.focus();
+    this.input.setSelectionRange(caret, caret);
+  },
+
+  // --- mention token encode/decode ----------------------------------------
+  decodeTokens() {
+    const value = this.input.value || "";
+    MENTION_TOKEN.lastIndex = 0;
+    if (!MENTION_TOKEN.test(value)) return;
+
+    MENTION_TOKEN.lastIndex = 0;
+    const decoded = value.replace(MENTION_TOKEN, (_t, name, id) => {
+      this.mentionMap.set(name, { id, name });
+      return `@${name}`;
+    });
+    if (decoded !== value) {
+      const caret = Math.min(this.input.selectionStart, decoded.length);
+      this.input.value = decoded;
+      this.input.setSelectionRange(caret, caret);
+    }
+  },
+  encodeMentions() {
+    if (this.mentionMap.size === 0) return;
+    let body = this.input.value;
+    Array.from(this.mentionMap.entries())
+      .sort(([a], [b]) => b.length - a.length)
+      .forEach(([name, user]) => {
+        if (String(user.id) === "all") return;
+        const matcher = new RegExp(
+          `@${escapeRegExp(name)}(?![\\p{L}\\p{N}._-])`,
+          "gu",
+        );
+        body = body.replace(matcher, `@[${name}](user:${user.id})`);
+      });
+    this.input.value = body;
+  },
+  pruneMentionMap() {
+    const body = this.input.value || "";
+    this.mentionMap.forEach((_u, name) => {
+      if (!body.includes(`@${name}`)) this.mentionMap.delete(name);
+    });
+  },
+
+  // --- typeahead ---------------------------------------------------------
+  handleInput() {
+    this.pruneMentionMap();
+    const caret = this.input.selectionStart;
+    const before = this.input.value.slice(0, caret);
+    const match = before.match(MENTION_QUERY);
+    if (!match) return this.close();
+
+    const term = match[1].toLowerCase();
+    this.queryStart = caret - match[1].length - 1;
+    this.matches = this.users
+      .filter((u) => (u.name || "").toLowerCase().includes(term))
+      .sort((a, b) => {
+        const ap = a.name.toLowerCase().startsWith(term) ? 0 : 1;
+        const bp = b.name.toLowerCase().startsWith(term) ? 0 : 1;
+        return ap - bp || a.name.localeCompare(b.name);
+      })
+      .slice(0, 8);
+
+    if (this.matches.length === 0) return this.close();
+    this.active = 0;
+    this.render();
+  },
+  render() {
+    this.menu.innerHTML = "";
+    this.matches.forEach((user, index) => {
+      const li = document.createElement("li");
+      li.setAttribute("role", "option");
+      li.className =
+        "flex cursor-pointer items-center gap-2 truncate px-3 py-1.5 " +
+        (index === this.active ? "bg-mint text-primary" : "text-ink hover:bg-mint/60");
+      li.textContent =
+        String(user.id) === "all" ? "@all — notify everyone" : user.name;
+      li.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        this.select(user);
+      });
+      this.menu.appendChild(li);
+    });
+
+    const rect = this.input.getBoundingClientRect();
+    const height = Math.min(this.menu.scrollHeight, 224);
+    const above = rect.top - height - 6;
+    this.menu.style.left = `${rect.left}px`;
+    this.menu.style.width = `${Math.max(200, Math.min(rect.width, 340))}px`;
+    this.menu.style.top = above > 8 ? `${above}px` : `${rect.bottom + 6}px`;
+    this.menu.hidden = false;
+  },
+  onKey(event) {
+    if (this.menu.hidden) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      this.active = (this.active + 1) % this.matches.length;
+      this.render();
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      this.active = (this.active - 1 + this.matches.length) % this.matches.length;
+      this.render();
+    } else if (event.key === "Enter" || event.key === "Tab") {
+      event.preventDefault();
+      this.select(this.matches[this.active]);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      this.close();
+    }
+  },
+  select(user) {
+    if (!user || this.queryStart == null) return this.close();
+    const value = this.input.value;
+    const caret = this.input.selectionStart;
+    const label = String(user.id) === "all" ? "@all " : `@${user.name} `;
+    const next = value.slice(0, this.queryStart) + label + value.slice(caret);
+    const cursor = this.queryStart + label.length;
+
+    if (String(user.id) !== "all") this.mentionMap.set(user.name, user);
+    this.input.value = next;
+    this.input.setSelectionRange(cursor, cursor);
+    this.close();
+    this.input.focus();
+    this.input.dispatchEvent(new Event("input", { bubbles: true }));
+  },
+  close() {
+    if (this.menu) this.menu.hidden = true;
+    this.matches = [];
+    this.queryStart = null;
+    this.active = 0;
+  },
+};
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function safeParse(json) {
+  try {
+    return JSON.parse(json || "[]");
+  } catch (_error) {
+    return [];
+  }
+}
+
 let csrfToken = document
   .querySelector("meta[name='csrf-token']")
   .getAttribute("content");
@@ -2693,6 +3373,20 @@ let liveSocket = new LiveSocket("/live", Socket, {
   params: { _csrf_token: csrfToken },
   hooks: Hooks,
   uploaders: { R2: R2Uploader },
+  dom: {
+    // Phoenix's <.modal> reveals itself once via a phx-mounted `display`
+    // style; a later patch would strip it and re-hide an open modal (e.g.
+    // when an upload finishes). Carry that JS style forward.
+    onBeforeElUpdated(from, to) {
+      if (
+        /(-modal)(-container|-bg)?$/.test(from.id || "") &&
+        from.getAttribute("style") &&
+        !to.getAttribute("style")
+      ) {
+        to.setAttribute("style", from.getAttribute("style"));
+      }
+    },
+  },
 });
 
 // Show progress bar on live navigation and form submits

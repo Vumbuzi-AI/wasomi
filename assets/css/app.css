@@ -1,4 +1,6 @@
 @import url("https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap");
+@import "../vendor/cropper.css";
+@import "../vendor/intl-tel-input.css";
 
 @import "tailwindcss/base";
 @import "tailwindcss/components";
@@ -335,4 +337,38 @@ body {
   grid-template-columns: repeat(3, 1fr);
   gap: 8px;
   padding: 2px;
+}
+
+/* ==========================================
+   International phone input (intl-tel-input)
+   ========================================== */
+/* The plugin ships an inline-block wrapper; the signup form wants it to fill
+   the row and the <input> to match the other auth fields. */
+.iti {
+  display: block;
+  width: 100%;
+}
+
+.iti__tel-input {
+  width: 100%;
+  border-radius: 0.5rem;
+  border: 1px solid rgb(0 0 0 / 0.15);
+  background: #fff;
+  padding: 0.75rem 0.875rem;
+  font-weight: 500;
+  color: #012c6a;
+  outline: none;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.iti__tel-input:focus {
+  border-color: #f97316;
+  box-shadow: 0 0 0 4px rgb(249 115 22 / 0.1);
+}
+
+/* Client-side "doesn't look valid yet" hint — the server still re-validates. */
+.phone-field.phone-invalid .iti__tel-input {
+  border-color: #fb7185;
 }

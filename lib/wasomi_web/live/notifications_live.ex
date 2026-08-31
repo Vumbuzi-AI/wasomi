@@ -39,15 +39,51 @@ defmodule WasomiWeb.NotificationsLive do
   # acted-on notification stuck "unread" forever — visiting the course is
   # every bit as much "handled" as clicking Dismiss.
   def handle_event("visit_course", %{"id" => id}, socket) do
-    case Notifications.get_notification(socket.assigns.current_user, id) do
+    user = socket.assigns.current_user
+
+    case Notifications.get_notification(user, id) do
       %{course: %{slug: slug}} = notification ->
         Notifications.mark_read(notification)
-        {:noreply, push_navigate(socket, to: ~p"/learn/courses/#{slug}")}
+
+        {:noreply,
+         push_navigate(socket, to: course_destination(notification, slug, user.role == :admin))}
 
       _ ->
         {:noreply, socket}
     end
   end
+
+  # Admins aren't enrolled, so the learner course player would bounce them to
+  # checkout — send them to the admin discussions hub instead.
+  defp course_destination(%{kind: kind} = notification, slug, true)
+       when kind in [:channel_announcement, :channel_mention] do
+    params =
+      case notification.channel_message_id do
+        nil -> %{course: slug}
+        msg_id -> %{course: slug, msg: msg_id}
+      end
+
+    ~p"/admin/discussions?#{params}"
+  end
+
+  defp course_destination(%{kind: kind} = notification, slug, false)
+       when kind in [:channel_announcement, :channel_mention] do
+    params =
+      case notification.channel_message_id do
+        nil -> %{tab: "discussion"}
+        msg_id -> %{tab: "discussion", msg: msg_id}
+      end
+
+    ~p"/learn/courses/#{slug}?#{params}"
+  end
+
+  defp course_destination(_notification, slug, true), do: ~p"/admin/courses/#{slug}"
+  defp course_destination(_notification, slug, false), do: ~p"/learn/courses/#{slug}"
+
+  defp cta_label(%{kind: kind}) when kind in [:channel_announcement, :channel_mention],
+    do: "Open discussion"
+
+  defp cta_label(_notification), do: "Go to course"
 
   @impl true
   def render(assigns) do
@@ -122,7 +158,7 @@ defmodule WasomiWeb.NotificationsLive do
                   phx-value-id={notification.id}
                   class="rounded-full bg-primary px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-ink"
                 >
-                  Go to course
+                  {cta_label(notification)}
                 </button>
                 <button
                   :if={unread?(notification)}

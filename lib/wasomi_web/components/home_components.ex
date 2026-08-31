@@ -253,12 +253,47 @@ defmodule WasomiWeb.HomeComponents do
   def hero(assigns) do
     ~H"""
     <section class="relative isolate min-h-[640px] overflow-hidden bg-dark lg:min-h-[740px]">
+      <div
+        :if={length(@images.hero) > 1}
+        id="hero-carousel"
+        phx-hook="HeroCarousel"
+        phx-update="ignore"
+        class="absolute inset-0 h-full w-full"
+      >
+        <img
+          :for={{image, index} <- Enum.with_index(@images.hero)}
+          src={image.url}
+          alt={image.alt}
+          aria-hidden="true"
+          data-hero-slide
+          class={[
+            "absolute inset-0 h-full w-full object-cover object-top transition-opacity duration-1000",
+            if(index == 0, do: "animate-image-in opacity-100", else: "opacity-0")
+          ]}
+        />
+        <div class="absolute bottom-6 left-1/2 z-10 flex -translate-x-1/2 gap-2">
+          <button
+            :for={{_image, index} <- Enum.with_index(@images.hero)}
+            type="button"
+            data-hero-dot={index}
+            aria-label={"Show hero image #{index + 1}"}
+            class={[
+              "h-2 rounded-full transition-all",
+              if(index == 0, do: "w-6 bg-white", else: "w-2 bg-white/40 hover:bg-white/60")
+            ]}
+          >
+          </button>
+        </div>
+      </div>
+
       <img
-        src={@images.hero.url}
-        alt=""
+        :if={length(@images.hero) == 1}
+        src={hd(@images.hero).url}
+        alt={hd(@images.hero).alt}
         aria-hidden="true"
         class="absolute inset-0 h-full w-full animate-image-in object-cover object-top"
       />
+
       <div class="relative mx-auto flex min-h-[560px] max-w-container items-center px-5 py-16 lg:min-h-[640px] lg:px-8">
         <div class="max-w-2xl animate-fade-up opacity-0">
           <h1 class="max-w-xl text-5xl font-semibold leading-[1.1] text-white sm:text-6xl lg:text-7xl">

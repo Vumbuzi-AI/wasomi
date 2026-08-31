@@ -65,6 +65,22 @@ defmodule Wasomi.Certificates do
     |> Repo.all()
   end
 
+  @doc """
+  Lists certificates safe to show on a learner's public profile.
+
+  This intentionally returns verification metadata only; callers should link
+  to the public GDTI verification page rather than exposing certificate files.
+  """
+  def list_public_for_user(%User{id: user_id, public_profile_enabled: true}) do
+    Certificate
+    |> where([certificate], certificate.user_id == ^user_id)
+    |> order_by([certificate], desc: certificate.issued_at)
+    |> preload(:course)
+    |> Repo.all()
+  end
+
+  def list_public_for_user(%User{}), do: []
+
   def list_for_user_course(%User{id: user_id}, %Course{id: course_id}) do
     Certificate
     |> where(

@@ -12,6 +12,7 @@ defmodule Wasomi.Accounts.UserToken do
   @confirm_validity_in_days 7
   @change_email_validity_in_days 7
   @session_validity_in_days 60
+  @login_validity_in_minutes 15
 
   schema "users_tokens" do
     field :token, :binary
@@ -128,6 +129,34 @@ defmodule Wasomi.Accounts.UserToken do
 
   defp days_for_context("confirm"), do: @confirm_validity_in_days
   defp days_for_context("reset_password"), do: @reset_password_validity_in_days
+
+  @doc "How long a `\"login\"` (magic-link) token stays valid."
+  def login_validity_in_minutes, do: @login_validity_in_minutes
+
+  @doc """
+  Verifies a `"login"` magic-link token. Valid when it matches a stored hash,
+  the user's email is unchanged, and it is under #{@login_validity_in_minutes}
+  minutes old. Returns `{:ok, query}` selecting the user, or `:error`.
+  """
+  def verify_login_token_query(token) do
+    case Base.url_decode64(token, padding: false) do
+      {:ok, decoded_token} ->
+        hashed_token = :crypto.hash(@hash_algorithm, decoded_token)
+
+        query =
+          from token in by_token_and_context_query(hashed_token, "login"),
+            join: user in assoc(token, :user),
+            where:
+              token.inserted_at > ago(^@login_validity_in_minutes, "minute") and
+                token.sent_to == user.email,
+            select: user
+
+        {:ok, query}
+
+      :error ->
+        :error
+    end
+  end
 
   @doc """
   Checks if the token is valid and returns its underlying lookup query.

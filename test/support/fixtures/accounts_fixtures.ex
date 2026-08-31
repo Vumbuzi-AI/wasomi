@@ -8,7 +8,7 @@ defmodule Wasomi.AccountsFixtures do
 
   def unique_user_phone,
     do:
-      "2547#{System.unique_integer([:positive]) |> rem(100_000_000) |> Integer.to_string() |> String.pad_leading(8, "0")}"
+      "+2547#{System.unique_integer([:positive]) |> rem(100_000_000) |> Integer.to_string() |> String.pad_leading(8, "0")}"
 
   def valid_user_password, do: "hello world!"
 

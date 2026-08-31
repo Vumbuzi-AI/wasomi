@@ -11,6 +11,7 @@ defmodule WasomiWeb.Router do
     plug :protect_from_forgery
     plug :put_secure_browser_headers
     plug :fetch_current_user
+    plug WasomiWeb.Plugs.ReferralCapture
   end
 
   pipeline :api do
@@ -28,6 +29,14 @@ defmodule WasomiWeb.Router do
     live "/", HomeLive
     get "/landing", PageController, :home
     get "/sitemap.xml", SitemapController, :index
+    get "/join", ReferralController, :join
+
+    # Public page, but auth-aware: signed-in learners get the app sidebar
+    # shell; anonymous visitors get the standalone marketing chrome.
+    live_session :learner_public_profile,
+      on_mount: [{WasomiWeb.UserAuth, :mount_current_user}] do
+      live "/learners/:slug", LearnerProfileLive, :show
+    end
 
     # GS1 Digital Link shape (AI(253) = GDTI) — see TODO.md's GDTI
     # decisions. No auth, no on_mount: the result is the same for every
@@ -87,10 +96,12 @@ defmodule WasomiWeb.Router do
       live "/users/settings", UserSettingsLive, :edit
       live "/users/settings/confirm_email/:token", UserSettingsLive, :confirm_email
       live "/dashboard", DashboardLive, :index
+      live "/discussions", DiscussionsLive, :index
       live "/notifications", NotificationsLive, :index
       live "/catalog", CatalogLive.Portal, :index
       live "/courses-taken", CoursesTakenLive, :index
       live "/certificates", CertificatesLive, :index
+      live "/refer", ReferLive, :index
       live "/courses/:slug/checkout", CheckoutLive, :show
       live "/learn/courses/:slug", CoursePlayerLive, :show
       live "/learn/study", StudyHubLive, :index
@@ -117,6 +128,8 @@ defmodule WasomiWeb.Router do
       live "/courses/:slug/edit", AdminLive.Courses, :edit
       live "/courses/:slug", AdminLive.CourseShow, :show
       live "/courses/:slug/certificate", AdminLive.CourseCertificate, :edit
+
+      live "/discussions", AdminLive.Discussions, :index
 
       live "/students", AdminLive.Students, :index
       live "/students/:id", AdminLive.StudentShow, :show
@@ -145,6 +158,8 @@ defmodule WasomiWeb.Router do
     delete "/users/log_out", UserSessionController, :delete
     get "/users/confirm/:token", UserConfirmationController, :show
     post "/users/confirm/:token", UserConfirmationController, :confirm
+    get "/users/log_in/:token", MagicLinkSessionController, :show
+    post "/users/log_in/:token", MagicLinkSessionController, :create
 
     live_session :current_user,
       on_mount: [{WasomiWeb.UserAuth, :mount_current_user}] do

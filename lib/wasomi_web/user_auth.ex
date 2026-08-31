@@ -28,6 +28,7 @@ defmodule WasomiWeb.UserAuth do
   def log_in_user(conn, user, params \\ %{}) do
     token = Accounts.generate_user_session_token(user)
     user_return_to = get_session(conn, :user_return_to)
+    :ok = record_account_audit_event(conn, user, :login_succeeded)
 
     conn
     |> renew_session()
@@ -74,6 +75,11 @@ defmodule WasomiWeb.UserAuth do
   """
   def log_out_user(conn, opts \\ []) do
     user_token = get_session(conn, :user_token)
+    # A logout with an already-expired/invalid token can't be attributed to a
+    # user, so no `:logout` event is recorded for it — accepted asymmetry with
+    # login, where the session is by definition still valid.
+    user = user_token && Accounts.get_user_by_session_token(user_token)
+    user && record_account_audit_event(conn, user, :logout)
     user_token && Accounts.delete_user_session_token(user_token)
     redirect_to = Keyword.get(opts, :to, ~p"/")
 
@@ -315,4 +321,31 @@ defmodule WasomiWeb.UserAuth do
     |> Phoenix.LiveView.put_flash(:error, "Please confirm your email before continuing.")
     |> Phoenix.LiveView.redirect(to: ~p"/users/confirm")
   end
+
+  defp record_account_audit_event(conn, user, event) do
+    _result = Accounts.record_account_audit_event(user, event, audit_request_attrs(conn))
+    :ok
+  end
+
+  @doc """
+  Request provenance (`:ip_address`, `:user_agent`, `:request_id`) for an
+  `Accounts.record_account_audit_event/3` call from a controller/plug.
+  """
+  def audit_request_attrs(conn) do
+    [
+      ip_address: remote_ip(conn),
+      user_agent: conn |> get_req_header("user-agent") |> List.first(),
+      request_id: conn |> get_resp_header("x-request-id") |> List.first()
+    ]
+  end
+
+  # NOTE: reads `conn.remote_ip` directly. Behind a proxy/CDN/load balancer
+  # this is the proxy address, not the client's — wire up `plug RemoteIp`
+  # (with a trusted-proxy allowlist for the real deploy topology) in the
+  # endpoint if a true client IP is needed in the audit trail.
+  defp remote_ip(%{remote_ip: remote_ip}) when is_tuple(remote_ip) do
+    remote_ip |> :inet.ntoa() |> to_string()
+  end
+
+  defp remote_ip(_conn), do: nil
 end

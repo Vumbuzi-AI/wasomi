@@ -5,7 +5,7 @@ defmodule Wasomi.AccountsTest do
 
   import Wasomi.AccountsFixtures
   import Swoosh.TestAssertions
-  alias Wasomi.Accounts.{Countries, User, UserToken}
+  alias Wasomi.Accounts.{AuditEvent, Countries, User, UserToken}
 
   describe "get_user_by_email/1" do
     test "does not return the user if the email does not exist" do
@@ -99,11 +99,60 @@ defmodule Wasomi.AccountsTest do
       assert is_nil(user.confirmed_at)
       assert is_nil(user.password)
       assert user.role == :learner
+
+      assert [%AuditEvent{event: :registered, user_id: user_id}] =
+               Accounts.list_account_audit_events(user)
+
+      assert user_id == user.id
     end
 
     test "does not allow registration to set an admin role" do
       {:ok, user} = Accounts.register_user(valid_user_attributes(role: :admin))
       assert user.role == :learner
+    end
+
+    test "registers without a phone number" do
+      {:ok, user} = Accounts.register_user(valid_user_attributes())
+      assert is_nil(user.phone)
+    end
+
+    test "stores a valid E.164 phone number" do
+      {:ok, user} =
+        Accounts.register_user(valid_user_attributes(phone: "+254712345678"))
+
+      assert user.phone == "+254712345678"
+    end
+
+    test "strips spaces, dashes and brackets before validating" do
+      {:ok, user} =
+        Accounts.register_user(valid_user_attributes(phone: " +254 (712) 345-678 "))
+
+      assert user.phone == "+254712345678"
+    end
+
+    test "treats a blank phone number as absent" do
+      {:ok, user} = Accounts.register_user(valid_user_attributes(phone: "   "))
+      assert is_nil(user.phone)
+    end
+
+    test "rejects a phone number that is not E.164" do
+      for bad <- ["0712345678", "254712345678", "+254abc123", "+0712345678", "+2542"] do
+        {:error, changeset} =
+          Accounts.register_user(valid_user_attributes(phone: bad))
+
+        assert Map.has_key?(errors_on(changeset), :phone),
+               "expected #{inspect(bad)} to be rejected"
+      end
+    end
+
+    test "rejects a phone number already registered to another account" do
+      {:ok, _first} =
+        Accounts.register_user(valid_user_attributes(phone: "+254712345699"))
+
+      {:error, changeset} =
+        Accounts.register_user(valid_user_attributes(phone: "+254712345699"))
+
+      assert "is already registered to another account" in errors_on(changeset).phone
     end
   end
 
@@ -227,6 +276,14 @@ defmodule Wasomi.AccountsTest do
       assert changed_user.confirmed_at
       assert changed_user.confirmed_at != user.confirmed_at
       refute Repo.get_by(UserToken, user_id: user.id)
+
+      assert %AuditEvent{event: :email_changed, metadata: metadata} =
+               Accounts.list_account_audit_events(user) |> List.first()
+
+      assert metadata["old_email"]["email_fingerprint"]
+      assert metadata["new_email"]["email_fingerprint"]
+      refute inspect(metadata) =~ user.email
+      refute inspect(metadata) =~ email
     end
 
     test "does not update email with invalid token", %{user: user} do
@@ -309,6 +366,9 @@ defmodule Wasomi.AccountsTest do
 
       assert is_nil(user.password)
       assert Accounts.get_user_by_email_and_password(user.email, "new valid password")
+
+      assert %AuditEvent{event: :password_changed} =
+               Accounts.list_account_audit_events(user) |> List.first()
     end
 
     test "deletes all tokens for the given user", %{user: user} do
@@ -320,6 +380,192 @@ defmodule Wasomi.AccountsTest do
         })
 
       refute Repo.get_by(UserToken, user_id: user.id)
+    end
+  end
+
+  describe "account audit events" do
+    test "records request metadata and sanitizes sensitive metadata" do
+      user = user_fixture()
+
+      assert {:ok, audit_event} =
+               Accounts.record_account_audit_event(user, :profile_updated, %{
+                 ip_address: "127.0.0.1",
+                 user_agent: String.duplicate("browser", 120),
+                 metadata: %{
+                   changed_fields: [:bio, :country],
+                   password: "secret",
+                   Password: "also-secret",
+                   nested: %{token: "secret-token", kept: "safe"}
+                 }
+               })
+
+      assert audit_event.user_id == user.id
+      assert audit_event.event == :profile_updated
+      assert audit_event.ip_address == "127.0.0.1"
+      assert String.length(audit_event.user_agent) == 512
+      assert audit_event.metadata["changed_fields"] == ["bio", "country"]
+      assert audit_event.metadata["nested"] == %{"kept" => "safe"}
+      refute Map.has_key?(audit_event.metadata, "password")
+      refute Map.has_key?(audit_event.metadata, "Password")
+      refute inspect(audit_event.metadata) =~ "secret-token"
+    end
+
+    test "does not record profile audit events when nothing changes" do
+      user = user_fixture()
+      audit_event_count = user |> Accounts.list_account_audit_events() |> length()
+
+      assert {:ok, _user} = Accounts.update_user_profile(user, %{})
+
+      assert length(Accounts.list_account_audit_events(user)) == audit_event_count
+    end
+
+    test "records failed login attempts without a user or raw email" do
+      attempted_email = "Learner+Mistyped@Example.COM"
+
+      assert {:ok, audit_event} =
+               Accounts.record_account_audit_event(nil, :login_failed,
+                 metadata:
+                   attempted_email
+                   |> Accounts.audit_email_metadata()
+                   |> Map.put("reason", "invalid_credentials")
+               )
+
+      assert audit_event.user_id == nil
+      assert audit_event.event == :login_failed
+      assert audit_event.metadata["reason"] == "invalid_credentials"
+      assert audit_event.metadata["email_domain"] == "example.com"
+      assert audit_event.metadata["email_fingerprint"]
+      refute inspect(audit_event.metadata) =~ attempted_email
+      refute inspect(audit_event.metadata) =~ "Learner"
+    end
+
+    test "lists audit events for a user newest first with a bounded limit" do
+      user = user_fixture()
+      other_user = user_fixture()
+
+      {:ok, older} = Accounts.record_account_audit_event(user, :login_succeeded)
+      {:ok, newer} = Accounts.record_account_audit_event(user, :logout)
+      {:ok, _other} = Accounts.record_account_audit_event(other_user, :login_succeeded)
+
+      assert [^newer] = Accounts.list_account_audit_events(user, limit: 1)
+      assert [_event] = Accounts.list_account_audit_events(user, limit: -1)
+      assert Enum.any?(Accounts.list_account_audit_events(user), &(&1.id == older.id))
+      refute Enum.any?(Accounts.list_account_audit_events(user), &(&1.user_id == other_user.id))
+    end
+
+    test "role changes are audited with old and new roles, and the acting admin" do
+      user = user_fixture()
+      admin = user_fixture()
+
+      assert {:ok, promoted} = Accounts.update_user_role(user, :admin, actor_id: admin.id)
+      assert promoted.role == :admin
+
+      assert %AuditEvent{event: :role_changed, metadata: metadata, actor_id: actor_id} =
+               Accounts.list_account_audit_events(user) |> List.first()
+
+      assert metadata == %{"old_role" => "learner", "new_role" => "admin"}
+      assert actor_id == admin.id
+    end
+
+    test "self-service events record the subject but no actor" do
+      user = user_fixture()
+
+      {:ok, _} =
+        Accounts.update_user_password(user, valid_user_password(), %{
+          password: "a fresh long password"
+        })
+
+      assert %AuditEvent{event: :password_changed, user_id: user_id, actor_id: nil} =
+               Accounts.list_account_audit_events(user) |> List.first()
+
+      assert user_id == user.id
+    end
+
+    test "an invalid event is logged and returns :error but never raises" do
+      user = user_fixture()
+      before = Accounts.list_account_audit_events(user)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, _} = Accounts.record_account_audit_event(user, :not_a_real_event, [])
+        end)
+
+      assert log =~ "account audit event"
+      assert log =~ "not_a_real_event"
+      assert Accounts.list_account_audit_events(user) == before
+    end
+
+    test "an account change still succeeds even when the audit write blows up" do
+      user = user_fixture()
+
+      # Break the table so the post-commit audit insert raises. `do_record`
+      # runs it in its own savepoint, so this doesn't poison the sandbox
+      # transaction, and the mutating call still returns {:ok, _}.
+      Repo.query!("ALTER TABLE account_audit_events RENAME TO account_audit_events_hidden")
+      on_exit(fn -> :ok end)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, updated} = Accounts.update_user_profile(user, %{"bio" => "still saved"})
+          assert updated.bio == "still saved"
+        end)
+
+      assert log =~ "account audit event :profile_updated could not be recorded"
+
+      Repo.query!("ALTER TABLE account_audit_events_hidden RENAME TO account_audit_events")
+    end
+
+    test "does not record role audit events when the role does not change" do
+      user = user_fixture()
+      audit_event_count = user |> Accounts.list_account_audit_events() |> length()
+
+      assert {:ok, unchanged_user} = Accounts.update_user_role(user, :learner)
+      assert unchanged_user.role == :learner
+
+      assert length(Accounts.list_account_audit_events(user)) == audit_event_count
+    end
+
+    test "confirming an email records an :email_confirmed event" do
+      user = user_fixture(confirmed: false)
+
+      token =
+        extract_user_token(fn url ->
+          Accounts.deliver_user_confirmation_instructions(user, url)
+        end)
+
+      assert {:ok, _confirmed} = Accounts.confirm_user(token)
+
+      assert %AuditEvent{event: :email_confirmed, user_id: user_id} =
+               Accounts.list_account_audit_events(user) |> List.first()
+
+      assert user_id == user.id
+    end
+
+    test "resetting a password via token records a :password_reset event" do
+      user = user_fixture()
+
+      assert {:ok, _updated} =
+               Accounts.reset_user_password(user, %{password: "a brand new password"})
+
+      assert %AuditEvent{event: :password_reset, user_id: user_id} =
+               Accounts.list_account_audit_events(user) |> List.first()
+
+      assert user_id == user.id
+    end
+
+    test "updating a profile records a :profile_updated event listing the changed fields" do
+      user = user_fixture()
+
+      assert {:ok, _updated} =
+               Accounts.update_user_profile(user, %{
+                 "bio" => "Learning GS1.",
+                 "country" => "Kenya"
+               })
+
+      assert %AuditEvent{event: :profile_updated, metadata: metadata} =
+               Accounts.list_account_audit_events(user) |> List.first()
+
+      assert Enum.sort(metadata["changed_fields"]) == ["bio", "country"]
     end
   end
 
@@ -755,6 +1001,231 @@ defmodule Wasomi.AccountsTest do
 
       assert updated.email == user.email
       assert updated.role == user.role
+    end
+  end
+
+  describe "change_user_public_profile/2" do
+    test "suggests readable public profile slugs from the learner name" do
+      user = user_fixture(name: "One Student")
+
+      assert Accounts.public_profile_slug_suggestions(user) == [
+               "one-student-#{user.id}",
+               "one-#{user.id}"
+             ]
+    end
+
+    test "does not derive public profile slug suggestions from email when name is blank" do
+      user = %User{id: 123, name: nil, email: "private.email@example.com"}
+
+      assert Accounts.public_profile_slug_suggestions(user) == ["learner-123"]
+    end
+
+    test "requires a slug only when the public profile is enabled" do
+      assert Accounts.change_user_public_profile(%User{}, %{"public_profile_enabled" => "false"}).valid?
+
+      changeset =
+        Accounts.change_user_public_profile(%User{role: :learner}, %{
+          "public_profile_enabled" => "true"
+        })
+
+      assert %{public_profile_slug: ["can't be blank"]} = errors_on(changeset)
+    end
+
+    test "normalizes and validates public profile slugs" do
+      changeset =
+        Accounts.change_user_public_profile(%User{role: :learner}, %{
+          "public_profile_enabled" => "true",
+          "public_profile_slug" => "  One Student!  "
+        })
+
+      assert changeset.valid?
+      assert get_change(changeset, :public_profile_slug) == "one-student"
+    end
+
+    test "rejects reserved public profile slugs after normalization" do
+      changeset =
+        Accounts.change_user_public_profile(%User{role: :learner}, %{
+          "public_profile_enabled" => "true",
+          "public_profile_slug" => "Wasomi"
+        })
+
+      assert %{public_profile_slug: ["is reserved"]} = errors_on(changeset)
+
+      changeset =
+        Accounts.change_user_public_profile(%User{role: :learner}, %{
+          "public_profile_enabled" => "true",
+          "public_profile_slug" => "GS1 Kenya"
+        })
+
+      assert %{public_profile_slug: ["is reserved"]} = errors_on(changeset)
+    end
+
+    test "rejects unsupported LinkedIn URLs" do
+      for url <- [
+            "https://example.com/in/learner",
+            "http://www.linkedin.com/in/learner",
+            "https://www.linkedin.com/company/wasomi",
+            "https://www.linkedin.com/in/",
+            "https://www.linkedin.com/in/one-student/recent-activity",
+            "https://www.linkedin.com/in/one_student"
+          ] do
+        changeset = Accounts.change_user_public_profile(%User{}, %{"linkedin_url" => url})
+
+        assert %{linkedin_url: ["must be a LinkedIn profile URL"]} = errors_on(changeset)
+      end
+    end
+
+    test "accepts LinkedIn profile URLs" do
+      for url <- [
+            "https://linkedin.com/in/one-student",
+            "https://www.linkedin.com/in/one-student",
+            "https://www.linkedin.com/in/one-student/",
+            "https://www.linkedin.com/in/one-student?utm_source=wasomi"
+          ] do
+        changeset = Accounts.change_user_public_profile(%User{}, %{"linkedin_url" => url})
+
+        assert changeset.valid?
+        assert get_change(changeset, :linkedin_url) == "https://www.linkedin.com/in/one-student"
+      end
+    end
+
+    test "accepts LinkedIn handles and repeated pasted profile prefixes" do
+      for url <- [
+            "one-student",
+            "https://www.linkedin.com/in/https://www.linkedin.com/in/one-student"
+          ] do
+        changeset = Accounts.change_user_public_profile(%User{}, %{"linkedin_url" => url})
+
+        assert changeset.valid?
+        assert get_change(changeset, :linkedin_url) == "https://www.linkedin.com/in/one-student"
+      end
+    end
+  end
+
+  describe "update_user_public_profile/2" do
+    setup do
+      %{user: user_fixture(name: "One Student")}
+    end
+
+    test "publishes with a generated stable slug when slug is blank", %{user: user} do
+      {:ok, updated} =
+        Accounts.update_user_public_profile(user, %{
+          "public_profile_enabled" => "true",
+          "public_profile_slug" => ""
+        })
+
+      assert updated.public_profile_enabled
+      assert updated.public_profile_slug == "one-student-#{user.id}"
+    end
+
+    test "persists public profile fields", %{user: user} do
+      {:ok, updated} =
+        Accounts.update_user_public_profile(user, %{
+          "public_profile_enabled" => "true",
+          "public_profile_slug" => "one-student",
+          "linkedin_url" => "https://www.linkedin.com/in/one-student"
+        })
+
+      assert updated.public_profile_enabled
+      assert updated.public_profile_slug == "one-student"
+      assert updated.linkedin_url == "https://www.linkedin.com/in/one-student"
+    end
+
+    test "unpublishes while keeping the learner's slug reserved", %{user: user} do
+      {:ok, user} =
+        Accounts.update_user_public_profile(user, %{
+          "public_profile_enabled" => "true",
+          "public_profile_slug" => "one-student"
+        })
+
+      {:ok, updated} =
+        Accounts.update_user_public_profile(user, %{"public_profile_enabled" => "false"})
+
+      refute updated.public_profile_enabled
+      assert updated.public_profile_slug == "one-student"
+      assert Accounts.get_public_profile_by_slug("one-student") == nil
+    end
+
+    test "does not expose admin users through learner public profile lookup" do
+      {:ok, admin} = user_fixture() |> Accounts.update_user_role(:admin)
+
+      {:error, changeset} =
+        Accounts.update_user_public_profile(admin, %{
+          "public_profile_enabled" => "true",
+          "public_profile_slug" => "admin-profile"
+        })
+
+      assert %{public_profile_enabled: ["is only available to learner accounts"]} =
+               errors_on(changeset)
+
+      assert Accounts.get_public_profile_by_slug("admin-profile") == nil
+    end
+
+    test "rejects duplicate public profile slugs", %{user: user} do
+      other = user_fixture(name: "Other Student")
+
+      {:ok, _other} =
+        Accounts.update_user_public_profile(other, %{
+          "public_profile_enabled" => "true",
+          "public_profile_slug" => "shared-profile"
+        })
+
+      {:error, changeset} =
+        Accounts.update_user_public_profile(user, %{
+          "public_profile_enabled" => "true",
+          "public_profile_slug" => "shared-profile"
+        })
+
+      assert %{public_profile_slug: ["has already been taken"]} = errors_on(changeset)
+    end
+
+    test "does not cast private account fields", %{user: user} do
+      {:ok, updated} =
+        Accounts.update_user_public_profile(user, %{
+          "public_profile_enabled" => "true",
+          "public_profile_slug" => "safe-profile",
+          "email" => "published@example.com",
+          "phone" => "254700000000"
+        })
+
+      assert updated.email == user.email
+      assert updated.phone == user.phone
+    end
+  end
+
+  describe "public_profile_view/1" do
+    test "exposes only the whitelisted public fields" do
+      user =
+        user_fixture(name: "Jane Doe", email: "jane@example.com", phone: "+254700000001")
+        |> then(fn u ->
+          {:ok, u} =
+            Accounts.update_user_profile(u, %{
+              "headline" => "Analyst",
+              "bio" => "Bio",
+              "country" => "Kenya",
+              "organization" => "Acme",
+              "industry" => "Technology & Software",
+              "occupation" => "Lead",
+              "avatar_key" => "https://cdn.test/a.png"
+            })
+
+          u
+        end)
+
+      view = Accounts.public_profile_view(user)
+
+      assert Map.keys(view) |> Enum.sort() ==
+               ~w(avatar_key bio country headline industry linkedin_url name)a
+
+      assert view.name == "Jane Doe"
+      assert view.country == "Kenya"
+      assert view.industry == "Technology & Software"
+      refute Map.has_key?(view, :email)
+      refute Map.has_key?(view, :phone)
+      refute Map.has_key?(view, :occupation)
+      refute Map.has_key?(view, :organization)
+      refute Map.has_key?(view, :hashed_password)
+      refute Map.has_key?(view, :role)
     end
   end
 

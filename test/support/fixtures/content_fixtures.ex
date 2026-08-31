@@ -12,4 +12,10 @@ defmodule Wasomi.ContentFixtures do
     {:ok, landing_image} = Wasomi.Content.put_landing_image(slot, image_url)
     landing_image
   end
+
+  @doc "Appends a hero image directly, bypassing the admin upload flow."
+  def hero_image_fixture(image_url \\ "https://cdn.example.test/hero.png", alt_text \\ nil) do
+    {:ok, landing_image} = Wasomi.Content.add_hero_image(image_url, alt_text)
+    landing_image
+  end
 end

@@ -38,6 +38,21 @@ defmodule Wasomi.Accounts.UserNotifier do
   end
 
   @doc """
+  Emails a one-time magic login link. `url` carries the raw login token.
+  """
+  def deliver_magic_link(user, url) do
+    deliver(user.email, "Your Wasomi login link", %{
+      title: "Log in to Wasomi",
+      intro: "Hi #{recipient_name(user)},",
+      body: [
+        "Use the button below to log in. The link works once and expires in 15 minutes.",
+        "If you didn't ask to log in, you can safely ignore this email."
+      ],
+      cta: %{label: "Log in to Wasomi", url: url}
+    })
+  end
+
+  @doc """
   Welcomes a user after their account is confirmed.
   """
   def deliver_welcome(user) do
@@ -250,6 +265,28 @@ defmodule Wasomi.Accounts.UserNotifier do
         "Click the button below to verify your new email address and complete the change."
       ],
       cta: %{label: "Update email", url: url}
+    })
+  end
+
+  @doc """
+  Tells an active member about a new course-channel announcement.
+  """
+  def deliver_channel_announcement(user, course, excerpt) do
+    name = recipient_name(user)
+    url = "#{WasomiWeb.Endpoint.url()}/learn/courses/#{course.slug}?tab=discussion"
+
+    deliver(user.email, "New announcement in #{course.title}", %{
+      title: "New announcement in #{course.title}",
+      intro: Template.rich(["Hi ", {:bold, name}, ","]),
+      body: [
+        Template.rich([
+          "There's a new announcement in the \"",
+          {:bold, course.title},
+          "\" channel:"
+        ]),
+        "“#{excerpt}”"
+      ],
+      cta: %{label: "Open the channel", url: url}
     })
   end
 

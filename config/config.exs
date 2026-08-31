@@ -13,6 +13,8 @@ config :wasomi,
   payment_provider: Wasomi.Paystack,
   media_provider: Wasomi.Media.Cloudflare,
   storage_provider: Wasomi.Storage.R2,
+  # Max referral attributions credited to one referrer per rolling 24h.
+  referral_daily_cap: 25,
   certificate_renderer: Wasomi.Certificates.Renderer.ChromicPdf,
   chromic_pdf_options: [
     # 1300x919 matches the certificate's A4-landscape ratio, for screenshots.
@@ -34,7 +36,11 @@ config :wasomi,
   paystack_api_url: "https://api.paystack.co",
   paystack_callback_url: "http://localhost:4000/payments/paystack/callback",
   cloudflare_api_url: "https://api.cloudflare.com",
-  cloudflare_stream_origin: "http://localhost:4000"
+  cloudflare_stream_origin: "http://localhost:4000",
+  # Course-channel message side effects (mention/announcement notifications).
+  # `:async` runs them in a supervised task off the sender's request; tests
+  # set `:sync` so assertions see them immediately.
+  channel_side_effects: :async
 
 # Organisation details printed down the left rail of every certificate.
 config :wasomi, :certificate_branding,

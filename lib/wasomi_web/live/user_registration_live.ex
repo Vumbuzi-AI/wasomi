@@ -1,8 +1,11 @@
 defmodule WasomiWeb.UserRegistrationLive do
   use WasomiWeb, :live_view
 
+  require Logger
+
   alias Wasomi.Accounts
   alias Wasomi.Accounts.User
+  alias Wasomi.Referrals
   alias Wasomi.Security.Captcha
 
   def render(assigns) do
@@ -107,6 +110,34 @@ defmodule WasomiWeb.UserRegistrationLive do
               Apply
             </button>
           </div>
+        </div>
+
+        <div>
+          <label for="registration_phone" class="mb-2 block text-sm font-semibold text-dark">
+            Phone number <span class="font-normal text-muted">— optional</span>
+          </label>
+          <div
+            id="registration-phone"
+            class="phone-field"
+            phx-hook="PhoneInput"
+            phx-update="ignore"
+            data-hidden-input="registration_phone_value"
+            data-initial-country="ke"
+          >
+            <input type="tel" id="registration_phone" autocomplete="tel" />
+          </div>
+          <input
+            type="hidden"
+            name="user[phone]"
+            id="registration_phone_value"
+            value={Phoenix.HTML.Form.normalize_value("hidden", @form[:phone].value)}
+          />
+          <.error :for={msg <- @form[:phone].errors} :if={@check_errors}>
+            {translate_error(msg)}
+          </.error>
+          <p class="mt-2 text-xs text-body">
+            We'll only use this for account and course notifications.
+          </p>
         </div>
 
         <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
@@ -214,7 +245,7 @@ defmodule WasomiWeb.UserRegistrationLive do
     """
   end
 
-  def mount(params, _session, socket) do
+  def mount(params, session, socket) do
     current_params =
       %{}
       |> maybe_put_param("name", params["name"])
@@ -226,6 +257,7 @@ defmodule WasomiWeb.UserRegistrationLive do
       socket
       |> assign(
         page_title: "Register",
+        referral_ref: session["referral_ref"],
         check_errors: false,
         email_suggestion: nil,
         current_params: current_params,
@@ -243,11 +275,28 @@ defmodule WasomiWeb.UserRegistrationLive do
   defp maybe_put_param(map, _key, ""), do: map
   defp maybe_put_param(map, key, value), do: Map.put(map, key, value)
 
+  # Best-effort — a signup must never fail because attribution hiccupped.
+  defp maybe_attribute_referral(_user, nil), do: :ok
+
+  defp maybe_attribute_referral(user, code) do
+    Referrals.attribute(user, code)
+  rescue
+    error ->
+      Logger.error(
+        "Referral attribution crashed for user #{user.id}: " <>
+          Exception.format(:error, error, __STACKTRACE__)
+      )
+
+      :ok
+  end
+
   def handle_event("save", %{"user" => user_params} = params, socket) do
     case Captcha.verify_from_params(params, action: "register") do
       {:ok, _} ->
         case Accounts.register_user(user_params) do
           {:ok, user} ->
+            maybe_attribute_referral(user, socket.assigns.referral_ref)
+
             {:ok, _} =
               Accounts.deliver_user_confirmation_instructions(
                 user,

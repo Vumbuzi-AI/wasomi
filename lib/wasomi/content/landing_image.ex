@@ -53,12 +53,19 @@ defmodule Wasomi.Content.LandingImage do
     field :slot, Ecto.Enum, values: @slots
     field :image_url, :string
     field :alt_text, :string
+    field :position, :integer, default: 0
 
     timestamps(type: :utc_datetime)
   end
 
   @doc "The fixed list of overridable landing-page image slots."
   def slots, do: @slots
+
+  @doc "The only slot that can hold more than one image."
+  def multi_slot, do: :hero
+
+  @doc "Max images allowed for `multi_slot/0`."
+  def multi_slot_max, do: 5
 
   @doc "The hardcoded fallback path for `slot`, used when no override exists."
   def default_path(slot) when slot in @slots, do: Map.fetch!(@defaults, slot)
@@ -72,10 +79,11 @@ defmodule Wasomi.Content.LandingImage do
   @doc false
   def changeset(landing_image, attrs) do
     landing_image
-    |> cast(attrs, [:slot, :image_url, :alt_text])
+    |> cast(attrs, [:slot, :image_url, :alt_text, :position])
     |> validate_required([:slot, :image_url])
     |> validate_length(:alt_text, max: 255)
     |> validate_inclusion(:slot, @slots)
-    |> unique_constraint(:slot)
+    |> unique_constraint(:slot, name: :landing_images_single_slot_index)
+    |> unique_constraint([:slot, :position])
   end
 end

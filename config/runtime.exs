@@ -268,3 +268,18 @@ if config_env() == :prod do
   #
   # See https://hexdocs.pm/swoosh/Swoosh.html#module-installation for details.
 end
+
+# Key for pseudonymising attempted email addresses in the account audit trail
+# (Wasomi.Accounts.audit_email_metadata/1). Derived from the endpoint signing
+# secret — which is resolved by this point for every environment — via its own
+# HKDF-style separation so it isn't the literal session key, and exposed as a
+# dedicated `:wasomi` app-env value so the Accounts context never has to reach
+# into web-layer (endpoint) config.
+audit_secret_source =
+  :wasomi
+  |> Application.fetch_env!(WasomiWeb.Endpoint)
+  |> Keyword.fetch!(:secret_key_base)
+
+config :wasomi,
+       :audit_fingerprint_key,
+       :crypto.hash(:sha256, audit_secret_source <> "account-audit-email-fingerprint-v1")

@@ -3,6 +3,7 @@ defmodule WasomiWeb.UserAuthTest do
 
   alias Phoenix.LiveView
   alias Wasomi.Accounts
+  alias Wasomi.Accounts.AuditEvent
   alias WasomiWeb.UserAuth
   import Wasomi.AccountsFixtures
 
@@ -19,11 +20,24 @@ defmodule WasomiWeb.UserAuthTest do
 
   describe "log_in_user/3" do
     test "stores the user token in the session", %{conn: conn, user: user} do
-      conn = UserAuth.log_in_user(conn, user)
+      conn =
+        conn
+        |> put_req_header("user-agent", "WasomiTest/1.0")
+        |> UserAuth.log_in_user(user)
+
       assert token = get_session(conn, :user_token)
       assert get_session(conn, :live_socket_id) == "users_sessions:#{Base.url_encode64(token)}"
       assert redirected_to(conn) == ~p"/dashboard"
       assert Accounts.get_user_by_session_token(token)
+
+      assert %AuditEvent{
+               event: :login_succeeded,
+               user_id: user_id,
+               ip_address: "127.0.0.1",
+               user_agent: "WasomiTest/1.0"
+             } = Accounts.list_account_audit_events(user) |> List.first()
+
+      assert user_id == user.id
     end
 
     test "redirects administrators to the admin area", %{conn: conn, user: user} do
@@ -79,6 +93,11 @@ defmodule WasomiWeb.UserAuthTest do
       assert %{max_age: 0} = conn.resp_cookies[@remember_me_cookie]
       assert redirected_to(conn) == ~p"/"
       refute Accounts.get_user_by_session_token(user_token)
+
+      assert %AuditEvent{event: :logout, user_id: user_id} =
+               Accounts.list_account_audit_events(user) |> List.first()
+
+      assert user_id == user.id
     end
 
     test "broadcasts to the given live_socket_id", %{conn: conn} do

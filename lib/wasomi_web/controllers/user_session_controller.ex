@@ -28,6 +28,7 @@ defmodule WasomiWeb.UserSessionController do
         # a persistent instruction that should stay put until the checkbox
         # is solved.
         email = get_in(params, ["user", "email"])
+        record_failed_login(conn, nil, email, "captcha_low_score")
 
         conn
         |> put_flash(:email, if(email, do: String.slice(email, 0, 160), else: nil))
@@ -35,6 +36,7 @@ defmodule WasomiWeb.UserSessionController do
 
       {:error, _reason} ->
         email = get_in(params, ["user", "email"])
+        record_failed_login(conn, nil, email, "captcha_failed")
 
         conn
         |> put_flash(:error, "Security verification failed. Please try again.")
@@ -47,7 +49,9 @@ defmodule WasomiWeb.UserSessionController do
     %{"email" => email, "password" => password} = user_params
 
     case Accounts.get_user_by_email_and_password(email, password) do
-      %Accounts.User{confirmed_at: nil} ->
+      %Accounts.User{confirmed_at: nil} = user ->
+        record_failed_login(conn, user, email, "unconfirmed")
+
         conn
         |> put_flash(
           :error,
@@ -61,6 +65,8 @@ defmodule WasomiWeb.UserSessionController do
         |> UserAuth.log_in_user(user, user_params)
 
       nil ->
+        record_failed_login(conn, nil, email, "invalid_credentials")
+
         # In order to prevent user enumeration attacks, don't disclose whether the email is registered.
         conn
         |> put_flash(:error, "Invalid email or password")
@@ -71,5 +77,17 @@ defmodule WasomiWeb.UserSessionController do
 
   def delete(conn, _params) do
     UserAuth.log_out_user(conn)
+  end
+
+  defp record_failed_login(conn, user, email, reason) do
+    attrs =
+      Keyword.put(
+        UserAuth.audit_request_attrs(conn),
+        :metadata,
+        Map.put(Accounts.audit_email_metadata(email), "reason", reason)
+      )
+
+    _result = Accounts.record_account_audit_event(user, :login_failed, attrs)
+    :ok
   end
 end

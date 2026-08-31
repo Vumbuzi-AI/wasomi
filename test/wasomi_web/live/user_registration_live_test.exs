@@ -338,6 +338,55 @@ defmodule WasomiWeb.UserRegistrationLiveTest do
     end
   end
 
+  describe "phone number (optional)" do
+    test "renders the international phone widget and a hidden E.164 field", %{conn: conn} do
+      {:ok, lv, html} = live(conn, ~p"/users/register")
+
+      assert html =~ "Phone number"
+      assert html =~ "optional"
+      assert has_element?(lv, "#registration-phone[phx-hook='PhoneInput'][phx-update='ignore']")
+      assert has_element?(lv, "#registration-phone input[type='tel']")
+      assert has_element?(lv, "input[type='hidden'][name='user[phone]']")
+    end
+
+    test "stores a submitted E.164 phone number on the new account", %{conn: conn} do
+      {:ok, lv, _html} = live(conn, ~p"/users/register")
+
+      email = unique_user_email()
+
+      # the PhoneInput JS hook mirrors iti.getNumber() into the hidden field;
+      # simulate that with an extra submit param.
+      form(lv, "#registration_form", user: valid_user_attributes(email: email))
+      |> render_submit(%{user: %{phone: "+254712345678"}})
+
+      assert Wasomi.Accounts.get_user_by_email(email).phone == "+254712345678"
+    end
+
+    test "registers fine when the phone number is left blank", %{conn: conn} do
+      {:ok, lv, _html} = live(conn, ~p"/users/register")
+
+      email = unique_user_email()
+
+      form(lv, "#registration_form", user: valid_user_attributes(email: email))
+      |> render_submit()
+
+      assert Wasomi.Accounts.get_user_by_email(email).phone == nil
+    end
+
+    test "rejects a badly formatted phone number and creates no account", %{conn: conn} do
+      {:ok, lv, _html} = live(conn, ~p"/users/register")
+
+      email = unique_user_email()
+
+      html =
+        form(lv, "#registration_form", user: valid_user_attributes(email: email))
+        |> render_submit(%{user: %{phone: "0712345678"}})
+
+      assert html =~ "valid phone number"
+      assert Wasomi.Accounts.get_user_by_email(email) == nil
+    end
+  end
+
   describe "registration navigation" do
     test "redirects to login page when the Log in button is clicked", %{conn: conn} do
       {:ok, lv, _html} = live(conn, ~p"/users/register")

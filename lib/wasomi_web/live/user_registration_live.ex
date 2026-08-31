@@ -109,6 +109,34 @@ defmodule WasomiWeb.UserRegistrationLive do
           </div>
         </div>
 
+        <div>
+          <label for="registration_phone" class="mb-2 block text-sm font-semibold text-dark">
+            Phone number <span class="font-normal text-muted">— optional</span>
+          </label>
+          <div
+            id="registration-phone"
+            class="phone-field"
+            phx-hook="PhoneInput"
+            phx-update="ignore"
+            data-hidden-input="registration_phone_value"
+            data-initial-country="ke"
+          >
+            <input type="tel" id="registration_phone" autocomplete="tel" />
+          </div>
+          <input
+            type="hidden"
+            name="user[phone]"
+            id="registration_phone_value"
+            value={Phoenix.HTML.Form.normalize_value("hidden", @form[:phone].value)}
+          />
+          <.error :for={msg <- @form[:phone].errors} :if={@check_errors}>
+            {translate_error(msg)}
+          </.error>
+          <p class="mt-2 text-xs text-body">
+            We'll only use this for account and course notifications.
+          </p>
+        </div>
+
         <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
           <.auth_input
             field={@form[:password]}

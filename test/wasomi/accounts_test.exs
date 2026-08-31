@@ -105,6 +105,50 @@ defmodule Wasomi.AccountsTest do
       {:ok, user} = Accounts.register_user(valid_user_attributes(role: :admin))
       assert user.role == :learner
     end
+
+    test "registers without a phone number" do
+      {:ok, user} = Accounts.register_user(valid_user_attributes())
+      assert is_nil(user.phone)
+    end
+
+    test "stores a valid E.164 phone number" do
+      {:ok, user} =
+        Accounts.register_user(valid_user_attributes(phone: "+254712345678"))
+
+      assert user.phone == "+254712345678"
+    end
+
+    test "strips spaces, dashes and brackets before validating" do
+      {:ok, user} =
+        Accounts.register_user(valid_user_attributes(phone: " +254 (712) 345-678 "))
+
+      assert user.phone == "+254712345678"
+    end
+
+    test "treats a blank phone number as absent" do
+      {:ok, user} = Accounts.register_user(valid_user_attributes(phone: "   "))
+      assert is_nil(user.phone)
+    end
+
+    test "rejects a phone number that is not E.164" do
+      for bad <- ["0712345678", "254712345678", "+254abc123", "+0712345678", "+2542"] do
+        {:error, changeset} =
+          Accounts.register_user(valid_user_attributes(phone: bad))
+
+        assert Map.has_key?(errors_on(changeset), :phone),
+               "expected #{inspect(bad)} to be rejected"
+      end
+    end
+
+    test "rejects a phone number already registered to another account" do
+      {:ok, _first} =
+        Accounts.register_user(valid_user_attributes(phone: "+254712345699"))
+
+      {:error, changeset} =
+        Accounts.register_user(valid_user_attributes(phone: "+254712345699"))
+
+      assert "is already registered to another account" in errors_on(changeset).phone
+    end
   end
 
   describe "change_user_registration/2" do

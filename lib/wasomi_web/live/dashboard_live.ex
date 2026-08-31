@@ -407,4 +407,11 @@ defmodule WasomiWeb.DashboardLive do
       end
     end) || List.last(lectures)
   end
+
+  defp provider_name(:paystack), do: "Paystack"
+  defp provider_name(:mpesa), do: "M-Pesa"
+  defp provider_name(provider), do: provider |> to_string() |> String.capitalize()
+
+  defp format_date(%DateTime{} = datetime), do: Calendar.strftime(datetime, "%b %-d, %Y")
+  defp format_date(_), do: "—"
 end

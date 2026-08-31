@@ -7,22 +7,6 @@ defmodule Wasomi.Application do
 
   @impl true
   def start(_type, _args) do
-    children = [
-      WasomiWeb.Telemetry,
-      Wasomi.Repo,
-      {Oban, Application.fetch_env!(:wasomi, Oban)},
-      {DNSCluster, query: Application.get_env(:wasomi, :dns_cluster_query) || :ignore},
-      {Phoenix.PubSub, name: Wasomi.PubSub},
-      {Task.Supervisor, name: Wasomi.TaskSupervisor},
-      WasomiWeb.Presence,
-      # Start the Finch HTTP client for sending emails
-      {Finch, name: Wasomi.Finch},
-      # Start a worker by calling: Wasomi.Worker.start_link(arg)
-      # {Wasomi.Worker, arg},
-      # Start to serve requests, typically the last entry
-      WasomiWeb.Endpoint
-    ]
-
     children =
       [
         WasomiWeb.Telemetry,
@@ -30,6 +14,8 @@ defmodule Wasomi.Application do
         {Oban, Application.fetch_env!(:wasomi, Oban)},
         {DNSCluster, query: Application.get_env(:wasomi, :dns_cluster_query) || :ignore},
         {Phoenix.PubSub, name: Wasomi.PubSub},
+        {Task.Supervisor, name: Wasomi.TaskSupervisor},
+        WasomiWeb.Presence,
         # Start the Finch HTTP client for sending emails
         {Finch, name: Wasomi.Finch}
       ] ++

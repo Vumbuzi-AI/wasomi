@@ -2,7 +2,7 @@ defmodule WasomiWeb.UserSettingsLive do
   use WasomiWeb, :live_view
 
   alias Wasomi.{Accounts, Storage}
-  alias Wasomi.Accounts.{Countries, User}
+  alias Wasomi.Accounts.User
 
   @max_avatar_bytes 2_000_000
   @avatar_failed_msg "That picture couldn't be uploaded, so it wasn't saved. " <>
@@ -74,6 +74,11 @@ defmodule WasomiWeb.UserSettingsLive do
                   </div>
 
                   <div class="space-y-6">
+                    <div class="grid gap-6 sm:grid-cols-2">
+                      <.input field={@profile_form[:first_name]} type="text" label="First name" />
+                      <.input field={@profile_form[:last_name]} type="text" label="Last name" />
+                    </div>
+
                     <.input
                       field={@profile_form[:headline]}
                       type="text"
@@ -88,8 +93,16 @@ defmodule WasomiWeb.UserSettingsLive do
                       placeholder="A short introduction — up to 500 characters."
                     />
 
+                    <.country_combobox field={@profile_form[:country]} />
+
                     <div class="grid gap-6 sm:grid-cols-2">
-                      <.country_combobox field={@profile_form[:country]} />
+                      <.input
+                        field={@profile_form[:gender]}
+                        type="select"
+                        label="Gender"
+                        prompt="Select gender"
+                        options={User.gender_options()}
+                      />
                       <.input
                         field={@profile_form[:industry]}
                         type="select"
@@ -133,14 +146,30 @@ defmodule WasomiWeb.UserSettingsLive do
                       />
                     </div>
                   </div>
-
-                  <div class="pt-2">
-                    <.button phx-disable-with="Saving..." class="rounded-full bg-ink px-5">
-                      Save Profile
-                    </.button>
-                  </div>
                 </div>
               </section>
+
+              <div
+                :if={@profile_dirty}
+                class="sticky bottom-0 z-40 -mx-6 -mb-6 mt-8 flex items-center justify-between gap-4 rounded-b-3xl border-t border-black/10 bg-white/95 px-6 py-3 shadow-[0_-4px_16px_rgba(0,0,0,0.06)] backdrop-blur sm:-mx-8 sm:-mb-8 sm:px-8"
+              >
+                <div class="flex items-center gap-2 text-sm font-medium text-ink">
+                  <.icon name="hero-exclamation-circle" class="h-4 w-4 shrink-0 text-amber-500" />
+                  <span>You have unsaved profile changes.</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <button
+                    type="button"
+                    phx-click="discard_profile"
+                    class="rounded-full px-4 py-2 text-sm font-medium text-muted transition hover:text-ink"
+                  >
+                    Discard
+                  </button>
+                  <.button phx-disable-with="Saving..." class="rounded-full bg-ink px-5">
+                    Save profile
+                  </.button>
+                </div>
+              </div>
             </.form>
 
             <section id="settings-public-panel" class={settings_panel_class(@settings_tab, :public)}>
@@ -391,81 +420,6 @@ defmodule WasomiWeb.UserSettingsLive do
     if active_tab == tab, do: "block", else: "hidden"
   end
 
-  attr :field, Phoenix.HTML.FormField, required: true
-
-  # searchable dropdown over Countries.grouped_options/0, filtering client-side via SearchableSelect
-  defp country_combobox(assigns) do
-    errors = if Phoenix.Component.used_input?(assigns.field), do: assigns.field.errors, else: []
-
-    assigns =
-      assigns
-      |> assign(:errors, Enum.map(errors, &translate_error/1))
-      |> assign(:groups, Countries.grouped_options())
-
-    ~H"""
-    <div id={"#{@field.id}-combobox"} phx-hook="SearchableSelect" class="relative">
-      <.label for={"#{@field.id}-trigger"}>Country</.label>
-
-      <input type="hidden" name={@field.name} value={@field.value} data-role="value" />
-
-      <button
-        type="button"
-        id={"#{@field.id}-trigger"}
-        data-role="trigger"
-        class={[
-          "mt-2 flex w-full items-center justify-between rounded-lg px-3 py-2 text-left shadow-sm sm:text-sm sm:leading-6",
-          @errors == [] && "border border-zinc-300 focus:border-zinc-400",
-          @errors != [] && "border border-rose-400 focus:border-rose-400"
-        ]}
-      >
-        <span data-role="trigger-label" data-placeholder="Select a country" class="text-zinc-900">
-          {@field.value || "Select a country"}
-        </span>
-        <.icon name="hero-chevron-up-down" class="h-4 w-4 shrink-0 text-zinc-400" />
-      </button>
-
-      <div
-        data-role="panel"
-        class="absolute z-20 mt-1 hidden w-full rounded-lg border border-zinc-200 bg-white shadow-lg"
-      >
-        <div class="p-2">
-          <input
-            type="text"
-            data-role="search"
-            placeholder="Search countries…"
-            autocomplete="off"
-            class="block w-full rounded-md border border-zinc-200 px-3 py-1.5 text-sm text-zinc-900 focus:border-zinc-400 focus:outline-none focus:ring-0"
-          />
-        </div>
-        <div data-role="options" class="max-h-60 overflow-y-auto px-1 pb-2">
-          <div :for={{group_label, countries} <- @groups}>
-            <p
-              data-role="group-label"
-              class="px-2 pt-2 pb-1 text-xs font-semibold uppercase tracking-wide text-zinc-400"
-            >
-              {group_label}
-            </p>
-            <button
-              :for={{country, _country} <- countries}
-              type="button"
-              data-role="option"
-              data-value={country}
-              class="block w-full rounded-md px-2 py-1.5 text-left text-sm text-zinc-700 hover:bg-zinc-100"
-            >
-              {country}
-            </button>
-          </div>
-          <p data-role="empty" class="hidden px-2 py-3 text-center text-sm text-zinc-400">
-            No countries match.
-          </p>
-        </div>
-      </div>
-
-      <.error :for={msg <- @errors}>{msg}</.error>
-    </div>
-    """
-  end
-
   attr :upload, :map, required: true
   attr :current_url, :string, default: nil
 
@@ -626,6 +580,7 @@ defmodule WasomiWeb.UserSettingsLive do
       |> assign(:profile_form, to_form(profile_changeset))
       |> assign(:public_profile_slug_suggestions, public_profile_suggestions)
       |> assign(:public_profile_form, to_form(public_profile_changeset))
+      |> assign(:profile_dirty, false)
       |> assign_public_profile_url()
       |> assign_saved_public_profile_url()
       |> allow_upload(:avatar,
@@ -717,7 +672,24 @@ defmodule WasomiWeb.UserSettingsLive do
       |> Accounts.change_user_profile(user_params)
       |> Map.put(:action, :validate)
 
-    {:noreply, socket |> assign(:profile_form, to_form(changeset)) |> assign_avatar_url()}
+    {:noreply,
+     socket
+     |> assign(:profile_form, to_form(changeset))
+     |> assign_avatar_url()
+     |> assign_profile_dirty()}
+  end
+
+  def handle_event("discard_profile", _params, socket) do
+    socket =
+      Enum.reduce(socket.assigns.uploads.avatar.entries, socket, fn entry, socket ->
+        cancel_upload(socket, :avatar, entry.ref)
+      end)
+
+    {:noreply,
+     socket
+     |> assign(:profile_form, to_form(Accounts.change_user_profile(socket.assigns.current_user)))
+     |> assign(:profile_dirty, false)
+     |> assign_avatar_url()}
   end
 
   def handle_event("save_profile", %{"user" => user_params}, socket) do
@@ -786,15 +758,22 @@ defmodule WasomiWeb.UserSettingsLive do
         cancel_upload(socket, :avatar, entry.ref)
       end)
 
-    {:noreply, socket |> assign(:profile_form, to_form(changeset)) |> assign_avatar_url()}
+    {:noreply,
+     socket
+     |> assign(:profile_form, to_form(changeset))
+     |> assign_avatar_url()
+     |> assign_profile_dirty()}
   end
 
   def handle_event("cancel-avatar-upload", %{"ref" => ref}, socket) do
-    {:noreply, socket |> cancel_upload(:avatar, ref) |> assign_avatar_url()}
+    {:noreply,
+     socket |> cancel_upload(:avatar, ref) |> assign_avatar_url() |> assign_profile_dirty()}
   end
 
   def handle_avatar_progress(:avatar, entry, socket) do
-    if entry.done?, do: {:noreply, assign_avatar_url(socket)}, else: {:noreply, socket}
+    if entry.done?,
+      do: {:noreply, socket |> assign_avatar_url() |> assign_profile_dirty()},
+      else: {:noreply, socket}
   end
 
   defp save_profile(socket, user_params) do
@@ -805,11 +784,20 @@ defmodule WasomiWeb.UserSettingsLive do
          |> put_flash(:info, "Profile saved.")
          |> assign(:current_user, user)
          |> assign(:profile_form, to_form(Accounts.change_user_profile(user)))
+         |> assign(:profile_dirty, false)
          |> assign_avatar_url()}
 
       {:error, changeset} ->
-        {:noreply, assign(socket, :profile_form, to_form(changeset))}
+        {:noreply, socket |> assign(:profile_form, to_form(changeset)) |> assign_profile_dirty()}
     end
+  end
+
+  # The profile form is "dirty" once the changeset carries a cast change (Ecto
+  # drops fields typed then reverted) or an avatar upload is pending.
+  defp assign_profile_dirty(socket) do
+    changeset = socket.assigns.profile_form.source
+    dirty? = changeset.changes != %{} or socket.assigns.uploads.avatar.entries != []
+    assign(socket, :profile_dirty, dirty?)
   end
 
   defp missing_public_url_flash(socket) do

@@ -31,11 +31,12 @@ defmodule WasomiWeb.UserRegistrationLiveTest do
       assert html =~ "Log in"
     end
 
-    test "prefills name and email from query params", %{conn: conn} do
+    test "prefills first name, last name and email from query params", %{conn: conn} do
       {:ok, _lv, html} =
         live(conn, ~p"/users/register?name=Jane%20Doe&email=jane@example.com")
 
-      assert html =~ "Jane Doe"
+      assert html =~ ~s(value="Jane")
+      assert html =~ ~s(value="Doe")
       assert html =~ "jane@example.com"
     end
 

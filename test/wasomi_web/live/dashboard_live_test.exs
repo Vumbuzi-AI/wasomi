@@ -16,6 +16,61 @@ defmodule WasomiWeb.DashboardLiveTest do
     assert {:error, {:redirect, %{to: "/users/log_in"}}} = live(conn, ~p"/dashboard")
   end
 
+  test "shows first-use copy for a new learner with no profile or courses", %{
+    conn: conn,
+    user: user
+  } do
+    {:ok, view, html} = live(conn, ~p"/dashboard")
+
+    assert html =~ "Welcome to Wasomi, #{String.split(user.name) |> List.first()}."
+    assert html =~ "Complete profile"
+    assert has_element?(view, "a[href='/users/settings']", "Complete profile")
+    refute html =~ "Welcome back"
+  end
+
+  test "a first-time learner sees courses to start, not empty progress metrics", %{
+    conn: conn,
+    user: user
+  } do
+    {:ok, _user} = Wasomi.Accounts.update_user_profile(user, %{occupation: "Operations analyst"})
+    published = course_fixture(status: :published, title: "Intro to GS1")
+
+    {:ok, view, html} = live(conn, ~p"/dashboard")
+
+    assert html =~ "Ready when you are"
+    assert html =~ "Choose a course to begin"
+    assert has_element?(view, "#dashboard-starter a[href='/courses/#{published.slug}']")
+    # A path to the full catalog so the starter list doesn't look exhaustive.
+    assert has_element?(view, "#dashboard-starter a[href='/catalog']", "Browse all courses")
+    # No zero-value progress cards, no "continue" section for a brand-new learner.
+    refute has_element?(view, "#dashboard-stats")
+    refute has_element?(view, "#dashboard-receipts")
+    refute html =~ "Pick up where you left off"
+    refute html =~ "Welcome back"
+  end
+
+  test "offers an opt-in tour prompt that goes away once answered", %{conn: conn, user: user} do
+    {:ok, view, html} = live(conn, ~p"/dashboard")
+    assert html =~ "show you around"
+    assert has_element?(view, "#product-tour", "Show me around")
+
+    view |> element("button", "I'll find my way") |> render_click()
+
+    refute has_element?(view, "#product-tour")
+    refute render(view) =~ "show you around"
+    assert Wasomi.Accounts.tour_completed?(Wasomi.Accounts.get_user!(user.id))
+  end
+
+  test "offers the full catalog when more starter courses exist than are shown", %{conn: conn} do
+    for n <- 1..7, do: course_fixture(status: :published, title: "Starter #{n}", position: n)
+
+    {:ok, view, _html} = live(conn, ~p"/dashboard")
+
+    assert has_element?(view, "#dashboard-starter", "Starter 1")
+    refute has_element?(view, "#dashboard-starter", "Starter 7")
+    assert has_element?(view, "#dashboard-starter a[href='/catalog']", "View the full catalog")
+  end
+
   test "shows only active courses and links to the protected player", %{conn: conn, user: user} do
     active_course = course_fixture(status: :published, title: "Active course")
     active_module = course_module_fixture(course_id: active_course.id, position: 1)
@@ -28,6 +83,8 @@ defmodule WasomiWeb.DashboardLiveTest do
     {:ok, view, html} = live(conn, ~p"/dashboard")
 
     assert html =~ active_course.title
+    assert html =~ "Your first course is ready"
+    assert html =~ "Start learning"
     assert html =~ lecture.title
     refute html =~ pending_course.title
     assert has_element?(view, "#dashboard-course-#{active_course.id}")
@@ -59,6 +116,7 @@ defmodule WasomiWeb.DashboardLiveTest do
 
     {:ok, view, _html} = live(conn, ~p"/dashboard")
 
+    assert render(view) =~ "Welcome back"
     assert has_element?(view, "#course-progress-#{course.id}", "0%")
     assert has_element?(view, "#dashboard-course-#{course.id}", "First lesson")
     assert has_element?(view, "#dashboard-course-#{course.id}", "Continue learning")
@@ -114,8 +172,8 @@ defmodule WasomiWeb.DashboardLiveTest do
     admin = admin_fixture()
     course = course_fixture(status: :published, title: "Granted course")
 
-    {:ok, view, html} = live(conn, ~p"/dashboard")
-    refute html =~ "Granted course"
+    {:ok, view, _html} = live(conn, ~p"/dashboard")
+    refute has_element?(view, "#dashboard-course-#{course.id}")
     refute has_element?(view, "#dashboard-notifications")
     refute has_element?(view, "#student-nav-notifications .sidebar-notification-dot")
 

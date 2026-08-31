@@ -17,6 +17,7 @@ defmodule WasomiWeb.UserRegistrationLive do
       <.form
         for={@form}
         id="registration_form"
+        novalidate
         phx-submit="save"
         phx-change="validate"
         phx-hook={if @recaptcha_site_key || @recaptcha_v2_site_key, do: "Recaptcha"}
@@ -33,27 +34,51 @@ defmodule WasomiWeb.UserRegistrationLive do
           Oops, something went wrong! Please check the errors below.
         </p>
 
-        <.auth_input
-          field={@form[:name]}
-          type="text"
-          label="Full name"
-          placeholder="Enter your full name"
-          required
-        >
-          <:icon>
-            <svg
-              class="h-4 w-4"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" />
-            </svg>
-          </:icon>
-        </.auth_input>
+        <div class="grid gap-4 sm:grid-cols-2">
+          <.auth_input
+            field={@form[:first_name]}
+            type="text"
+            label="First name"
+            placeholder="Enter your first name"
+            required
+          >
+            <:icon>
+              <svg
+                class="h-4 w-4"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" />
+              </svg>
+            </:icon>
+          </.auth_input>
+
+          <.auth_input
+            field={@form[:last_name]}
+            type="text"
+            label="Last name"
+            placeholder="Enter your last name"
+            required
+          >
+            <:icon>
+              <svg
+                class="h-4 w-4"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" />
+              </svg>
+            </:icon>
+          </.auth_input>
+        </div>
 
         <div class="space-y-2">
           <.auth_input
@@ -248,7 +273,7 @@ defmodule WasomiWeb.UserRegistrationLive do
   def mount(params, session, socket) do
     current_params =
       %{}
-      |> maybe_put_param("name", params["name"])
+      |> put_name_params(params["name"])
       |> maybe_put_param("email", params["email"])
 
     changeset = Accounts.change_user_registration(%User{}, current_params)
@@ -289,6 +314,18 @@ defmodule WasomiWeb.UserRegistrationLive do
 
       :ok
   end
+
+  # The confirm/recovery round-trip carries a single `name` query param;
+  # split it back onto the two form fields.
+  defp put_name_params(map, name) when is_binary(name) and name != "" do
+    case String.split(name, ~r/\s+/, parts: 2, trim: true) do
+      [first, last] -> map |> Map.put("first_name", first) |> Map.put("last_name", last)
+      [first] -> Map.put(map, "first_name", first)
+      _ -> map
+    end
+  end
+
+  defp put_name_params(map, _name), do: map
 
   def handle_event("save", %{"user" => user_params} = params, socket) do
     case Captcha.verify_from_params(params, action: "register") do

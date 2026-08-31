@@ -2055,6 +2055,38 @@ Hooks.TogglePassword = {
   },
 };
 
+// driver.js is loaded from the CDN in root.html.heex.
+Hooks.ProductTour = {
+  mounted() {
+    this.el.addEventListener("click", (event) => {
+      event.preventDefault();
+      this.start();
+    });
+  },
+  start() {
+    const factory = window.driver && window.driver.js && window.driver.js.driver;
+    if (!factory) return;
+
+    const steps = [
+      ["#student-nav-dashboard", "Your dashboard", "Your learning home — progress and courses land here once you enrol."],
+      ["#student-nav-browse", "Browse the catalog", "Every course we offer. Pick one and enrol to get started."],
+      ["#student-nav-courses", "My courses", "Jump back into any course you're enrolled in from here."],
+      ["#student-nav-certificates", "Certificates", "Complete a course and download your certificate here."],
+      ["#student-nav-account", "Your account", "Update your name, profile details and password any time."],
+    ]
+      .filter(([selector]) => document.querySelector(selector))
+      .map(([element, title, description]) => ({ element, popover: { title, description } }));
+
+    if (steps.length === 0) return;
+
+    factory({
+      showProgress: true,
+      steps,
+      onDestroyed: () => this.pushEvent("tour_completed"),
+    }).drive();
+  },
+};
+
 Hooks.QuizCountdown = {
   // Display-only: the server owns the deadline and auto-submits via its own
   // `Process.send_after` timer, so this never drives submission itself —

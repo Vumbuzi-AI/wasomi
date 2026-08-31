@@ -28,6 +28,7 @@ defmodule WasomiWeb.UserAuth do
   def log_in_user(conn, user, params \\ %{}) do
     token = Accounts.generate_user_session_token(user)
     user_return_to = get_session(conn, :user_return_to)
+    Accounts.record_user_sign_in(user)
     :ok = record_account_audit_event(conn, user, :login_succeeded)
 
     conn
@@ -175,6 +176,17 @@ defmodule WasomiWeb.UserAuth do
         {:halt, redirect_unconfirmed_live_user(socket)}
 
       _user ->
+        {:cont, socket}
+    end
+  end
+
+  # Routes a learner who hasn't done first-run onboarding to `/welcome`.
+  def on_mount(:ensure_onboarded, _params, _session, socket) do
+    case socket.assigns[:current_user] do
+      %{role: :learner, onboarding_completed_at: nil} ->
+        {:halt, Phoenix.LiveView.redirect(socket, to: ~p"/welcome")}
+
+      _ ->
         {:cont, socket}
     end
   end

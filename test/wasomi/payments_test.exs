@@ -397,8 +397,8 @@ defmodule Wasomi.PaymentsTest do
     end
 
     test "sorts by learner name" do
-      a = payment_fixture(user_id: user_fixture(name: "Amina").id)
-      b = payment_fixture(user_id: user_fixture(name: "Brian").id)
+      a = payment_fixture(user_id: user_fixture(name: "Amina Otieno").id)
+      b = payment_fixture(user_id: user_fixture(name: "Brian Kamau").id)
 
       assert [%{id: first}, %{id: second}] =
                Payments.list_payments_page(sort_by: :learner, sort_dir: :asc).entries

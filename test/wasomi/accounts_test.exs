@@ -56,8 +56,46 @@ defmodule Wasomi.AccountsTest do
       assert %{
                password: ["can't be blank"],
                email: ["can't be blank"],
-               name: ["can't be blank"]
+               first_name: ["can't be blank"],
+               last_name: ["can't be blank"]
              } = errors_on(changeset)
+    end
+
+    test "collects a first and last name and derives the full name" do
+      {:ok, user} =
+        Accounts.register_user(
+          valid_user_attributes(first_name: "  Amina ", last_name: " Otieno ", name: nil)
+        )
+
+      assert user.first_name == "Amina"
+      assert user.last_name == "Otieno"
+      assert user.name == "Amina Otieno"
+    end
+
+    test "still accepts a single legacy name and splits it" do
+      {:ok, user} =
+        Accounts.register_user(valid_user_attributes(name: "Grace Wanjiru Mbeki"))
+
+      assert user.first_name == "Grace"
+      assert user.last_name == "Wanjiru Mbeki"
+      assert user.name == "Grace Wanjiru Mbeki"
+    end
+
+    test "rejects single-character name parts" do
+      {:error, changeset} =
+        Accounts.register_user(valid_user_attributes(first_name: "A", last_name: "B", name: nil))
+
+      assert "should be at least 2 character(s)" in errors_on(changeset).first_name
+      assert "should be at least 2 character(s)" in errors_on(changeset).last_name
+    end
+
+    test "requires a last name even when a first name is given" do
+      {:error, changeset} =
+        Accounts.register_user(
+          valid_user_attributes(first_name: "Amina", last_name: "", name: nil)
+        )
+
+      assert "can't be blank" in errors_on(changeset).last_name
     end
 
     test "validates email and password when given" do
@@ -159,7 +197,9 @@ defmodule Wasomi.AccountsTest do
   describe "change_user_registration/2" do
     test "returns a changeset" do
       assert %Ecto.Changeset{} = changeset = Accounts.change_user_registration(%User{})
-      assert Enum.sort(changeset.required) == Enum.sort([:name, :password, :email])
+
+      assert Enum.sort(changeset.required) ==
+               Enum.sort([:first_name, :last_name, :password, :email])
     end
 
     test "allows fields to be set" do
@@ -949,6 +989,25 @@ defmodule Wasomi.AccountsTest do
       assert changeset.valid?
       assert get_change(changeset, :learning_goal) == nil
     end
+
+    test "accepts each supported gender" do
+      for value <- ~w(female male prefer_not_to_say) do
+        changeset = Accounts.change_user_profile(%User{}, %{"gender" => value})
+        assert changeset.valid?, "expected #{value} to be accepted"
+        assert get_change(changeset, :gender) == String.to_existing_atom(value)
+      end
+    end
+
+    test "rejects a gender outside the enum" do
+      changeset = Accounts.change_user_profile(%User{}, %{"gender" => "other"})
+      assert %{gender: ["is invalid"]} = errors_on(changeset)
+    end
+
+    test "treats an empty-string gender as unset rather than invalid" do
+      changeset = Accounts.change_user_profile(%User{}, %{"gender" => ""})
+      assert changeset.valid?
+      assert get_change(changeset, :gender) == nil
+    end
   end
 
   describe "update_user_profile/2" do
@@ -1001,6 +1060,35 @@ defmodule Wasomi.AccountsTest do
 
       assert updated.email == user.email
       assert updated.role == user.role
+    end
+
+    test "updates first and last name and re-derives the full name", %{user: user} do
+      {:ok, updated} =
+        Accounts.update_user_profile(user, %{"first_name" => " Amina ", "last_name" => "Otieno"})
+
+      assert updated.first_name == "Amina"
+      assert updated.last_name == "Otieno"
+      assert updated.name == "Amina Otieno"
+    end
+
+    test "re-derives the full name when only the first name changes", %{user: user} do
+      {:ok, user} =
+        Accounts.update_user_profile(user, %{"first_name" => "Grace", "last_name" => "Wanjiru"})
+
+      {:ok, updated} = Accounts.update_user_profile(user, %{"first_name" => "Gracie"})
+
+      assert updated.name == "Gracie Wanjiru"
+    end
+
+    test "rejects a blank last name", %{user: user} do
+      {:error, changeset} = Accounts.update_user_profile(user, %{"last_name" => ""})
+      assert "can't be blank" in errors_on(changeset).last_name
+    end
+
+    test "leaves the name untouched when only biodata fields change", %{user: user} do
+      original = user.name
+      {:ok, updated} = Accounts.update_user_profile(user, %{"bio" => "Hello."})
+      assert updated.name == original
     end
   end
 
@@ -1226,6 +1314,47 @@ defmodule Wasomi.AccountsTest do
       refute Map.has_key?(view, :organization)
       refute Map.has_key?(view, :hashed_password)
       refute Map.has_key?(view, :role)
+    end
+  end
+
+  describe "record_user_sign_in/1" do
+    test "stamps last_signed_in_at" do
+      user = user_fixture()
+      assert is_nil(user.last_signed_in_at)
+
+      {:ok, updated} = Accounts.record_user_sign_in(user)
+
+      assert %DateTime{} = updated.last_signed_in_at
+      assert Accounts.get_user!(user.id).last_signed_in_at == updated.last_signed_in_at
+    end
+  end
+
+  describe "onboarding" do
+    setup do
+      {:ok, user} = valid_user_attributes() |> Accounts.register_user()
+      %{user: user}
+    end
+
+    test "a fresh account has not completed onboarding", %{user: user} do
+      assert is_nil(user.onboarding_completed_at)
+      refute Accounts.onboarding_completed?(user)
+    end
+
+    test "complete_user_onboarding/1 stamps onboarding_completed_at once", %{user: user} do
+      {:ok, done} = Accounts.complete_user_onboarding(user)
+
+      assert %DateTime{} = done.onboarding_completed_at
+      assert Accounts.onboarding_completed?(done)
+      assert Accounts.get_user!(user.id).onboarding_completed_at == done.onboarding_completed_at
+    end
+
+    test "the product tour is separately tracked", %{user: user} do
+      refute Accounts.tour_completed?(user)
+
+      {:ok, done} = Accounts.complete_user_tour(user)
+
+      assert %DateTime{} = done.tour_completed_at
+      assert Accounts.tour_completed?(done)
     end
   end
 

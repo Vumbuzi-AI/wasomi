@@ -281,8 +281,44 @@ defmodule WasomiWeb.UserSettingsLiveTest do
     test "renders the profile section", %{conn: conn} do
       {:ok, _lv, html} = live(conn, ~p"/users/settings")
 
-      assert html =~ "Save Profile"
+      assert html =~ "Profile basics"
       assert html =~ "other learner ever sees this"
+      # The save bar only appears once there are unsaved changes.
+      refute html =~ "unsaved profile changes"
+    end
+
+    test "shows an unsaved-changes bar while the form is dirty, then hides it after saving", %{
+      conn: conn,
+      user: user
+    } do
+      {:ok, view, _html} = live(conn, ~p"/users/settings")
+
+      html =
+        view
+        |> form("#profile_form", user: %{"headline" => "Warehouse Ops Lead"})
+        |> render_change()
+
+      assert html =~ "unsaved profile changes"
+
+      html =
+        render_submit(view, "save_profile", %{"user" => %{"headline" => "Warehouse Ops Lead"}})
+
+      refute html =~ "unsaved profile changes"
+      assert Accounts.get_user!(user.id).headline == "Warehouse Ops Lead"
+    end
+
+    test "discard resets the form and clears the unsaved-changes bar", %{conn: conn, user: user} do
+      {:ok, view, _html} = live(conn, ~p"/users/settings")
+
+      view
+      |> form("#profile_form", user: %{"headline" => "Temporary"})
+      |> render_change()
+
+      html = view |> element("button", "Discard") |> render_click()
+
+      refute html =~ "unsaved profile changes"
+      refute html =~ "Temporary"
+      assert is_nil(Accounts.get_user!(user.id).headline)
     end
 
     test "updates every profile field", %{conn: conn, user: user} do
@@ -302,7 +338,8 @@ defmodule WasomiWeb.UserSettingsLiveTest do
           "industry" => "Supply Chain & Logistics",
           "occupation" => "Warehouse Manager",
           "experience_level" => "mid",
-          "learning_goal" => "upskilling"
+          "learning_goal" => "upskilling",
+          "gender" => "prefer_not_to_say"
         }
       })
 
@@ -315,6 +352,7 @@ defmodule WasomiWeb.UserSettingsLiveTest do
       assert updated.occupation == "Warehouse Manager"
       assert updated.experience_level == :mid
       assert updated.learning_goal == :upskilling
+      assert updated.gender == :prefer_not_to_say
     end
 
     test "leaves every field optional", %{conn: conn, user: user} do
@@ -330,7 +368,8 @@ defmodule WasomiWeb.UserSettingsLiveTest do
           "industry" => "",
           "occupation" => "",
           "experience_level" => "",
-          "learning_goal" => ""
+          "learning_goal" => "",
+          "gender" => ""
         }
       })
       |> render_submit()
@@ -344,6 +383,7 @@ defmodule WasomiWeb.UserSettingsLiveTest do
       assert updated.occupation in [nil, ""]
       assert updated.experience_level == nil
       assert updated.learning_goal == nil
+      assert updated.gender == nil
     end
 
     test "renders a validation error on phx-change for a bio over the length cap", %{conn: conn} do
@@ -548,6 +588,14 @@ defmodule WasomiWeb.UserSettingsLiveTest do
       assert html =~ "wasn&#39;t saved"
       assert Accounts.get_user!(user.id).headline == "Still saved"
       refute Accounts.get_user!(user.id).avatar_key
+    end
+
+    test "renders an optional gender select", %{conn: conn} do
+      {:ok, _view, html} = live(conn, ~p"/users/settings")
+
+      assert html =~ ~s(name="user[gender]")
+      assert html =~ "Select gender"
+      assert html =~ "Prefer not to say"
     end
 
     test "renders country as a searchable combobox with East Africa options first", %{

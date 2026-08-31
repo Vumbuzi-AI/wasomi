@@ -47,7 +47,7 @@ defmodule WasomiWeb.CatalogLive.PortalTest do
     assert html =~ ~s(href="/courses/#{course.slug}")
   end
 
-  test "shows an enrolled course with progress and a link into the course player", %{
+  test "shows an enrolled course with an Enrolled badge and a link into the course player", %{
     conn: conn
   } do
     user = user_fixture()
@@ -61,7 +61,7 @@ defmodule WasomiWeb.CatalogLive.PortalTest do
     {:ok, _view, html} = live(conn, ~p"/catalog")
 
     assert html =~ course.title
-    assert html =~ "Start course"
+    assert html =~ "Enrolled"
     assert html =~ ~s(href="/learn/courses/#{course.slug}")
   end
 
@@ -79,6 +79,43 @@ defmodule WasomiWeb.CatalogLive.PortalTest do
 
     assert html =~ ~s(href="/learn/courses/#{enrolled.slug}")
     assert html =~ ~s(href="/courses/#{available.slug}")
+  end
+
+  test "the price filter narrows the catalog to free or paid courses", %{conn: conn} do
+    user = user_fixture()
+
+    free =
+      course_fixture(status: :published, title: "Free Course", is_free: true, price_minor: nil)
+
+    paid =
+      course_fixture(status: :published, title: "Paid Course", is_free: false, price_minor: 5000)
+
+    conn = log_in_user(conn, user)
+
+    {:ok, _view, html} = live(conn, ~p"/catalog?price=free")
+    assert html =~ free.title
+    refute html =~ paid.title
+
+    {:ok, _view, html} = live(conn, ~p"/catalog?price=paid")
+    assert html =~ paid.title
+    refute html =~ free.title
+  end
+
+  test "hide_enrolled removes courses the learner already has access to", %{conn: conn} do
+    user = user_fixture()
+    enrolled = course_fixture(status: :published, title: "Owned Course")
+    available = course_fixture(status: :published, title: "Fresh Course")
+    enrollment_fixture(user_id: user.id, course_id: enrolled.id, status: :active)
+
+    conn = log_in_user(conn, user)
+
+    {:ok, _view, html} = live(conn, ~p"/catalog")
+    assert html =~ enrolled.title
+    assert html =~ available.title
+
+    {:ok, _view, html} = live(conn, ~p"/catalog?hide_enrolled=1")
+    refute html =~ enrolled.title
+    assert html =~ available.title
   end
 
   test "a pending (unpaid) enrollment is treated as not yet enrolled", %{conn: conn} do

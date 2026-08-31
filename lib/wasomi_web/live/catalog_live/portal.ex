@@ -4,10 +4,9 @@ defmodule WasomiWeb.CatalogLive.Portal do
 
   Same published-course listing as `WasomiWeb.CatalogLive.Index`, reusing
   `Wasomi.Catalog` for data, but wrapped in the student portal sidebar
-  instead of the public marketing chrome. Each card reflects the viewing
-  learner's own enrollment/progress state, so "Browse catalog" from the
-  sidebar feels like part of the app rather than a jump out to the public
-  site.
+  instead of the public marketing chrome. It's a discovery surface: courses
+  the learner already has show an "Enrolled"/"Completed" badge and link
+  straight into the player, and a filter can hide them entirely.
   """
   use WasomiWeb, :live_view
 
@@ -21,60 +20,70 @@ defmodule WasomiWeb.CatalogLive.Portal do
 
   @impl true
   def handle_params(params, _url, socket) do
+    user = socket.assigns.current_user
     search = params["search"] || ""
+    price = normalize_price(params["price"])
+    hide_enrolled = params["hide_enrolled"] == "1"
     page_number = Paginate.parse_page(params["page"])
 
+    exclude_ids = if hide_enrolled, do: Enrollments.active_course_ids(user), else: []
+
     page =
-      Catalog.list_courses_page(status: :published, search: search, page: page_number)
+      Catalog.list_courses_page(
+        status: :published,
+        search: search,
+        price: price,
+        exclude_ids: exclude_ids,
+        page: page_number
+      )
 
     {:noreply,
      socket
      |> assign(:search, search)
+     |> assign(:price, price)
+     |> assign(:hide_enrolled, hide_enrolled)
      |> assign(:page, page)
-     |> assign(:cards, Enum.map(page.entries, &build_card(socket.assigns.current_user, &1)))}
+     |> assign(:cards, Enum.map(page.entries, &build_card(user, &1)))}
   end
 
   @impl true
   def handle_event("search", %{"search" => search}, socket) do
-    {:noreply, push_patch(socket, to: courses_path(search, 1))}
+    {:noreply, push_patch(socket, to: catalog_path(socket.assigns, search: search))}
   end
 
-  defp courses_path(search, page) do
-    params =
-      %{search: search, page: page}
-      |> Enum.reject(fn
-        {:page, 1} -> true
-        {_key, value} -> value in [nil, ""]
-      end)
+  defp normalize_price(price) when price in ["free", "paid"], do: price
+  defp normalize_price(_price), do: "all"
 
-    ~p"/catalog?#{params}"
+  # Builds a `/catalog` patch path from the current filter assigns plus any
+  # overrides (`search:`, `price:`, `hide_enrolled:`, `page:`). Every state
+  # change resets to page 1.
+  defp catalog_path(assigns, overrides) do
+    %{
+      search: assigns.search,
+      price: assigns.price,
+      hide_enrolled: if(assigns.hide_enrolled, do: "1", else: nil),
+      page: 1
+    }
+    |> Map.merge(Map.new(overrides))
+    |> Enum.reject(fn
+      {:page, 1} -> true
+      {:price, "all"} -> true
+      {_key, value} -> value in [nil, ""]
+    end)
+    |> build_catalog_url()
   end
+
+  defp build_catalog_url(params), do: ~p"/catalog?#{params}"
 
   defp build_card(user, course) do
     if Enrollments.can_access_course?(user, course) do
-      progress = Learning.course_progress(user, course)
+      badge =
+        if Learning.course_progress(user, course).complete?, do: "Completed", else: "Enrolled"
 
-      {:enrolled,
-       %{
-         course: course,
-         progress: progress,
-         resume_lecture: resume_lecture(course, progress.progress),
-         started?: map_size(progress.progress) > 0
-       }}
+      {:enrolled, %{course: course, badge: badge}}
     else
       {:available, course}
     end
-  end
-
-  defp resume_lecture(course, progress) do
-    lectures = Enum.flat_map(course.modules, & &1.lectures)
-
-    Enum.find(lectures, fn lecture ->
-      case progress[lecture.id] do
-        %{status: :completed} -> false
-        _progress -> true
-      end
-    end) || List.last(lectures)
   end
 
   @impl true
@@ -94,25 +103,36 @@ defmodule WasomiWeb.CatalogLive.Portal do
           </span>
         </div>
 
-        <form
-          phx-change="search"
-          class="mt-6 flex max-w-md items-center gap-2 rounded-full border border-black/10 bg-white px-5 py-3 shadow-sm focus-within:border-primary"
-        >
-          <.icon name="hero-magnifying-glass" class="h-5 w-5 shrink-0 text-muted" />
-          <input
-            type="search"
-            name="search"
-            value={@search}
-            placeholder="Search courses…"
-            phx-debounce="300"
-            class="w-full border-0 bg-transparent p-0 text-sm text-ink placeholder:text-muted focus:outline-none focus:ring-0"
+        <div class="mt-6 flex flex-wrap items-center gap-3">
+          <form
+            phx-change="search"
+            class="flex w-full max-w-xs items-center gap-2 rounded-full border border-black/10 bg-white px-5 py-3 shadow-sm focus-within:border-primary"
+          >
+            <.icon name="hero-magnifying-glass" class="h-5 w-5 shrink-0 text-muted" />
+            <input
+              type="search"
+              name="search"
+              value={@search}
+              placeholder="Search courses…"
+              phx-debounce="300"
+              class="w-full border-0 bg-transparent p-0 text-sm text-ink placeholder:text-muted focus:outline-none focus:ring-0"
+            />
+          </form>
+
+          <WasomiWeb.HomeComponents.catalog_filters
+            price={@price}
+            price_href={fn value -> catalog_path(assigns, price: value) end}
+            hide_enrolled={@hide_enrolled}
+            toggle_enrolled_href={
+              catalog_path(assigns, hide_enrolled: if(@hide_enrolled, do: nil, else: "1"))
+            }
           />
-        </form>
+        </div>
 
         <.paginated_table
           page={@page.page}
           total_pages={@page.total_pages}
-          path_fn={&courses_path(@search, &1)}
+          path_fn={&catalog_path(assigns, page: &1)}
         >
           <div
             :if={@cards != []}
@@ -120,28 +140,28 @@ defmodule WasomiWeb.CatalogLive.Portal do
             class="mt-8 grid gap-7 sm:grid-cols-2 xl:grid-cols-3"
           >
             <%= for {state, card} <- @cards do %>
-              <.course_card
+              <WasomiWeb.HomeComponents.course_card
                 :if={state == :enrolled}
-                card={card}
-                id={"portal-catalog-course-#{card.course.id}"}
-                progress_id={"portal-catalog-progress-#{card.course.id}"}
+                course={card.course}
+                status_badge={card.badge}
+                href={~p"/learn/courses/#{card.course.slug}"}
               />
               <WasomiWeb.HomeComponents.course_card :if={state == :available} course={card} />
             <% end %>
           </div>
 
           <div
-            :if={@cards == [] and @search != ""}
+            :if={@cards == [] and (@search != "" or @price != "all" or @hide_enrolled)}
             id="portal-catalog-empty"
             class="mt-14 rounded-3xl border border-black/5 bg-white p-10 text-center"
           >
             <.icon name="hero-magnifying-glass" class="h-10 w-10 text-primary" />
-            <h2 class="mt-4 text-xl font-semibold">No courses match "{@search}".</h2>
-            <p class="mt-2 text-body">Try a different search, or explore all courses.</p>
+            <h2 class="mt-4 text-xl font-semibold">No courses match your filters.</h2>
+            <p class="mt-2 text-body">Try clearing a filter or searching for something else.</p>
           </div>
 
           <div
-            :if={@cards == [] and @search == ""}
+            :if={@cards == [] and @search == "" and @price == "all" and not @hide_enrolled}
             id="portal-catalog-empty"
             class="mt-14 rounded-3xl border border-black/5 bg-white p-10 text-center"
           >

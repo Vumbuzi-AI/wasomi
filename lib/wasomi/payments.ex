@@ -5,6 +5,8 @@ defmodule Wasomi.Payments do
 
   import Ecto.Query, warn: false
 
+  require Logger
+
   alias Ecto.Multi
   alias Wasomi.Accounts.User
   alias Wasomi.Catalog.Course
@@ -29,6 +31,23 @@ defmodule Wasomi.Payments do
     |> order_by([payment], desc: payment.paid_at, desc: payment.id)
     |> preload(:course)
     |> Repo.all()
+  end
+
+  @doc """
+  A `Wasomi.Paginate.Page` of the same receipts as `list_receipts_for_user/1`,
+  plus `:page` / `:page_size` (default 10).
+  """
+  def list_receipts_for_user_page(%User{id: user_id}, opts \\ []) do
+    page = Keyword.get(opts, :page, 1)
+    page_size = Keyword.get(opts, :page_size, 10)
+
+    result =
+      Payment
+      |> where([p], p.user_id == ^user_id and p.status == :successful)
+      |> order_by([p], desc: p.paid_at, desc: p.id)
+      |> Paginate.paginate(page, page_size)
+
+    %{result | entries: Repo.preload(result.entries, :course)}
   end
 
   def format_amount(%Payment{amount_minor: amount, currency: currency}) do
@@ -234,6 +253,9 @@ defmodule Wasomi.Payments do
   end
 
   def get_payment!(id), do: Repo.get!(Payment, id)
+
+  @doc "Fetches a payment by id, or `nil` if it doesn't exist."
+  def get_payment(id), do: Repo.get(Payment, id)
   def get_payment_by_reference(reference), do: Repo.get_by(Payment, provider_reference: reference)
 
   def create_payment(attrs \\ %{}) do
@@ -429,7 +451,7 @@ defmodule Wasomi.Payments do
           |> repo.one!()
 
         if locked.status == :successful do
-          {:ok, locked}
+          {:ok, %{payment: locked, newly_confirmed?: false}}
         else
           locked
           |> Payment.changeset(%{
@@ -443,27 +465,48 @@ defmodule Wasomi.Payments do
               )
           })
           |> repo.update()
+          |> case do
+            {:ok, updated} -> {:ok, %{payment: updated, newly_confirmed?: true}}
+            {:error, _} = error -> error
+          end
         end
       end)
-      |> Multi.run(:enrollment, fn _repo, %{payment: completed_payment} ->
+      |> Multi.run(:enrollment, fn _repo, %{payment: %{payment: completed_payment}} ->
         enrollment = Repo.get!(Wasomi.Enrollments.Enrollment, completed_payment.enrollment_id)
         Enrollments.activate_enrollment(enrollment)
       end)
       |> Repo.transaction()
 
     case result do
-      {:ok, %{payment: payment, enrollment: enrollment}} ->
+      {:ok,
+       %{payment: %{payment: payment, newly_confirmed?: newly_confirmed?}, enrollment: enrollment}} ->
         Phoenix.PubSub.broadcast(
           Wasomi.PubSub,
           "user:#{payment.user_id}",
           {:payment_confirmed, enrollment}
         )
 
+        # only on the actual :successful transition, so retries don't re-notify
+        if newly_confirmed?, do: notify_learner_of_payment(payment)
+
         {:ok, %{payment: payment, enrollment: enrollment}}
 
       {:error, _step, reason, _changes} ->
         {:error, reason}
     end
+  end
+
+  # Best-effort — payment and enrollment are already committed.
+  defp notify_learner_of_payment(payment) do
+    Wasomi.Notifications.deliver_payment_confirmed(payment)
+  rescue
+    error ->
+      Logger.error(
+        "Failed to notify learner of payment #{payment.id}: " <>
+          Exception.format(:error, error, __STACKTRACE__)
+      )
+
+      :error
   end
 
   defp mark_failed(reference, verification) do

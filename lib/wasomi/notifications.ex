@@ -11,6 +11,7 @@ defmodule Wasomi.Notifications do
   alias Wasomi.Accounts.{User, UserNotifier}
   alias Wasomi.Enrollments.Enrollment
   alias Wasomi.Notifications.Notification
+  alias Wasomi.Payments.Payment
   alias Wasomi.Repo
 
   @hidden_in_app_kinds [
@@ -201,6 +202,57 @@ defmodule Wasomi.Notifications do
       |> then(&Regex.replace(@channel_mention_token, &1, "@\\1"))
 
     if String.length(text) > max, do: String.slice(text, 0, max) <> "…", else: text
+  end
+
+  @doc """
+  Confirms a completed course payment to the learner: an in-app
+  notification plus a receipt-style email. Best-effort and called after the
+  payment and its enrollment have already committed, so a mail or broadcast
+  hiccup never rolls anything back.
+  """
+  def deliver_payment_confirmed(%Payment{} = payment) do
+    payment = Repo.preload(payment, [:user, :course])
+
+    try do
+      UserNotifier.deliver_payment_receipt(payment, receipt_pdf(payment))
+    rescue
+      error ->
+        Logger.error(
+          "Failed to email payment receipt for payment #{payment.id}: " <>
+            Exception.format(:error, error, __STACKTRACE__)
+        )
+    end
+
+    case create_notification(%{
+           user_id: payment.user_id,
+           course_id: payment.course_id,
+           kind: :enrollment_granted,
+           title: "Payment confirmed",
+           body:
+             "Your payment for \"#{payment.course.title}\" is confirmed — you now have full access."
+         }) do
+      {:ok, notification} ->
+        broadcast(payment.user_id, {:notification_created, notification})
+        {:ok, notification}
+
+      {:error, changeset} ->
+        Logger.error(
+          "Failed to create payment_confirmed notification for payment #{payment.id}: " <>
+            inspect(changeset)
+        )
+
+        {:error, changeset}
+    end
+  end
+
+  # Best-effort — a failed render just means no attachment on the email.
+  defp receipt_pdf(%Payment{} = payment) do
+    case Wasomi.Receipts.pdf_for(payment.user, payment.id) do
+      {:ok, bytes} -> bytes
+      _ -> nil
+    end
+  rescue
+    _ -> nil
   end
 
   @doc """

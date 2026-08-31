@@ -49,6 +49,21 @@ defmodule Wasomi.EnrollmentsTest do
       assert Enrollments.can_access_course?(user, free_course)
     end
 
+    test "notifies the learner in-app and by email, once" do
+      user = user_fixture()
+      course = course_fixture(is_free: true, price_minor: nil, title: "Free GS1 Intro")
+
+      assert {:ok, _} = Enrollments.enroll_free_course(user, course)
+
+      assert [%{kind: :enrollment_granted}] = Wasomi.Notifications.list_for_user(user)
+      assert_email_sent(subject: "You now have access to Free GS1 Intro")
+
+      # re-enrolling is idempotent and must not re-notify
+      assert {:ok, _} = Enrollments.enroll_free_course(user, course)
+      assert length(Wasomi.Notifications.list_for_user(user)) == 1
+      assert_no_email_sent()
+    end
+
     test "refuses to enroll a paid course as free" do
       user = user_fixture()
       paid_course = course_fixture(is_free: false, price_minor: 15_000)

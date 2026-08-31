@@ -16,6 +16,9 @@ config :wasomi,
   # Max referral attributions credited to one referrer per rolling 24h.
   referral_daily_cap: 25,
   certificate_renderer: Wasomi.Certificates.Renderer.ChromicPdf,
+  receipt_renderer: Wasomi.Receipts.Renderer.ChromicPdf,
+  # Start the headless-Chrome pool by default; test disables it and dev may.
+  start_chromic_pdf: true,
   chromic_pdf_options: [
     # 1300x919 matches the certificate's A4-landscape ratio, for screenshots.
     chrome_args: "--window-size=1300,1062 --force-device-scale-factor=2",

@@ -77,6 +77,8 @@ defmodule Wasomi.Catalog do
     |> order_by([course], desc: course.inserted_at, desc: course.id)
     |> filter_by_status(Keyword.get(opts, :status))
     |> filter_by_search(Keyword.get(opts, :search))
+    |> filter_by_price(Keyword.get(opts, :price))
+    |> exclude_course_ids(Keyword.get(opts, :exclude_ids))
   end
 
   defp filter_by_status(query, nil), do: query
@@ -88,6 +90,21 @@ defmodule Wasomi.Catalog do
     pattern = "%#{search}%"
     where(query, [course], ilike(course.title, ^pattern) or ilike(course.slug, ^pattern))
   end
+
+  # `:price` accepts `"free"` / `"paid"` (straight from a URL param) or the
+  # matching atoms; anything else (incl. `nil` / `"all"`) is "no filter".
+  defp filter_by_price(query, price) when price in ["free", :free],
+    do: where(query, [course], course.is_free == true)
+
+  defp filter_by_price(query, price) when price in ["paid", :paid],
+    do: where(query, [course], course.is_free == false)
+
+  defp filter_by_price(query, _price), do: query
+
+  defp exclude_course_ids(query, ids) when is_list(ids) and ids != [],
+    do: where(query, [course], course.id not in ^ids)
+
+  defp exclude_course_ids(query, _ids), do: query
 
   @doc """
   Counts all courses regardless of status. Used by the admin overview.

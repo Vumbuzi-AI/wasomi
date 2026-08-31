@@ -22,27 +22,42 @@ defmodule WasomiWeb.CatalogLive.Index do
   @impl true
   def handle_params(params, _url, socket) do
     search = params["search"] || ""
+    price = normalize_price(params["price"])
     page_number = Paginate.parse_page(params["page"])
 
     page =
-      Catalog.list_courses_page(status: :published, search: search, page: page_number)
+      Catalog.list_courses_page(
+        status: :published,
+        search: search,
+        price: price,
+        page: page_number
+      )
 
     {:noreply,
      socket
      |> assign(:search, search)
+     |> assign(:price, price)
      |> assign(:page, page)}
   end
 
   @impl true
   def handle_event("search", %{"search" => search}, socket) do
-    {:noreply, push_patch(socket, to: courses_path(search, 1))}
+    {:noreply, push_patch(socket, to: courses_path(search: search, price: socket.assigns.price))}
   end
 
-  defp courses_path(search, page) do
+  defp normalize_price(price) when price in ["free", "paid"], do: price
+  defp normalize_price(_price), do: "all"
+
+  defp courses_path(opts) do
     params =
-      %{search: search, page: page}
+      %{
+        search: Keyword.get(opts, :search, ""),
+        price: Keyword.get(opts, :price, "all"),
+        page: Keyword.get(opts, :page, 1)
+      }
       |> Enum.reject(fn
         {:page, 1} -> true
+        {:price, "all"} -> true
         {_key, value} -> value in [nil, ""]
       end)
 
@@ -92,6 +107,13 @@ defmodule WasomiWeb.CatalogLive.Index do
                 />
               </form>
 
+              <div class="mt-6 flex justify-center">
+                <.catalog_filters
+                  price={@price}
+                  price_href={fn value -> courses_path(search: @search, price: value) end}
+                />
+              </div>
+
               <p class="mt-4 text-sm text-muted">
                 {@page.total_count} {ngettext("course", "courses", @page.total_count)}
               </p>
@@ -100,7 +122,7 @@ defmodule WasomiWeb.CatalogLive.Index do
             <.paginated_table
               page={@page.page}
               total_pages={@page.total_pages}
-              path_fn={&courses_path(@search, &1)}
+              path_fn={&courses_path(search: @search, price: @price, page: &1)}
             >
               <div
                 :if={@page.entries != []}

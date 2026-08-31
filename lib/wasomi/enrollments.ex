@@ -41,6 +41,20 @@ defmodule Wasomi.Enrollments do
   end
 
   @doc """
+  The set of course ids a learner has active access to — a lightweight
+  companion to `list_active_for_user/1` for callers that only need to know
+  "which courses does this learner already have?" (e.g. a catalog filter).
+  """
+  def active_course_ids(%User{id: user_id}) do
+    Enrollment
+    |> where([e], e.user_id == ^user_id and e.status == :active)
+    |> select([e], e.course_id)
+    |> Repo.all()
+  end
+
+  def active_course_ids(_user), do: []
+
+  @doc """
   Counts active enrollments across all courses.
   """
   def count_active do
@@ -245,14 +259,24 @@ defmodule Wasomi.Enrollments do
   def enroll_free_course(nil, %Course{}), do: {:error, :unauthenticated}
 
   def enroll_free_course(%User{} = user, %Course{is_free: true} = course) do
-    Repo.transaction(fn ->
-      with {:ok, enrollment} <- create_pending_enrollment(user, course),
-           {:ok, active_enrollment} <- activate_enrollment(enrollment) do
-        active_enrollment
-      else
-        {:error, reason} -> Repo.rollback(reason)
-      end
-    end)
+    # so a repeat enrolment doesn't re-notify
+    already_enrolled? = can_access_course?(user, course)
+
+    result =
+      Repo.transaction(fn ->
+        with {:ok, enrollment} <- create_pending_enrollment(user, course),
+             {:ok, active_enrollment} <- activate_enrollment(enrollment) do
+          active_enrollment
+        else
+          {:error, reason} -> Repo.rollback(reason)
+        end
+      end)
+
+    with false <- already_enrolled?, {:ok, enrollment} <- result do
+      Notifications.deliver_enrollment_granted(enrollment)
+    end
+
+    result
   end
 
   def enroll_free_course(%User{}, %Course{}), do: {:error, :course_not_free}

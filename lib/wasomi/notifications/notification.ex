@@ -35,6 +35,9 @@ defmodule Wasomi.Notifications.Notification do
     |> assoc_constraint(:user)
     |> assoc_constraint(:course)
     |> assoc_constraint(:channel_message)
+    |> unique_constraint([:user_id, :course_id, :kind],
+      name: :notifications_user_id_course_id_kind_index
+    )
   end
 
   # The re-engagement kinds are per-enrollment nudges: a `course_id` is what

@@ -1475,11 +1475,9 @@ defmodule WasomiWeb.StudyComponents do
   end
 
   defp result_passed?(%{passed: passed}), do: passed
-  defp result_passed?(%Assessments.QuizSubmission{passed: passed}), do: passed
   defp result_passed?(_), do: false
 
   defp result_score(%{score_percent: score}), do: score
-  defp result_score(%Assessments.QuizSubmission{score_percent: score}), do: score
   defp result_score(_), do: 0
 
   defp preview_result?(%{preview?: preview?}), do: preview?

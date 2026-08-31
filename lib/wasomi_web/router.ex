@@ -155,6 +155,8 @@ defmodule WasomiWeb.Router do
     delete "/users/log_out", UserSessionController, :delete
     get "/users/confirm/:token", UserConfirmationController, :show
     post "/users/confirm/:token", UserConfirmationController, :confirm
+    get "/users/log_in/:token", MagicLinkSessionController, :show
+    post "/users/log_in/:token", MagicLinkSessionController, :create
 
     live_session :current_user,
       on_mount: [{WasomiWeb.UserAuth, :mount_current_user}] do

@@ -38,6 +38,21 @@ defmodule Wasomi.Accounts.UserNotifier do
   end
 
   @doc """
+  Emails a one-time magic login link. `url` carries the raw login token.
+  """
+  def deliver_magic_link(user, url) do
+    deliver(user.email, "Your Wasomi login link", %{
+      title: "Log in to Wasomi",
+      intro: "Hi #{recipient_name(user)},",
+      body: [
+        "Use the button below to log in. The link works once and expires in 15 minutes.",
+        "If you didn't ask to log in, you can safely ignore this email."
+      ],
+      cta: %{label: "Log in to Wasomi", url: url}
+    })
+  end
+
+  @doc """
   Welcomes a user after their account is confirmed.
   """
   def deliver_welcome(user) do

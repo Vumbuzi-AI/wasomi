@@ -94,6 +94,7 @@ defmodule WasomiWeb.Router do
       live "/users/settings", UserSettingsLive, :edit
       live "/users/settings/confirm_email/:token", UserSettingsLive, :confirm_email
       live "/dashboard", DashboardLive, :index
+      live "/discussions", DiscussionsLive, :index
       live "/notifications", NotificationsLive, :index
       live "/catalog", CatalogLive.Portal, :index
       live "/courses-taken", CoursesTakenLive, :index
@@ -124,6 +125,8 @@ defmodule WasomiWeb.Router do
       live "/courses/:slug/edit", AdminLive.Courses, :edit
       live "/courses/:slug", AdminLive.CourseShow, :show
       live "/courses/:slug/certificate", AdminLive.CourseCertificate, :edit
+
+      live "/discussions", AdminLive.Discussions, :index
 
       live "/students", AdminLive.Students, :index
       live "/students/:id", AdminLive.StudentShow, :show

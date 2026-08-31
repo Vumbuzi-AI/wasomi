@@ -34,7 +34,11 @@ config :wasomi,
   paystack_api_url: "https://api.paystack.co",
   paystack_callback_url: "http://localhost:4000/payments/paystack/callback",
   cloudflare_api_url: "https://api.cloudflare.com",
-  cloudflare_stream_origin: "http://localhost:4000"
+  cloudflare_stream_origin: "http://localhost:4000",
+  # Course-channel message side effects (mention/announcement notifications).
+  # `:async` runs them in a supervised task off the sender's request; tests
+  # set `:sync` so assertions see them immediately.
+  channel_side_effects: :async
 
 # Organisation details printed down the left rail of every certificate.
 config :wasomi, :certificate_branding,

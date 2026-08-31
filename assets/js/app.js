@@ -3046,6 +3046,285 @@ Hooks.Confetti = {
   },
 };
 
+// Keeps the course-channel message list pinned to the newest message,
+// unless the reader has scrolled up to read history. Every method guards
+// `this.el` and swallows errors — a throw here would abort the view's
+// join/update patch and break all further DOM updates for the panel.
+Hooks.ChannelScroll = {
+  mounted() {
+    this.stick();
+    // Jump to and briefly highlight a message linked from a notification.
+    this.handleEvent("channel:highlight", ({ id }) => {
+      window.setTimeout(() => {
+        const el = document.getElementById(`messages-${id}`);
+        if (!el) return;
+        el.scrollIntoView({ block: "center", behavior: "smooth" });
+        el.classList.add("rounded-xl", "ring-2", "ring-primary", "ring-offset-2");
+        window.setTimeout(
+          () =>
+            el.classList.remove(
+              "rounded-xl",
+              "ring-2",
+              "ring-primary",
+              "ring-offset-2",
+            ),
+          2600,
+        );
+      }, 80);
+    });
+  },
+  updated() {
+    this.stick();
+  },
+  stick() {
+    try {
+      const el = this.el;
+      if (!el) return;
+      const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      if (distanceFromBottom < 160) el.scrollTop = el.scrollHeight;
+    } catch (_error) {
+      /* never let scroll bookkeeping break the view */
+    }
+  },
+};
+
+// Channel composer: @mention typeahead + typing indicator.
+//
+// Mentionable people come as `data-mention-users` JSON (`[{id, name}]`, where
+// id may be "all"). While editing, the field shows friendly `@Name`; a hidden
+// map remembers name -> id, and on submit `@Name` is rewritten to the stable
+// token `@[Name](user:ID)` the server resolves. `@all` stays literal. The
+// dropdown is body-mounted and fixed-positioned so it can't be clipped or
+// disturbed by LiveView DOM patches.
+const MENTION_QUERY = /(?:^|\s)@([\p{L}\p{N}._-]*)$/u;
+const MENTION_TOKEN = /@\[([^\]\n]+)\]\(user:([\w]+)\)/g;
+
+Hooks.ChannelComposer = {
+  mounted() {
+    this.input = this.el.querySelector("#course-channel-input");
+    if (!this.input) return;
+
+    this.users = safeParse(this.el.dataset.mentionUsers);
+    this.mentionMap = new Map();
+    this.active = 0;
+    this.matches = [];
+    this.queryStart = null;
+
+    this.menu = document.createElement("ul");
+    this.menu.setAttribute("role", "listbox");
+    this.menu.className =
+      "fixed z-[70] max-h-56 w-72 overflow-y-auto rounded-xl border border-black/10 bg-white py-1 text-sm shadow-xl";
+    this.menu.hidden = true;
+    document.body.appendChild(this.menu);
+
+    this.onInput = () => this.handleInput();
+    this.onKeyDown = (event) => this.onKey(event);
+    this.onBlur = () => window.setTimeout(() => this.close(), 150);
+    this.onSubmit = () => this.encodeMentions();
+    this.onInsertEmoji = (event) => this.insertText((event.detail || {}).emoji || "");
+    this.reposition = () => (this.menu.hidden ? null : this.render());
+
+    this.input.addEventListener("input", this.onInput);
+    this.input.addEventListener("keyup", this.onInput);
+    this.input.addEventListener("click", () => this.handleInput());
+    this.input.addEventListener("keydown", this.onKeyDown);
+    this.input.addEventListener("blur", this.onBlur);
+    this.input.addEventListener("wasomi:insert-emoji", this.onInsertEmoji);
+    this.el.addEventListener("submit", this.onSubmit, true);
+    window.addEventListener("scroll", this.reposition, true);
+    window.addEventListener("resize", this.reposition);
+
+    // Clear the composer after a successful send (the textarea is uncontrolled,
+    // so the server can't reset it via re-render).
+    this.handleEvent("channel:reset-composer", () => {
+      this.input.value = "";
+      this.mentionMap.clear();
+      this.close();
+    });
+
+    // Insert a mention chosen from the members panel.
+    this.handleEvent("channel:insert-mention", ({ id, name }) => {
+      this.insertMention({ id: String(id), name }, this.input.value.length);
+    });
+
+    this.decodeTokens();
+  },
+  updated() {
+    this.users = safeParse(this.el.dataset.mentionUsers);
+  },
+  destroyed() {
+    this.input?.removeEventListener("input", this.onInput);
+    this.input?.removeEventListener("keyup", this.onInput);
+    this.input?.removeEventListener("keydown", this.onKeyDown);
+    this.input?.removeEventListener("blur", this.onBlur);
+    this.input?.removeEventListener("wasomi:insert-emoji", this.onInsertEmoji);
+    this.el.removeEventListener("submit", this.onSubmit, true);
+    window.removeEventListener("scroll", this.reposition, true);
+    window.removeEventListener("resize", this.reposition);
+    this.menu?.remove();
+  },
+  insertText(text) {
+    if (!text) return;
+    const start = this.input.selectionStart ?? this.input.value.length;
+    const end = this.input.selectionEnd ?? start;
+    const value = this.input.value;
+    this.input.value = value.slice(0, start) + text + value.slice(end);
+    const caret = start + text.length;
+    this.input.focus();
+    this.input.setSelectionRange(caret, caret);
+    this.input.dispatchEvent(new Event("input", { bubbles: true }));
+  },
+  insertMention(user, at) {
+    const value = this.input.value;
+    const needsSpace = at > 0 && !/\s$/.test(value.slice(0, at));
+    const label = `${needsSpace ? " " : ""}@${user.name} `;
+    this.input.value = value.slice(0, at) + label + value.slice(at);
+    if (String(user.id) !== "all") this.mentionMap.set(user.name, user);
+    const caret = at + label.length;
+    this.input.focus();
+    this.input.setSelectionRange(caret, caret);
+  },
+
+  // --- mention token encode/decode ----------------------------------------
+  decodeTokens() {
+    const value = this.input.value || "";
+    MENTION_TOKEN.lastIndex = 0;
+    if (!MENTION_TOKEN.test(value)) return;
+
+    MENTION_TOKEN.lastIndex = 0;
+    const decoded = value.replace(MENTION_TOKEN, (_t, name, id) => {
+      this.mentionMap.set(name, { id, name });
+      return `@${name}`;
+    });
+    if (decoded !== value) {
+      const caret = Math.min(this.input.selectionStart, decoded.length);
+      this.input.value = decoded;
+      this.input.setSelectionRange(caret, caret);
+    }
+  },
+  encodeMentions() {
+    if (this.mentionMap.size === 0) return;
+    let body = this.input.value;
+    Array.from(this.mentionMap.entries())
+      .sort(([a], [b]) => b.length - a.length)
+      .forEach(([name, user]) => {
+        if (String(user.id) === "all") return;
+        const matcher = new RegExp(
+          `@${escapeRegExp(name)}(?![\\p{L}\\p{N}._-])`,
+          "gu",
+        );
+        body = body.replace(matcher, `@[${name}](user:${user.id})`);
+      });
+    this.input.value = body;
+  },
+  pruneMentionMap() {
+    const body = this.input.value || "";
+    this.mentionMap.forEach((_u, name) => {
+      if (!body.includes(`@${name}`)) this.mentionMap.delete(name);
+    });
+  },
+
+  // --- typeahead ---------------------------------------------------------
+  handleInput() {
+    this.pruneMentionMap();
+    const caret = this.input.selectionStart;
+    const before = this.input.value.slice(0, caret);
+    const match = before.match(MENTION_QUERY);
+    if (!match) return this.close();
+
+    const term = match[1].toLowerCase();
+    this.queryStart = caret - match[1].length - 1;
+    this.matches = this.users
+      .filter((u) => (u.name || "").toLowerCase().includes(term))
+      .sort((a, b) => {
+        const ap = a.name.toLowerCase().startsWith(term) ? 0 : 1;
+        const bp = b.name.toLowerCase().startsWith(term) ? 0 : 1;
+        return ap - bp || a.name.localeCompare(b.name);
+      })
+      .slice(0, 8);
+
+    if (this.matches.length === 0) return this.close();
+    this.active = 0;
+    this.render();
+  },
+  render() {
+    this.menu.innerHTML = "";
+    this.matches.forEach((user, index) => {
+      const li = document.createElement("li");
+      li.setAttribute("role", "option");
+      li.className =
+        "flex cursor-pointer items-center gap-2 truncate px-3 py-1.5 " +
+        (index === this.active ? "bg-mint text-primary" : "text-ink hover:bg-mint/60");
+      li.textContent =
+        String(user.id) === "all" ? "@all — notify everyone" : user.name;
+      li.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        this.select(user);
+      });
+      this.menu.appendChild(li);
+    });
+
+    const rect = this.input.getBoundingClientRect();
+    const height = Math.min(this.menu.scrollHeight, 224);
+    const above = rect.top - height - 6;
+    this.menu.style.left = `${rect.left}px`;
+    this.menu.style.width = `${Math.max(200, Math.min(rect.width, 340))}px`;
+    this.menu.style.top = above > 8 ? `${above}px` : `${rect.bottom + 6}px`;
+    this.menu.hidden = false;
+  },
+  onKey(event) {
+    if (this.menu.hidden) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      this.active = (this.active + 1) % this.matches.length;
+      this.render();
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      this.active = (this.active - 1 + this.matches.length) % this.matches.length;
+      this.render();
+    } else if (event.key === "Enter" || event.key === "Tab") {
+      event.preventDefault();
+      this.select(this.matches[this.active]);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      this.close();
+    }
+  },
+  select(user) {
+    if (!user || this.queryStart == null) return this.close();
+    const value = this.input.value;
+    const caret = this.input.selectionStart;
+    const label = String(user.id) === "all" ? "@all " : `@${user.name} `;
+    const next = value.slice(0, this.queryStart) + label + value.slice(caret);
+    const cursor = this.queryStart + label.length;
+
+    if (String(user.id) !== "all") this.mentionMap.set(user.name, user);
+    this.input.value = next;
+    this.input.setSelectionRange(cursor, cursor);
+    this.close();
+    this.input.focus();
+    this.input.dispatchEvent(new Event("input", { bubbles: true }));
+  },
+  close() {
+    if (this.menu) this.menu.hidden = true;
+    this.matches = [];
+    this.queryStart = null;
+    this.active = 0;
+  },
+};
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function safeParse(json) {
+  try {
+    return JSON.parse(json || "[]");
+  } catch (_error) {
+    return [];
+  }
+}
+
 let csrfToken = document
   .querySelector("meta[name='csrf-token']")
   .getAttribute("content");

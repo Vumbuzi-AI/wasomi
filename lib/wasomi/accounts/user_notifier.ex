@@ -109,6 +109,29 @@ defmodule Wasomi.Accounts.UserNotifier do
   end
 
   @doc """
+  Alerts an admin that a student has paid for a course. `amount` is the
+  pre-formatted display string (e.g. `"KES 4,500"`).
+  """
+  def deliver_admin_student_payment(admin, student, course, amount) do
+    deliver(admin.email, "New payment: #{course.title}", %{
+      title: "New student payment",
+      intro: Template.rich(["Hi ", {:bold, recipient_name(admin)}, ","]),
+      body: [
+        Template.rich([
+          {:bold, recipient_name(student)},
+          " paid ",
+          {:bold, amount},
+          " for \"",
+          {:bold, course.title},
+          "\"."
+        ]),
+        "Their enrolment is already active. Open the payments dashboard for the full record."
+      ],
+      cta: %{label: "View payments", url: "#{WasomiWeb.Endpoint.url()}/admin/payments"}
+    })
+  end
+
+  @doc """
   Tells a learner that a generated certificate is ready to download.
   """
   def deliver_certificate_issued(certificate) do

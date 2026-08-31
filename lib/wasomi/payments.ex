@@ -486,8 +486,12 @@ defmodule Wasomi.Payments do
           {:payment_confirmed, enrollment}
         )
 
-        # only on the actual :successful transition, so retries don't re-notify
-        if newly_confirmed?, do: notify_learner_of_payment(payment)
+        # Only on the transition to :successful — a webhook/reconciliation
+        # retry that finds the payment already confirmed must not re-notify.
+        if newly_confirmed? do
+          notify_learner_of_payment(payment)
+          notify_admins_of_payment(payment)
+        end
 
         {:ok, %{payment: payment, enrollment: enrollment}}
 
@@ -496,13 +500,26 @@ defmodule Wasomi.Payments do
     end
   end
 
-  # Best-effort — payment and enrollment are already committed.
+  # Best-effort — payment and enrollment are already committed, so a failure
+  # here is logged, never propagated.
   defp notify_learner_of_payment(payment) do
     Wasomi.Notifications.deliver_payment_confirmed(payment)
   rescue
     error ->
       Logger.error(
         "Failed to notify learner of payment #{payment.id}: " <>
+          Exception.format(:error, error, __STACKTRACE__)
+      )
+
+      :error
+  end
+
+  defp notify_admins_of_payment(payment) do
+    Wasomi.Notifications.deliver_student_payment_notice(payment)
+  rescue
+    error ->
+      Logger.error(
+        "Failed to notify admins of payment #{payment.id}: " <>
           Exception.format(:error, error, __STACKTRACE__)
       )
 

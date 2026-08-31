@@ -11,6 +11,12 @@ defmodule WasomiWeb.UserSessionController do
     |> create_session(params, "Password updated successfully!")
   end
 
+  def create(conn, %{"_action" => "admin_password_updated"} = params) do
+    conn
+    |> put_session(:user_return_to, ~p"/admin/settings")
+    |> create_session(params, "Password updated successfully!")
+  end
+
   def create(conn, params) do
     case Captcha.verify_from_params(params, action: "login") do
       {:ok, _} ->

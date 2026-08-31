@@ -20,7 +20,7 @@ defmodule WasomiWeb.AdminLiveTest do
 
     test "learners are redirected away from the admin area", %{conn: conn} do
       conn = log_in_user(conn, user_fixture())
-      assert {:error, {:redirect, %{to: "/"}}} = live(conn, ~p"/admin")
+      assert {:error, {:redirect, %{to: "/dashboard"}}} = live(conn, ~p"/admin")
     end
 
     test "admins can reach the overview", %{conn: conn} do

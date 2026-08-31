@@ -14,7 +14,8 @@ defmodule Wasomi.Notifications.Notification do
   @course_scoped_kinds @reengagement_kinds ++ @channel_kinds
 
   schema "notifications" do
-    field :kind, Ecto.Enum, values: [:enrollment_granted] ++ @reengagement_kinds ++ @channel_kinds
+    field :kind, Ecto.Enum,
+      values: [:enrollment_granted, :student_payment] ++ @reengagement_kinds ++ @channel_kinds
 
     field :title, :string
     field :body, :string

@@ -2,8 +2,10 @@ defmodule Wasomi.NotificationsTest do
   use Wasomi.DataCase
 
   import ExUnit.CaptureLog
+  import Swoosh.TestAssertions
   import Wasomi.AccountsFixtures
   import Wasomi.CatalogFixtures
+  import Wasomi.PaymentsFixtures
 
   alias Wasomi.{Accounts, Enrollments, Notifications}
 
@@ -235,6 +237,48 @@ defmodule Wasomi.NotificationsTest do
         })
 
       assert changeset.valid?
+    end
+  end
+
+  describe "deliver_student_payment_notice/1" do
+    test "fans an in-app row and an email out to every admin" do
+      admin_one = admin_fixture()
+      admin_two = admin_fixture()
+      student = user_fixture(%{name: "Ada Lovelace"})
+      course = course_fixture(status: :published, title: "GS1 Foundations")
+
+      payment =
+        payment_fixture(%{
+          user_id: student.id,
+          course_id: course.id,
+          status: :successful,
+          amount_minor: 4_500
+        })
+
+      assert :ok = Notifications.deliver_student_payment_notice(payment)
+
+      for admin <- [admin_one, admin_two] do
+        assert [%{kind: :student_payment, course_id: course_id} = notification] =
+                 Notifications.list_for_user(admin)
+
+        assert course_id == course.id
+        assert notification.body =~ "Ada Lovelace"
+        assert notification.body =~ "GS1 Foundations"
+        assert notification.body =~ "KES"
+      end
+
+      assert_email_sent(subject: "New payment: GS1 Foundations")
+    end
+
+    test "is a silent no-op when there are no admins" do
+      student = user_fixture()
+      course = course_fixture(status: :published)
+
+      payment =
+        payment_fixture(%{user_id: student.id, course_id: course.id, status: :successful})
+
+      assert :ok = Notifications.deliver_student_payment_notice(payment)
+      assert_no_email_sent()
     end
   end
 

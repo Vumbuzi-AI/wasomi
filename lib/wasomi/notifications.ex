@@ -8,9 +8,11 @@ defmodule Wasomi.Notifications do
 
   import Ecto.Query, warn: false
 
+  alias Wasomi.Accounts
   alias Wasomi.Accounts.{User, UserNotifier}
   alias Wasomi.Enrollments.Enrollment
   alias Wasomi.Notifications.Notification
+  alias Wasomi.Payments
   alias Wasomi.Payments.Payment
   alias Wasomi.Repo
 
@@ -156,6 +158,51 @@ defmodule Wasomi.Notifications do
     :ok
   end
 
+  @doc """
+  Fans a "new student payment" alert out to every admin — an in-app row
+  plus an email each. Best-effort: it runs after the payment and its
+  enrollment have already committed, so a mail or broadcast hiccup never
+  rolls anything back.
+  """
+  def deliver_student_payment_notice(%Payment{} = payment) do
+    payment = Repo.preload(payment, [:user, :course])
+    amount = Payments.format_amount(payment)
+    student = student_label(payment.user)
+    title = "New student payment"
+    body = "#{student} paid #{amount} for \"#{payment.course.title}\"."
+
+    for admin <- Accounts.list_users(role: :admin) do
+      case create_notification(%{
+             user_id: admin.id,
+             course_id: payment.course_id,
+             kind: :student_payment,
+             title: title,
+             body: body
+           }) do
+        {:ok, notification} ->
+          broadcast(admin.id, {:notification_created, notification})
+
+        {:error, changeset} ->
+          Logger.error(
+            "Failed to create student_payment notification for admin #{admin.id}, " <>
+              "payment #{payment.id}: #{inspect(changeset)}"
+          )
+      end
+
+      try do
+        UserNotifier.deliver_admin_student_payment(admin, payment.user, payment.course, amount)
+      rescue
+        error ->
+          Logger.error(
+            "Failed to email admin #{admin.id} about payment #{payment.id}: " <>
+              Exception.format(:error, error, __STACKTRACE__)
+          )
+      end
+    end
+
+    :ok
+  end
+
   defp notify_channel(user, course, message, kind, title, body) do
     case create_notification(%{
            user_id: user.id,
@@ -203,6 +250,9 @@ defmodule Wasomi.Notifications do
 
     if String.length(text) > max, do: String.slice(text, 0, max) <> "…", else: text
   end
+
+  defp student_label(%User{name: name}) when is_binary(name) and name != "", do: name
+  defp student_label(%User{email: email}), do: email
 
   @doc """
   Confirms a completed course payment to the learner: an in-app

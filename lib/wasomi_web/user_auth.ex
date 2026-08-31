@@ -138,6 +138,11 @@ defmodule WasomiWeb.UserAuth do
     * `:ensure_admin` - Authenticates the user and only continues for the
       `admin` role.
 
+    * `:redirect_admins_from_learner_area` - Sends `admin` users back to
+      `/admin`. Stacked after `:ensure_authenticated` on the learner
+      live_session so an admin account can't wander into learner-only
+      pages — they keep a separate learner account to take courses.
+
   ## Examples
 
   Use the `on_mount` lifecycle macro in LiveViews to mount or authenticate
@@ -191,6 +196,20 @@ defmodule WasomiWeb.UserAuth do
     end
   end
 
+  # Quietly returns an admin who lands on a learner route to the admin area —
+  # no flash, no bounce to the public landing page.
+  def on_mount(:redirect_admins_from_learner_area, _params, session, socket) do
+    socket = mount_current_user(socket, session)
+
+    case socket.assigns.current_user do
+      %{role: :admin} ->
+        {:halt, Phoenix.LiveView.redirect(socket, to: ~p"/admin")}
+
+      _user ->
+        {:cont, socket}
+    end
+  end
+
   def on_mount(:redirect_if_user_is_authenticated, _params, session, socket) do
     socket = mount_current_user(socket, session)
 
@@ -219,13 +238,11 @@ defmodule WasomiWeb.UserAuth do
 
         {:halt, socket}
 
+      # A signed-in learner who lands on an admin URL is quietly returned to
+      # their own area — no flash, no bounce out to the public landing page.
       _user ->
-        socket =
-          socket
-          |> Phoenix.LiveView.put_flash(:error, "You do not have permission to access this page.")
-          |> Phoenix.LiveView.redirect(to: ~p"/")
-
-        {:halt, socket}
+        {:halt,
+         Phoenix.LiveView.redirect(socket, to: signed_in_path(socket.assigns.current_user))}
     end
   end
 
@@ -294,8 +311,7 @@ defmodule WasomiWeb.UserAuth do
 
       _user ->
         conn
-        |> put_flash(:error, "You do not have permission to access this page.")
-        |> redirect(to: ~p"/")
+        |> redirect(to: signed_in_path(conn.assigns.current_user))
         |> halt()
     end
   end

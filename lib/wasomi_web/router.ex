@@ -99,6 +99,7 @@ defmodule WasomiWeb.Router do
     live_session :require_authenticated_user,
       on_mount: [
         {WasomiWeb.UserAuth, :ensure_authenticated},
+        {WasomiWeb.UserAuth, :redirect_admins_from_learner_area},
         {WasomiWeb.UserAuth, :ensure_onboarded}
       ] do
       live "/users/settings", UserSettingsLive, :edit
@@ -132,6 +133,11 @@ defmodule WasomiWeb.Router do
     live_session :require_admin,
       on_mount: [{WasomiWeb.UserAuth, :ensure_admin}] do
       live "/", AdminLive.Dashboard, :index
+
+      live "/settings", AdminLive.Settings, :edit
+      live "/settings/confirm_email/:token", AdminLive.Settings, :confirm_email
+
+      live "/notifications", AdminLive.Notifications, :index
 
       live "/courses", AdminLive.Courses, :index
       live "/courses/new", AdminLive.Courses, :new

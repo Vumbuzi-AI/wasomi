@@ -30,6 +30,7 @@ defmodule WasomiWeb.StudentComponents do
     %{key: :certificates, label: "Certificates", icon: "hero-trophy", path: "/certificates"},
     %{key: :notifications, label: "Notifications", icon: "hero-bell", path: "/notifications"},
     %{key: :browse, label: "Browse catalog", icon: "hero-magnifying-glass", path: "/catalog"},
+    %{key: :refer, label: "Refer a friend", icon: "hero-user-plus", path: "/refer"},
     %{key: :account, label: "Account", icon: "hero-cog-6-tooth", path: "/users/settings"}
   ]
 

@@ -13,6 +13,8 @@ config :wasomi,
   payment_provider: Wasomi.Paystack,
   media_provider: Wasomi.Media.Cloudflare,
   storage_provider: Wasomi.Storage.R2,
+  # Max referral attributions credited to one referrer per rolling 24h.
+  referral_daily_cap: 25,
   certificate_renderer: Wasomi.Certificates.Renderer.ChromicPdf,
   chromic_pdf_options: [
     # 1300x919 matches the certificate's A4-landscape ratio, for screenshots.

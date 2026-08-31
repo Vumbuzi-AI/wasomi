@@ -1,7 +1,7 @@
 defmodule WasomiWeb.AdminLive.StudentShow do
   use WasomiWeb, :live_view
 
-  alias Wasomi.{Accounts, Catalog, Enrollments, Payments}
+  alias Wasomi.{Accounts, Catalog, Enrollments, Payments, Referrals}
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -20,6 +20,9 @@ defmodule WasomiWeb.AdminLive.StudentShow do
      |> assign(:user, user)
      |> assign(:payments, payments)
      |> assign(:spent_minor, spent_minor)
+     |> assign(:referral_stats, Referrals.stats_for(user))
+     |> assign(:referred_by, Referrals.referred_by(user))
+     |> assign(:referred, Referrals.list_referred(user))
      |> assign(:modal, nil)
      |> assign(:grant_access_form, to_form(Enrollments.change_grant_access()))
      |> refresh_enrollments()}
@@ -191,6 +194,57 @@ defmodule WasomiWeb.AdminLive.StudentShow do
 
             <p :if={@payments == []} class="mt-5 rounded-2xl bg-surface p-5 text-body">
               No payments recorded for this learner.
+            </p>
+          </section>
+
+          <%!-- Referrals --%>
+          <section class="rounded-3xl border border-black/5 bg-white p-6 shadow-card">
+            <h2 class="text-xl font-semibold text-ink">Referrals</h2>
+            <p class="mt-1 text-sm text-muted">
+              Referred by:
+              <.link
+                :if={@referred_by}
+                navigate={~p"/admin/students/#{@referred_by.id}"}
+                class="font-medium text-primary hover:underline"
+              >
+                {@referred_by.name || @referred_by.email}
+              </.link>
+              <span :if={!@referred_by}>—</span>
+            </p>
+
+            <div class="mt-4 grid grid-cols-3 gap-3 text-center">
+              <div class="rounded-2xl bg-surface p-3">
+                <p class="text-2xl font-bold text-ink">{@referral_stats.signups}</p>
+                <p class="text-xs text-muted">signed up</p>
+              </div>
+              <div class="rounded-2xl bg-surface p-3">
+                <p class="text-2xl font-bold text-ink">{@referral_stats.confirmed}</p>
+                <p class="text-xs text-muted">confirmed</p>
+              </div>
+              <div class="rounded-2xl bg-surface p-3">
+                <p class="text-2xl font-bold text-ink">{@referral_stats.converted}</p>
+                <p class="text-xs text-muted">enrolled</p>
+              </div>
+            </div>
+
+            <ul :if={@referred != []} class="mt-4 divide-y divide-black/5 text-sm">
+              <li :for={r <- @referred} class="flex items-center justify-between gap-4 py-2.5">
+                <.link
+                  navigate={~p"/admin/students/#{r.referee.id}"}
+                  class="min-w-0 truncate text-ink hover:text-primary"
+                >
+                  {r.referee.name || r.referee.email}
+                </.link>
+                <span class="shrink-0 text-xs text-muted">
+                  {if r.referee.confirmed_at, do: "confirmed", else: "unconfirmed"} · {format_date(
+                    r.attributed_at
+                  )}
+                </span>
+              </li>
+            </ul>
+
+            <p :if={@referred == []} class="mt-4 rounded-2xl bg-surface p-5 text-body">
+              This learner hasn't referred anyone yet.
             </p>
           </section>
         </div>

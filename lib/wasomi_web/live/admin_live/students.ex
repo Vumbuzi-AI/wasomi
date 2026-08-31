@@ -23,12 +23,17 @@ defmodule WasomiWeb.AdminLive.Students do
 
     page = Accounts.list_users_page(search: search, page: page_number)
 
+    referrals_by_user = Wasomi.Referrals.counts_by_referrer(Enum.map(page.entries, & &1.id))
+    referred_by = Wasomi.Referrals.referrers_of(Enum.map(page.entries, & &1.id))
+
     rows =
       Enum.map(page.entries, fn user ->
         %{
           user: user,
           courses: Map.get(enrollments_by_user, user.id, 0),
-          spent_minor: Map.get(revenue_by_user, user.id, 0)
+          spent_minor: Map.get(revenue_by_user, user.id, 0),
+          referrals: Map.get(referrals_by_user, user.id, %{confirmed: 0}).confirmed,
+          referred_by: Map.get(referred_by, user.id)
         }
       end)
 
@@ -124,6 +129,8 @@ defmodule WasomiWeb.AdminLive.Students do
                     <th class="px-6 py-4 font-semibold">Phone</th>
                     <th class="px-6 py-4 font-semibold">Role</th>
                     <th class="px-6 py-4 font-semibold">Courses</th>
+                    <th class="px-6 py-4 font-semibold">Referrals</th>
+                    <th class="px-6 py-4 font-semibold">Referred by</th>
                     <th class="px-6 py-4 font-semibold">Total spent</th>
                   </tr>
                 </thead>
@@ -152,6 +159,17 @@ defmodule WasomiWeb.AdminLive.Students do
                       </span>
                     </td>
                     <td class="px-6 py-4 text-body">{row.courses}</td>
+                    <td class="px-6 py-4 text-body">{row.referrals}</td>
+                    <td class="px-6 py-4 text-body">
+                      <.link
+                        :if={row.referred_by}
+                        navigate={~p"/admin/students/#{row.referred_by.id}"}
+                        class="text-primary hover:underline"
+                      >
+                        {row.referred_by.name || row.referred_by.email}
+                      </.link>
+                      <span :if={!row.referred_by}>—</span>
+                    </td>
                     <td class="px-6 py-4 font-semibold text-ink">
                       {Payments.format_minor(row.spent_minor)}
                     </td>

@@ -146,4 +146,27 @@ defmodule WasomiWeb.AdminLive.StudentShowTest do
       refute Enrollments.can_access_course?(learner, course)
     end
   end
+
+  describe "referrals section" do
+    test "shows who referred the learner and their referral funnel", %{conn: conn} do
+      referrer = user_fixture(%{name: "Jane Referrer"})
+      learner = user_fixture(%{name: "Referred Learner"})
+      also_referred = user_fixture(%{name: "Downstream Signup"})
+
+      assert {:ok, %Wasomi.Referrals.Referral{}} =
+               Wasomi.Referrals.attribute(learner, referrer.referral_code)
+
+      assert {:ok, %Wasomi.Referrals.Referral{}} =
+               Wasomi.Referrals.attribute(also_referred, learner.referral_code)
+
+      {:ok, _view, html} = live(conn, ~p"/admin/students/#{learner.id}")
+
+      assert html =~ "Referrals"
+      assert html =~ "Jane Referrer"
+      assert html =~ "Downstream Signup"
+
+      {:ok, _view, referrer_html} = live(conn, ~p"/admin/students/#{referrer.id}")
+      assert referrer_html =~ "Referred Learner"
+    end
+  end
 end

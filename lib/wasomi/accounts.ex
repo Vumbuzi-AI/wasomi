@@ -296,11 +296,38 @@ defmodule Wasomi.Accounts do
 
   """
   def register_user(attrs, audit \\ []) do
-    with {:ok, user} <- %User{} |> User.registration_changeset(attrs) |> Repo.insert() do
+    do_register_user(attrs, audit, 2)
+  end
+
+  defp do_register_user(attrs, audit, retries) do
+    with {:ok, user} <- insert_user(attrs, retries) do
       record_account_audit_event(user, :registered, audit)
       {:ok, user}
     end
   end
+
+  defp insert_user(attrs, retries) do
+    case %User{} |> User.registration_changeset(attrs) |> Repo.insert() do
+      {:error, %Ecto.Changeset{} = changeset} = error when retries > 0 ->
+        if Keyword.has_key?(changeset.errors, :referral_code) do
+          insert_user(attrs, retries - 1)
+        else
+          error
+        end
+
+      result ->
+        result
+    end
+  end
+
+  @doc """
+  Returns a user by their referral code, or `nil`.
+  """
+  def get_user_by_referral_code(code) when is_binary(code) and code != "" do
+    Repo.get_by(User, referral_code: code)
+  end
+
+  def get_user_by_referral_code(_code), do: nil
 
   @doc """
   Returns an `%Ecto.Changeset{}` for tracking user changes.

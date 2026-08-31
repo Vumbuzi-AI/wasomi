@@ -93,8 +93,16 @@ defmodule WasomiWeb.UserSettingsLive do
                       placeholder="A short introduction — up to 500 characters."
                     />
 
+                    <.country_combobox field={@profile_form[:country]} />
+
                     <div class="grid gap-6 sm:grid-cols-2">
-                      <.country_combobox field={@profile_form[:country]} />
+                      <.input
+                        field={@profile_form[:gender]}
+                        type="select"
+                        label="Gender"
+                        prompt="Select gender"
+                        options={User.gender_options()}
+                      />
                       <.input
                         field={@profile_form[:industry]}
                         type="select"

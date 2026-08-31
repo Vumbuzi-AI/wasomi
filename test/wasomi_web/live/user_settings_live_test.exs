@@ -338,7 +338,8 @@ defmodule WasomiWeb.UserSettingsLiveTest do
           "industry" => "Supply Chain & Logistics",
           "occupation" => "Warehouse Manager",
           "experience_level" => "mid",
-          "learning_goal" => "upskilling"
+          "learning_goal" => "upskilling",
+          "gender" => "prefer_not_to_say"
         }
       })
 
@@ -351,6 +352,7 @@ defmodule WasomiWeb.UserSettingsLiveTest do
       assert updated.occupation == "Warehouse Manager"
       assert updated.experience_level == :mid
       assert updated.learning_goal == :upskilling
+      assert updated.gender == :prefer_not_to_say
     end
 
     test "leaves every field optional", %{conn: conn, user: user} do
@@ -366,7 +368,8 @@ defmodule WasomiWeb.UserSettingsLiveTest do
           "industry" => "",
           "occupation" => "",
           "experience_level" => "",
-          "learning_goal" => ""
+          "learning_goal" => "",
+          "gender" => ""
         }
       })
       |> render_submit()
@@ -380,6 +383,7 @@ defmodule WasomiWeb.UserSettingsLiveTest do
       assert updated.occupation in [nil, ""]
       assert updated.experience_level == nil
       assert updated.learning_goal == nil
+      assert updated.gender == nil
     end
 
     test "renders a validation error on phx-change for a bio over the length cap", %{conn: conn} do
@@ -584,6 +588,14 @@ defmodule WasomiWeb.UserSettingsLiveTest do
       assert html =~ "wasn&#39;t saved"
       assert Accounts.get_user!(user.id).headline == "Still saved"
       refute Accounts.get_user!(user.id).avatar_key
+    end
+
+    test "renders an optional gender select", %{conn: conn} do
+      {:ok, _view, html} = live(conn, ~p"/users/settings")
+
+      assert html =~ ~s(name="user[gender]")
+      assert html =~ "Select gender"
+      assert html =~ "Prefer not to say"
     end
 
     test "renders country as a searchable combobox with East Africa options first", %{

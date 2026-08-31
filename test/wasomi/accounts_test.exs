@@ -989,6 +989,25 @@ defmodule Wasomi.AccountsTest do
       assert changeset.valid?
       assert get_change(changeset, :learning_goal) == nil
     end
+
+    test "accepts each supported gender" do
+      for value <- ~w(female male prefer_not_to_say) do
+        changeset = Accounts.change_user_profile(%User{}, %{"gender" => value})
+        assert changeset.valid?, "expected #{value} to be accepted"
+        assert get_change(changeset, :gender) == String.to_existing_atom(value)
+      end
+    end
+
+    test "rejects a gender outside the enum" do
+      changeset = Accounts.change_user_profile(%User{}, %{"gender" => "other"})
+      assert %{gender: ["is invalid"]} = errors_on(changeset)
+    end
+
+    test "treats an empty-string gender as unset rather than invalid" do
+      changeset = Accounts.change_user_profile(%User{}, %{"gender" => ""})
+      assert changeset.valid?
+      assert get_change(changeset, :gender) == nil
+    end
   end
 
   describe "update_user_profile/2" do

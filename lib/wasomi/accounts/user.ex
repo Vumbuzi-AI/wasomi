@@ -19,6 +19,7 @@ defmodule Wasomi.Accounts.User do
     field :referral_code, :string
     field :bio, :string
     field :country, :string
+    field :gender, Ecto.Enum, values: [:female, :male, :prefer_not_to_say]
     field :occupation, :string
     field :avatar_key, :string
     field :headline, :string
@@ -106,6 +107,15 @@ defmodule Wasomi.Accounts.User do
 
   @doc "The fixed list of industries offered on the learner profile's `industry` dropdown."
   def industries, do: @industries
+
+  @gender_options [
+    {"Female", :female},
+    {"Male", :male},
+    {"Prefer not to say", :prefer_not_to_say}
+  ]
+
+  @doc "`{label, value}` pairs for the optional gender dropdown (onboarding + settings)."
+  def gender_options, do: @gender_options
 
   @doc """
   A user changeset for registration.
@@ -290,7 +300,7 @@ defmodule Wasomi.Accounts.User do
   rather than accepted as free text; `experience_level` and
   `learning_goal` are enums for the same reason.
   """
-  @profile_select_fields ~w(country industry experience_level learning_goal)a
+  @profile_select_fields ~w(country gender industry experience_level learning_goal)a
 
   def profile_changeset(user, attrs) do
     user
@@ -300,6 +310,7 @@ defmodule Wasomi.Accounts.User do
       :headline,
       :bio,
       :country,
+      :gender,
       :organization,
       :industry,
       :occupation,
@@ -318,6 +329,7 @@ defmodule Wasomi.Accounts.User do
     |> validate_length(:occupation, max: @occupation_max_length)
     |> validate_inclusion(:country, Countries.list(), message: "is not a supported country")
     |> validate_inclusion(:industry, @industries, message: "is not a supported industry")
+    |> check_constraint(:gender, name: :users_gender_must_be_valid)
   end
 
   @doc """

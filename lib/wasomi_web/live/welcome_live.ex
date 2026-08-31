@@ -36,6 +36,7 @@ defmodule WasomiWeb.WelcomeLive do
        |> assign(:page_title, "Welcome to Wasomi")
        |> assign(:goal_options, @goal_options)
        |> assign(:experience_options, @experience_options)
+       |> assign(:gender_options, User.gender_options())
        |> assign(:skip_available, false)
        |> assign_form(Accounts.change_user_profile(user))}
     end
@@ -105,6 +106,14 @@ defmodule WasomiWeb.WelcomeLive do
         />
 
         <.country_combobox field={@form[:country]} />
+
+        <.input
+          field={@form[:gender]}
+          type="select"
+          label="Gender"
+          prompt="Select gender"
+          options={@gender_options}
+        />
 
         <div class="pt-2">
           <div class="flex justify-end">

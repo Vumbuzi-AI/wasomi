@@ -450,9 +450,17 @@ defmodule Wasomi.Channels do
   def broadcast_typing(%Channel{id: channel_id}, %User{} = user, typing?) do
     broadcast(
       channel_id,
-      {:typing, %{user_id: user.id, name: user.name || user.email, typing: typing?}}
+      {:typing, %{user_id: user.id, name: typing_name(user), typing: typing?}}
     )
   end
+
+  defp typing_name(%User{first_name: first_name}) when is_binary(first_name) and first_name != "",
+    do: first_name
+
+  defp typing_name(%User{name: name}) when is_binary(name) and name != "",
+    do: name |> String.split() |> List.first()
+
+  defp typing_name(%User{email: email}) when is_binary(email), do: email
 
   ## ------------------------------------------------------------------
   ## Unread tracking

@@ -64,6 +64,18 @@ defmodule WasomiWeb.WelcomeLiveTest do
       assert Accounts.onboarding_completed?(updated)
     end
 
+    test "offers an optional gender select and persists the choice", %{conn: conn, user: user} do
+      {:ok, lv, html} = live(conn, ~p"/welcome")
+
+      assert html =~ "Gender"
+      assert html =~ "Prefer not to say"
+
+      assert {:error, {:live_redirect, %{to: "/dashboard"}}} =
+               render_submit(lv, "save", %{"user" => %{"gender" => "female"}})
+
+      assert Accounts.get_user!(user.id).gender == :female
+    end
+
     test "skipping marks onboarding done without saving answers", %{conn: conn, user: user} do
       {:ok, lv, _html} = live(conn, ~p"/welcome")
 

@@ -43,6 +43,7 @@ defmodule WasomiWeb.HomeLive do
         <.faqs />
       </main>
       <.footer />
+      <.zebra_chat_embed />
     </div>
     """
   end

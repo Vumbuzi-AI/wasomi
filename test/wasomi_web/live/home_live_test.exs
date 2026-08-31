@@ -34,4 +34,13 @@ defmodule WasomiWeb.HomeLiveTest do
     assert html =~ "Admin dashboard"
     assert html =~ ~s|href="/admin"|
   end
+
+  test "mounts the Zebra chat embed on the homepage but not the learner dashboard", %{conn: conn} do
+    {:ok, _view, home} = live(conn, ~p"/")
+    assert home =~ ~s|id="zebra-chat-embed"|
+    assert home =~ ~s|phx-hook="ZebraChat"|
+
+    {:ok, _view, dashboard} = conn |> log_in_user(user_fixture()) |> live(~p"/dashboard")
+    refute dashboard =~ "ZebraChat"
+  end
 end

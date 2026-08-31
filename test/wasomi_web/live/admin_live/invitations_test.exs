@@ -15,7 +15,7 @@ defmodule WasomiWeb.AdminLive.InvitationsTest do
   describe "authorization" do
     test "a learner cannot open the page", %{conn: conn} do
       conn = log_in_user(conn, user_fixture())
-      assert {:error, {:redirect, %{to: "/"}}} = live(conn, ~p"/admin/invitations")
+      assert {:error, {:redirect, %{to: "/dashboard"}}} = live(conn, ~p"/admin/invitations")
     end
   end
 

@@ -152,6 +152,16 @@ if config_env() == :prod do
          :start_chromic_pdf,
          System.get_env("START_CHROMIC_PDF", "true") not in ~w(false 0)
 
+  if chrome_executable = System.get_env("CHROME_EXECUTABLE") do
+    config :wasomi,
+           :chromic_pdf_options,
+           Keyword.put(
+             Application.get_env(:wasomi, :chromic_pdf_options, []),
+             :chrome_executable,
+             chrome_executable
+           )
+  end
+
   config :wasomi, Wasomi.Repo,
     # ssl: true,
     url: database_url,

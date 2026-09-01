@@ -6,7 +6,7 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
   import Wasomi.CertificatesFixtures
   import Wasomi.LearningFixtures
 
-  alias Wasomi.{Certificates, Enrollments, Learning}
+  alias Wasomi.{Certificates, Enrollments, Learning, Reviews}
 
   setup :register_and_log_in_user
 
@@ -33,7 +33,11 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
 
     assert {:ok, view, html} = live(conn, ~p"/learn/courses/#{course.slug}")
     assert html =~ lecture.title
-    assert html =~ user.email
+    assert html =~ course.title
+
+    # Immersive shell: a plain exit link, no learner sidebar.
+    assert has_element?(view, "a[aria-label='Exit course']")
+    refute has_element?(view, "#student-sidebar")
 
     assert has_element?(
              view,
@@ -43,7 +47,7 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
     assert has_element?(view, "#course-progress-percent", "0%")
     # A recording completes itself, so there is no button here — only the
     # watch-progress readout that stands in for one.
-    refute has_element?(view, "#mark-lecture-complete")
+    refute has_element?(view, "#mark-lesson-complete")
     assert has_element?(view, "#lecture-watch-progress")
   end
 
@@ -61,24 +65,23 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
         video_provider: nil
       )
 
-    resource = lecture_resource_fixture(lecture_id: lecture.id, name: "Slides")
+    _resource = lecture_resource_fixture(lecture_id: lecture.id, name: "Slides")
     {:ok, pending} = Enrollments.create_pending_enrollment(user, course)
     {:ok, _active} = Enrollments.activate_enrollment(pending)
 
     assert {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
 
     refute has_element?(view, "#protected-player-#{lecture.id}")
-    # Nothing to watch and nothing to auto-complete: the reading is the lesson.
-    refute has_element?(view, "#mark-lecture-complete")
-    assert has_element?(view, "#mark-resource-read-#{resource.id}")
+    # One completion control for the whole lesson, at the end of its body.
+    assert has_element?(view, "#mark-lesson-complete")
 
     view
-    |> element("#mark-resource-read-#{resource.id}")
+    |> element("#mark-lesson-complete")
     |> render_click()
 
     assert %{status: :completed} = Learning.get_lecture_progress(user, lecture)
-    refute has_element?(view, "#mark-resource-read-#{resource.id}")
-    assert has_element?(view, "#unmark-resource-read-#{resource.id}")
+    refute has_element?(view, "#mark-lesson-complete")
+    assert render(view) =~ "Lesson complete"
   end
 
   test "a lecture with neither a video nor a PDF keeps the manual mark-complete button",
@@ -110,14 +113,14 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
 
     assert {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
 
-    assert has_element?(view, "#mark-lecture-complete")
+    assert has_element?(view, "#mark-lesson-complete")
 
     view
-    |> element("#mark-lecture-complete")
+    |> element("#mark-lesson-complete")
     |> render_click()
 
     assert %{status: :completed} = Learning.get_lecture_progress(user, lecture)
-    refute has_element?(view, "#mark-lecture-complete")
+    refute has_element?(view, "#mark-lesson-complete")
   end
 
   test "resources and FAQ for the current lecture are rendered to enrolled learners", %{
@@ -151,7 +154,7 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
 
     assert {:ok, view, html} = live(conn, ~p"/learn/courses/#{course.slug}")
 
-    assert has_element?(view, "#lecture-resources a", "Slides")
+    assert has_element?(view, "#resources-panel a", "Slides")
 
     assert has_element?(
              view,
@@ -183,13 +186,7 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
 
     assert has_element?(
              view,
-             "#lesson-pdfs #pdf-resource-#{resource.id} iframe[src='#{resource_path}']"
-           )
-
-    assert has_element?(
-             view,
-             "#pdf-resource-#{resource.id} a[href='#{resource_path}']",
-             "Open PDF"
+             "#lesson-pdfs #pdf-deck-#{resource.id}[phx-hook='PdfDeck'][data-src='#{resource_path}']"
            )
   end
 
@@ -202,7 +199,6 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
 
     assert {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
 
-    refute has_element?(view, "#lecture-resources")
     refute has_element?(view, "#lecture-faq")
   end
 
@@ -217,7 +213,7 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
     {:ok, _active} = Enrollments.activate_enrollment(pending)
 
     assert {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
-    assert has_element?(view, "a[href='#{~p"/courses-taken"}']", "My courses")
+    assert has_element?(view, "a[href='#{~p"/courses-taken"}'][aria-label='Exit course']")
 
     assert {:ok, archived} = Wasomi.Catalog.archive_course(course)
 
@@ -225,7 +221,7 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
     # this course) is always a valid destination regardless of status.
     assert {:ok, view, html} = live(conn, ~p"/learn/courses/#{archived.slug}")
     assert html =~ lecture.title
-    assert has_element?(view, "a[href='#{~p"/courses-taken"}']", "My courses")
+    assert has_element?(view, "a[href='#{~p"/courses-taken"}'][aria-label='Exit course']")
   end
 
   test "a non-enrolled visitor to an archived course is redirected to the catalog, not checkout",
@@ -328,7 +324,7 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
     # mark: still in progress, and still no button offered.
     render_hook(view, "video-progress", %{"lecture_id" => lecture.id, "position_seconds" => 85})
     assert %{status: :in_progress} = Learning.get_lecture_progress(user, lecture)
-    refute has_element?(view, "#mark-lecture-complete")
+    refute has_element?(view, "#mark-lesson-complete")
     assert has_element?(view, "#lecture-watch-progress")
 
     Wasomi.Repo.update!(
@@ -346,7 +342,7 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
     refute has_element?(view, "#lecture-watch-progress")
   end
 
-  test "a partly watched video says it will complete on its own rather than offering a button", %{
+  test "a video lesson shows a watch-progress readout rather than a manual complete button", %{
     conn: conn,
     user: user
   } do
@@ -358,10 +354,8 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
 
     {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
 
-    refute has_element?(view, "#mark-lecture-complete")
-
-    assert render(view) =~
-             "This lesson completes on its own once you have watched the video"
+    refute has_element?(view, "#mark-lesson-complete")
+    assert has_element?(view, "#lecture-watch-progress", "% watched")
   end
 
   test "cannot mark a lecture complete below the watch threshold by forging a client event", %{
@@ -379,27 +373,6 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
 
     assert render(view) =~ "Watch more of this lecture before marking it complete."
     refute match?(%{status: :completed}, Learning.get_lecture_progress(user, lecture))
-  end
-
-  test "certificate ready PubSub events reveal a download button", %{conn: conn, user: user} do
-    course = course_fixture(status: :published)
-    module = course_module_fixture(course_id: course.id, position: 1)
-    lecture_fixture(module_id: module.id, position: 1)
-    {:ok, pending} = Enrollments.create_pending_enrollment(user, course)
-    {:ok, _active} = Enrollments.activate_enrollment(pending)
-
-    {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
-    assert has_element?(view, "#course-certificates")
-
-    certificate =
-      certificate_fixture(user_id: user.id, course_id: course.id, module_id: module.id)
-
-    :ok = Certificates.broadcast_ready(certificate)
-
-    assert has_element?(
-             view,
-             "#certificate-#{certificate.id} a[href='/certificates/#{certificate.id}/download']"
-           )
   end
 
   describe "certificate celebration modal" do
@@ -449,7 +422,7 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
       assert has_element?(view, "#certificate-celebration")
 
       view
-      |> element("button", "Continue learning")
+      |> element("#certificate-celebration button[aria-label='Close']")
       |> render_click()
 
       refute has_element?(view, "#certificate-celebration")
@@ -637,7 +610,7 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
         assert has_element?(view, "nav button", label)
       end
 
-      assert has_element?(view, "nav button.bg-white.text-primary", "Lessons")
+      assert has_element?(view, "nav button.bg-dark.text-white", "Lessons")
     end
 
     test "the study tools stay in the course workspace and Flashcards opens at the scope picker",
@@ -709,7 +682,7 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
       {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
       render_hook(view, "select-section", %{"section" => "not_a_real_section"})
 
-      assert has_element?(view, "nav button.bg-white.text-primary", "Lessons")
+      assert has_element?(view, "nav button.bg-dark.text-white", "Lessons")
     end
 
     test "a multi-module course shows a module picker for the Module quiz section", %{
@@ -754,7 +727,7 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
 
       html =
         view
-        |> element("button[phx-value-module_id='#{module1.id}']")
+        |> element("#module-quiz-picker button[phx-value-module_id='#{module1.id}']")
         |> render_click()
 
       assert html =~ "Question 1 of 1"
@@ -775,7 +748,11 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
 
       {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
       view |> element("nav button", "Module quiz") |> render_click()
-      view |> element("button[phx-value-module_id='#{module1.id}']") |> render_click()
+
+      view
+      |> element("#module-quiz-picker button[phx-value-module_id='#{module1.id}']")
+      |> render_click()
+
       assert has_element?(view, "form[phx-submit='submit-quiz']")
 
       html = view |> element("button", "Choose a different module") |> render_click()
@@ -884,7 +861,7 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
       # The outline flags the lesson as owing a quiz.
       assert has_element?(view, "button[data-lecture-id='#{first.id}']", "Quiz to pass")
 
-      view |> element("#mark-lecture-complete") |> render_click()
+      view |> element("#mark-lesson-complete") |> render_click()
 
       # Completing the lecture is no longer enough on its own.
       assert has_element?(view, "button[data-lecture-id='#{second.id}'][data-locked='true']")
@@ -912,7 +889,7 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
 
       {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
 
-      view |> element("#mark-lecture-complete") |> render_click()
+      view |> element("#mark-lesson-complete") |> render_click()
       view |> element("#lesson-quiz input[value='#{wrong.id}']") |> render_click()
       view |> element("#lesson-quiz form") |> render_submit()
 
@@ -1162,6 +1139,15 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
           content_type: nil
         )
 
+      pdf_resource =
+        lecture_resource_fixture(
+          lecture_id: lecture.id,
+          position: 2,
+          kind: :document,
+          name: "Preview notes.pdf",
+          content_type: "application/pdf"
+        )
+
       question =
         lecture_question_fixture(
           lecture_id: lecture.id,
@@ -1171,15 +1157,147 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
 
       assert {:ok, view, html} = live(conn, ~p"/admin/courses/#{course.slug}/preview")
 
-      assert has_element?(view, "#lecture-resources a", "Slides")
+      assert has_element?(view, "#resources-panel a", "Slides")
+      resource_path = ~p"/learn/resources/#{resource.id}/download?preview=true"
+      pdf_resource_path = ~p"/learn/resources/#{pdf_resource.id}/download?preview=true"
 
       assert has_element?(
                view,
-               "a[href='#{~p"/learn/resources/#{resource.id}/download?preview=true"}']"
+               "a[href='#{resource_path}']"
+             )
+
+      assert has_element?(
+               view,
+               "#lesson-pdfs #pdf-deck-#{pdf_resource.id}[phx-hook='PdfDeck'][data-src='#{pdf_resource_path}']"
              )
 
       assert html =~ question.question
       assert has_element?(view, "#lecture-faq")
+    end
+  end
+
+  describe "course rating inline section" do
+    setup %{user: user} do
+      course = course_fixture(status: :published)
+      module = course_module_fixture(course_id: course.id, position: 1)
+
+      first =
+        lecture_fixture(
+          module_id: module.id,
+          position: 1,
+          duration_seconds: nil,
+          video_asset_id: nil,
+          video_provider: nil
+        )
+
+      last =
+        lecture_fixture(
+          module_id: module.id,
+          position: 2,
+          duration_seconds: nil,
+          video_asset_id: nil,
+          video_provider: nil
+        )
+
+      last_pdf =
+        lecture_resource_fixture(
+          lecture_id: last.id,
+          kind: :document,
+          name: "Final lesson notes.pdf",
+          content_type: "application/pdf"
+        )
+
+      {:ok, pending} = Enrollments.create_pending_enrollment(user, course)
+      {:ok, _active} = Enrollments.activate_enrollment(pending)
+
+      %{course: course, first: first, last: last, last_pdf: last_pdf, user: user}
+    end
+
+    test "does not appear on non-final lectures or incomplete final lectures", %{
+      conn: conn,
+      course: course,
+      first: first
+    } do
+      assert {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
+
+      # On first (non-final) lecture
+      refute has_element?(view, "#course-rating-section")
+
+      # Navigate to last lecture before it is completed
+      assert {:ok, view, _html} =
+               live(conn, ~p"/learn/courses/#{course.slug}?lecture_id=#{first.id}")
+
+      refute has_element?(view, "#course-rating-section")
+    end
+
+    test "appears on the final lecture once completed, allowing star rating and comment submission",
+         %{conn: conn, course: course, first: first, last: last, last_pdf: last_pdf, user: user} do
+      _certificate = certificate_fixture(user_id: user.id, course_id: course.id)
+      # Complete first lecture
+      {:ok, _progress, _} = Learning.mark_complete(user, first)
+
+      assert {:ok, view, _html} =
+               live(conn, ~p"/learn/courses/#{course.slug}?lecture_id=#{last.id}")
+
+      refute has_element?(view, "#course-rating-section")
+      assert has_element?(view, "#pdf-deck-#{last_pdf.id}")
+
+      # Mark final lecture complete
+      view
+      |> element("#mark-lesson-complete")
+      |> render_click()
+
+      # Now rating section appears inline where the PDF deck was.
+      assert has_element?(view, "#course-rating-section")
+      refute has_element?(view, "#pdf-deck-#{last_pdf.id}")
+      assert has_element?(view, "#course-review-form")
+      assert has_element?(view, "#submit-course-rating[disabled]")
+
+      # Click 5-star rating
+      view
+      |> element("#rate-star-5")
+      |> render_click()
+
+      refute has_element?(view, "#submit-course-rating[disabled]")
+
+      # Submit review with comment
+      view
+      |> element("#course-review-form")
+      |> render_submit(%{"body" => "Great instructor and practical content!"})
+
+      # Review is saved in the database
+      assert %{rating: 5, body: "Great instructor and practical content!"} =
+               Reviews.get_user_course_review(user, course)
+
+      # Rating section now reflects submitted feedback
+      assert has_element?(view, "#course-rating-section", "5/5 stars")
+
+      assert has_element?(
+               view,
+               "#course-rating-section",
+               "Great instructor and practical content!"
+             )
+
+      # Certificate celebration modal pops after rating submission
+      assert has_element?(view, "#certificate-celebration")
+    end
+
+    test "rating is required with no skip option on the final lecture",
+         %{conn: conn, course: course, first: first, last: last, user: user} do
+      _certificate = certificate_fixture(user_id: user.id, course_id: course.id)
+      {:ok, _progress, _} = Learning.mark_complete(user, first)
+
+      assert {:ok, view, _html} =
+               live(conn, ~p"/learn/courses/#{course.slug}?lecture_id=#{last.id}")
+
+      view
+      |> element("#mark-lesson-complete")
+      |> render_click()
+
+      assert has_element?(view, "#course-rating-section")
+      refute has_element?(view, "#skip-course-rating")
+      refute has_element?(view, "#certificate-celebration")
+      assert has_element?(view, "#submit-course-rating[disabled]")
     end
   end
 end

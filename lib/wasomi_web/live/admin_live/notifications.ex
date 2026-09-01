@@ -117,7 +117,7 @@ defmodule WasomiWeb.AdminLive.Notifications do
 
               <div class="flex shrink-0 items-center gap-2">
                 <button
-                  :if={notification.course}
+                  :if={NotificationCTA.admin_cta?(notification)}
                   type="button"
                   phx-click="visit_course"
                   phx-value-id={notification.id}

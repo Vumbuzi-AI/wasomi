@@ -685,6 +685,42 @@ defmodule Wasomi.CatalogTest do
       refute_enqueued(worker: TranscribeLecture)
     end
 
+    test "resource names are tagged with their module and lecture position" do
+      course_module = course_module_fixture(position: 2)
+
+      {:ok, lecture} =
+        Catalog.create_lecture_content(
+          %{module_id: course_module.id, position: 3, title: "Tagged", description: "d"},
+          [
+            %{
+              kind: :link,
+              name: "Ten steps to barcode implementation.pdf",
+              url: "https://example.com/x"
+            }
+          ],
+          []
+        )
+
+      assert [%{name: "[M2·L3] Ten steps to barcode implementation.pdf"}] = lecture.resources
+
+      # Re-saving reuses the already-tagged name and must not double-prefix it.
+      {:ok, updated} =
+        Catalog.update_lecture_content(
+          lecture,
+          %{title: "Tagged"},
+          [
+            %{
+              kind: :link,
+              name: "[M2·L3] Ten steps to barcode implementation.pdf",
+              url: "https://example.com/x"
+            }
+          ],
+          []
+        )
+
+      assert [%{name: "[M2·L3] Ten steps to barcode implementation.pdf"}] = updated.resources
+    end
+
     test "course outlines preload ordered resources and questions" do
       course = course_fixture()
       course_module = course_module_fixture(course_id: course.id, position: 1)

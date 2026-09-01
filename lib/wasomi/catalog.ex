@@ -732,7 +732,44 @@ defmodule Wasomi.Catalog do
   end
 
   defp insert_resources(lecture_id, resources) do
-    insert_content_records(LectureResource, lecture_id, resources)
+    insert_content_records(LectureResource, lecture_id, tag_resource_names(lecture_id, resources))
+  end
+
+  # Every resource's display name is prefixed with its lesson's position —
+  # `[M2·L3] Ten steps to barcode implementation.pdf` — so the course-wide
+  # resource list stays traceable to its lesson while keeping the original
+  # document title. Lecture content is saved by delete-and-reinsert, so a
+  # stale tag from a previous position is stripped before the current one is
+  # applied. If the lecture has no resolvable position yet, names pass through
+  # untouched.
+  @resource_name_tag ~r/^\[M\d+·L\d+\]\s*/u
+
+  defp tag_resource_names(lecture_id, resources) do
+    case resource_name_prefix(lecture_id) do
+      nil ->
+        resources
+
+      prefix ->
+        Enum.map(resources, fn attrs ->
+          attrs = Map.new(attrs)
+          original = attrs |> Map.get(:name, Map.get(attrs, "name", "")) |> to_string()
+          Map.put(attrs, :name, prefix <> String.replace(original, @resource_name_tag, ""))
+        end)
+    end
+  end
+
+  defp resource_name_prefix(lecture_id) do
+    Repo.one(
+      from(l in Lecture,
+        join: m in assoc(l, :module),
+        where: l.id == ^lecture_id and not is_nil(l.position) and not is_nil(m.position),
+        select: {m.position, l.position}
+      )
+    )
+    |> case do
+      {module_position, lecture_position} -> "[M#{module_position}·L#{lecture_position}] "
+      nil -> nil
+    end
   end
 
   defp insert_questions(lecture_id, questions) do

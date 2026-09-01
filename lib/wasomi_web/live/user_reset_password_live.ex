@@ -5,36 +5,73 @@ defmodule WasomiWeb.UserResetPasswordLive do
 
   def render(assigns) do
     ~H"""
-    <div class="mx-auto max-w-sm">
-      <.header class="text-center">Reset Password</.header>
+    <.auth_shell active={:login}>
+      <h1 class="mt-8 text-4xl font-semibold text-dark">Reset Password</h1>
+      <p class="mt-2 text-body">Choose a new password for your account.</p>
 
-      <.simple_form
+      <.form
         for={@form}
         id="reset_password_form"
         phx-submit="reset_password"
         phx-change="validate"
+        class="mt-8 space-y-5"
       >
-        <.error :if={@form.errors != []}>
-          Oops, something went wrong! Please check the errors below.
-        </.error>
+        <p
+          :if={@form.errors != []}
+          class="rounded-2xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-600"
+        >
+          Please fix the errors below and try again.
+        </p>
 
-        <.input field={@form[:password]} type="password" label="New password" required />
-        <.input
+        <.auth_input
+          field={@form[:password]}
+          type="password"
+          label="New password"
+          placeholder="Enter a new password"
+          required
+        >
+          <:icon><.icon name="hero-lock-closed" class="h-4 w-4" /></:icon>
+        </.auth_input>
+        <.auth_input
           field={@form[:password_confirmation]}
           type="password"
           label="Confirm new password"
+          placeholder="Re-enter the new password"
           required
-        />
-        <:actions>
-          <.button phx-disable-with="Resetting..." class="w-full">Reset Password</.button>
-        </:actions>
-      </.simple_form>
+        >
+          <:icon><.icon name="hero-lock-closed" class="h-4 w-4" /></:icon>
+        </.auth_input>
 
-      <p class="text-center text-sm mt-4">
-        <.link href={~p"/users/register"}>Register</.link>
-        | <.link href={~p"/users/log_in"}>Log in</.link>
+        <button
+          type="submit"
+          phx-disable-with="Resetting..."
+          class="group inline-flex w-full items-center justify-center gap-2 rounded-full bg-slate-100 px-6 py-3.5 font-semibold text-dark transition hover:bg-dark hover:text-white phx-submit-loading:opacity-75"
+        >
+          Reset Password
+          <svg
+            class="h-4 w-4"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" />
+          </svg>
+        </button>
+      </.form>
+
+      <p class="mt-6 text-center text-sm text-body">
+        <.link href={~p"/users/register"} class="font-semibold text-dark underline hover:text-primary">
+          Register
+        </.link>
+        <span class="mx-1 text-black/20">|</span>
+        <.link href={~p"/users/log_in"} class="font-semibold text-dark underline hover:text-primary">
+          Log in
+        </.link>
       </p>
-    </div>
+    </.auth_shell>
     """
   end
 

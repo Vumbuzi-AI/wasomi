@@ -350,6 +350,314 @@ Hooks.CaptureGuard = {
   },
 };
 
+Hooks.PdfDeck = {
+  mounted() {
+    this.src = this.el.dataset.src;
+    this.title = this.el.dataset.title || "PDF";
+    this.viewerSrc = this.el.dataset.viewerSrc || "/assets/pdf.min.mjs";
+    this.workerSrc = this.el.dataset.workerSrc || "/assets/pdf.worker.min.mjs";
+    this.storageKey = `wasomi-pdf-deck:${this.src || this.el.id}`;
+    this.zoomLevel = Number(
+      window.sessionStorage.getItem(`${this.storageKey}:zoom`) || 1,
+    );
+    if (!Number.isFinite(this.zoomLevel)) this.zoomLevel = 1;
+    this.pageNumber = 1;
+    this.pageCount = 0;
+    this.renderToken = 0;
+    this.visible = false;
+    this.touchStartX = null;
+    this.resizeTimer = null;
+    this.el.tabIndex = 0;
+    this.el.classList.add("outline-none");
+    this.renderShell();
+
+    this.setActiveDeck = () => {
+      window.__wasomiActivePdfDeck = this;
+    };
+    this.el.addEventListener("focusin", this.setActiveDeck);
+    this.el.addEventListener("pointerenter", this.setActiveDeck);
+    this.el.addEventListener("click", this.setActiveDeck);
+
+    this.onKeydown = (event) => this.handleKeydown(event);
+    document.addEventListener("keydown", this.onKeydown);
+
+    this.onTouchStart = (event) => {
+      this.setActiveDeck();
+      this.touchStartX = event.changedTouches?.[0]?.clientX ?? null;
+    };
+    this.onTouchEnd = (event) => this.handleTouchEnd(event);
+    this.el.addEventListener("touchstart", this.onTouchStart, { passive: true });
+    this.el.addEventListener("touchend", this.onTouchEnd, { passive: true });
+
+    this.observer = new ResizeObserver(() => this.scheduleRender());
+    this.observer.observe(this.viewport);
+
+    this.intersectionObserver = new IntersectionObserver(
+      ([entry]) => {
+        this.visible = entry?.isIntersecting || false;
+      },
+      { threshold: 0.35 },
+    );
+    this.intersectionObserver.observe(this.el);
+
+    this.onOrientationChange = () => this.scheduleRender();
+    window.addEventListener("orientationchange", this.onOrientationChange);
+
+    this.loadDocument();
+  },
+
+  destroyed() {
+    document.removeEventListener("keydown", this.onKeydown);
+    this.el.removeEventListener("focusin", this.setActiveDeck);
+    this.el.removeEventListener("pointerenter", this.setActiveDeck);
+    this.el.removeEventListener("click", this.setActiveDeck);
+    this.el.removeEventListener("touchstart", this.onTouchStart);
+    this.el.removeEventListener("touchend", this.onTouchEnd);
+    window.removeEventListener("orientationchange", this.onOrientationChange);
+    window.clearTimeout(this.resizeTimer);
+    this.observer?.disconnect();
+    this.intersectionObserver?.disconnect();
+    this.renderTask?.cancel?.();
+    this.loadingTask?.destroy?.();
+    this.pdf?.destroy?.();
+    if (window.__wasomiActivePdfDeck === this) window.__wasomiActivePdfDeck = null;
+  },
+
+  renderShell() {
+    this.el.replaceChildren();
+    this.el.classList.add("rounded-b-2xl");
+
+    this.viewerBody = document.createElement("div");
+    this.viewerBody.className = "relative";
+
+    this.viewport = document.createElement("div");
+    this.viewport.className =
+      "h-[min(72vh,calc(100vh-9rem))] min-h-[360px] overflow-auto bg-surface px-3 py-4 sm:px-5";
+
+    this.canvasFrame = document.createElement("div");
+    this.canvasFrame.className =
+      "mx-auto flex min-h-[360px] w-full items-center justify-center rounded-2xl border border-black/10 bg-white p-2";
+
+    this.status = document.createElement("p");
+    this.status.className = "text-sm font-medium text-muted";
+    this.status.textContent = "Loading PDF...";
+    this.canvasFrame.append(this.status);
+    this.viewport.append(this.canvasFrame);
+
+    this.prevOverlayButton = this.buildOverlayButton("Previous page", "<", () =>
+      this.goTo(this.pageNumber - 1),
+    );
+    this.prevOverlayButton.classList.add("left-3");
+    this.nextOverlayButton = this.buildOverlayButton("Next page", ">", () =>
+      this.goTo(this.pageNumber + 1),
+    );
+    this.nextOverlayButton.classList.add("right-3");
+    this.viewerBody.append(this.viewport, this.prevOverlayButton, this.nextOverlayButton);
+
+    this.controls = document.createElement("div");
+    this.controls.className =
+      "flex flex-wrap items-center justify-center gap-3 border-t border-black/10 bg-white px-4 py-3";
+
+    this.prevButton = this.buildControlButton("Previous", () => this.goTo(this.pageNumber - 1));
+    this.counter = document.createElement("span");
+    this.counter.className =
+      "min-w-16 text-center text-sm font-semibold tabular-nums text-muted";
+    this.counter.textContent = "0 / 0";
+    this.nextButton = this.buildControlButton("Next", () => this.goTo(this.pageNumber + 1));
+    this.zoomOutButton = this.buildControlButton("-", () => this.nudgeZoom(-0.1));
+    this.zoomOutButton.setAttribute("aria-label", "Zoom out");
+    this.zoomLabel = document.createElement("span");
+    this.zoomLabel.className =
+      "min-w-14 text-center text-sm font-semibold tabular-nums text-muted";
+    this.zoomInButton = this.buildControlButton("+", () => this.nudgeZoom(0.1));
+    this.zoomInButton.setAttribute("aria-label", "Zoom in");
+
+    const zoomControls = document.createElement("div");
+    zoomControls.className = "flex items-center gap-1";
+    zoomControls.append(this.zoomOutButton, this.zoomLabel, this.zoomInButton);
+
+    this.controls.append(
+      this.prevButton,
+      this.counter,
+      this.nextButton,
+      zoomControls,
+    );
+    this.el.append(this.viewerBody, this.controls);
+    this.syncControls();
+  },
+
+  buildControlButton(label, onClick) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className =
+      "min-h-10 rounded-full border border-black/10 px-4 text-sm font-semibold text-ink transition hover:border-primary/40 hover:bg-mint/40 hover:text-primary disabled:cursor-not-allowed disabled:opacity-40";
+    button.textContent = label;
+    button.addEventListener("click", onClick);
+    return button;
+  },
+
+  buildOverlayButton(label, glyph, onClick) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.setAttribute("aria-label", label);
+    button.className =
+      "absolute top-1/2 z-10 hidden h-11 w-11 -translate-y-1/2 place-items-center rounded-full border border-black/10 bg-white/90 text-xl font-semibold leading-none text-primary shadow-sm backdrop-blur transition hover:border-primary/30 hover:bg-mint focus:outline-none focus:ring-2 focus:ring-primary/25 disabled:pointer-events-none disabled:opacity-0 sm:grid";
+    button.textContent = glyph;
+    button.addEventListener("click", onClick);
+    return button;
+  },
+
+  async loadDocument() {
+    if (!this.src) return this.fallback();
+
+    try {
+      const pdfjs = await import(this.viewerSrc);
+      pdfjs.GlobalWorkerOptions.workerSrc = this.workerSrc;
+      this.loadingTask = pdfjs.getDocument({ url: this.src });
+      this.pdf = await this.loadingTask.promise;
+      this.pageCount = this.pdf.numPages;
+      this.pageNumber = 1;
+      this.syncControls();
+      await this.renderPage();
+    } catch (error) {
+      console.error("PDF deck failed to load", error);
+      this.fallback();
+    }
+  },
+
+  async renderPage() {
+    if (!this.pdf || !this.viewport) return;
+
+    const token = ++this.renderToken;
+    this.renderTask?.cancel?.();
+
+    try {
+      const page = await this.pdf.getPage(this.pageNumber);
+      if (token !== this.renderToken) return;
+
+      const baseViewport = page.getViewport({ scale: 1 });
+      const availableWidth = Math.max(280, this.viewport.clientWidth - 40);
+      const availableHeight = Math.max(260, this.viewport.clientHeight - 40);
+      const widthScale = availableWidth / baseViewport.width;
+      const heightScale = availableHeight / baseViewport.height;
+      const fitPageScale = Math.min(widthScale, heightScale);
+      const scale = fitPageScale * this.zoomLevel;
+      const viewport = page.getViewport({ scale });
+      const outputScale = window.devicePixelRatio || 1;
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+
+      canvas.width = Math.floor(viewport.width * outputScale);
+      canvas.height = Math.floor(viewport.height * outputScale);
+      canvas.style.width = `${Math.floor(viewport.width)}px`;
+      canvas.style.height = `${Math.floor(viewport.height)}px`;
+      canvas.className = "block max-w-full bg-white";
+
+      this.renderTask = page.render({
+        canvasContext: context,
+        viewport,
+        transform:
+          outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null,
+      });
+
+      await this.renderTask.promise;
+      if (token !== this.renderToken) return;
+
+      this.canvasFrame.replaceChildren(canvas);
+      this.canvasFrame.classList.toggle("items-start", viewport.height > availableHeight);
+      this.canvasFrame.classList.toggle("items-center", viewport.height <= availableHeight);
+      this.lastFitPageScale = fitPageScale;
+      this.lastWidthScale = widthScale;
+      this.syncControls();
+    } catch (error) {
+      if (error?.name === "RenderingCancelledException") return;
+      console.error("PDF deck failed to render", error);
+      this.fallback();
+    }
+  },
+
+  scheduleRender() {
+    if (!this.pdf) return;
+    window.clearTimeout(this.resizeTimer);
+    this.resizeTimer = window.setTimeout(() => this.renderPage(), 150);
+  },
+
+  goTo(pageNumber) {
+    if (!this.pdf) return;
+
+    const nextPage = Math.min(this.pageCount, Math.max(1, pageNumber));
+    if (nextPage === this.pageNumber) return;
+
+    this.pageNumber = nextPage;
+    this.syncControls();
+    this.renderPage();
+  },
+
+  nudgeZoom(delta) {
+    this.zoomLevel = Math.min(2.5, Math.max(0.6, this.zoomLevel + delta));
+    this.persistZoom();
+    this.syncControls();
+    this.renderPage();
+  },
+
+  persistZoom() {
+    window.sessionStorage.setItem(`${this.storageKey}:zoom`, String(this.zoomLevel));
+  },
+
+  syncControls() {
+    if (this.counter) this.counter.textContent = `${this.pageNumber} / ${this.pageCount || 0}`;
+    if (this.prevButton) this.prevButton.disabled = this.pageNumber <= 1 || !this.pageCount;
+    if (this.nextButton)
+      this.nextButton.disabled = this.pageNumber >= this.pageCount || !this.pageCount;
+    if (this.prevOverlayButton)
+      this.prevOverlayButton.disabled = this.pageNumber <= 1 || !this.pageCount;
+    if (this.nextOverlayButton)
+      this.nextOverlayButton.disabled = this.pageNumber >= this.pageCount || !this.pageCount;
+    if (this.zoomLabel) this.zoomLabel.textContent = `${Math.round(this.zoomLevel * 100)}%`;
+    if (this.zoomOutButton) this.zoomOutButton.disabled = this.zoomLevel <= 0.6;
+    if (this.zoomInButton) this.zoomInButton.disabled = this.zoomLevel >= 2.5;
+  },
+
+  handleKeydown(event) {
+    const activeDeck = window.__wasomiActivePdfDeck;
+    const focusedHere = this.el.contains(document.activeElement);
+    if (!focusedHere && (!this.visible || activeDeck !== this)) return;
+    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
+      return;
+    }
+
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      this.goTo(this.pageNumber - 1);
+    } else if (event.key === "ArrowRight") {
+      event.preventDefault();
+      this.goTo(this.pageNumber + 1);
+    }
+  },
+
+  handleTouchEnd(event) {
+    if (this.touchStartX == null) return;
+
+    const endX = event.changedTouches?.[0]?.clientX;
+    const delta = Number.isFinite(endX) ? endX - this.touchStartX : 0;
+    this.touchStartX = null;
+
+    if (Math.abs(delta) < 40) return;
+    this.goTo(delta < 0 ? this.pageNumber + 1 : this.pageNumber - 1);
+  },
+
+  fallback() {
+    this.renderTask?.cancel?.();
+    this.observer?.disconnect();
+    const iframe = document.createElement("iframe");
+    iframe.src = this.src;
+    iframe.title = this.title;
+    iframe.loading = "lazy";
+    iframe.className = "h-[70vh] min-h-[520px] w-full bg-white";
+    this.el.replaceChildren(iframe);
+  },
+};
+
 // The lesson player draws its own controls instead of handing the learner the
 // browser's. Two reasons: native chrome offers a scrub bar that invites
 // skipping ahead, which the seek clamp then silently undoes — reading as a
@@ -2067,23 +2375,46 @@ Hooks.ProductTour = {
     const factory = window.driver && window.driver.js && window.driver.js.driver;
     if (!factory) return;
 
+    // Keep in sync with @nav_items in student_components.ex — every sidebar
+    // entry gets a step (missing selectors are filtered out below).
     const steps = [
-      ["#student-nav-dashboard", "Your dashboard", "Your learning home — progress and courses land here once you enrol."],
-      ["#student-nav-browse", "Browse the catalog", "Every course we offer. Pick one and enrol to get started."],
-      ["#student-nav-courses", "My courses", "Jump back into any course you're enrolled in from here."],
-      ["#student-nav-certificates", "Certificates", "Complete a course and download your certificate here."],
-      ["#student-nav-account", "Your account", "Update your name, profile details and password any time."],
+      ["#student-nav-dashboard", "Dashboard", "Your learning home. Progress and the courses you're taking show up here."],
+      ["#student-nav-courses", "My courses", "Jump back into any course you're enrolled in."],
+      ["#student-nav-discussions", "Discussions", "Chat with classmates and mentors in each course's discussion space."],
+      ["#student-nav-certificates", "Certificates", "Finish a course and download your certificate here."],
+      ["#student-nav-receipts", "Receipts", "Download a PDF receipt for any course you've paid for."],
+      ["#student-nav-notifications", "Notifications", "New enrolments, discussion mentions and learning reminders land here."],
+      ["#student-nav-browse", "Browse catalog", "Every course we offer. Pick one and enrol to get started."],
+      ["#student-nav-refer", "Refer a friend", "Invite a friend to Wasomi and see when they join."],
+      ["#student-nav-account", "Account", "Update your name, profile details and password any time."],
     ]
       .filter(([selector]) => document.querySelector(selector))
       .map(([element, title, description]) => ({ element, popover: { title, description } }));
 
     if (steps.length === 0) return;
 
-    factory({
+    const tour = factory({
       showProgress: true,
+      doneBtnText: "Done",
       steps,
-      onDestroyed: () => this.pushEvent("tour_completed"),
-    }).drive();
+      // Add a "Skip tour" control to every popover — the tour can be left
+      // from any step, not just before it starts.
+      onPopoverRender: (popover) => {
+        const skip = document.createElement("button");
+        skip.type = "button";
+        skip.textContent = "Skip tour";
+        skip.className = "driver-tour-skip";
+        skip.addEventListener("click", () => tour.destroy());
+        (popover.footerButtons || popover.footer)?.prepend(skip);
+      },
+      // A replay from the sidebar shouldn't re-record completion (and the
+      // current LiveView may not handle the event); first-run only.
+      onDestroyed: () => {
+        if (!("replay" in this.el.dataset)) this.pushEvent("tour_completed");
+      },
+    });
+
+    tour.drive();
   },
 };
 
@@ -2887,6 +3218,22 @@ Hooks.PhoneInput = {
     if (this.hidden.value) this.iti.setNumber(this.hidden.value);
 
     this.sync = () => {
+      // type="tel" does not filter characters — drop anything that isn't a
+      // plausible phone character so letters never make it into the field.
+      const cleaned = this.field.value.replace(/[^\d\s()+.\-]/g, "");
+      if (cleaned !== this.field.value) {
+        const caret = Math.max(
+          0,
+          (this.field.selectionStart || 0) - (this.field.value.length - cleaned.length),
+        );
+        this.field.value = cleaned;
+        try {
+          this.field.setSelectionRange(caret, caret);
+        } catch (_e) {
+          // some input types disallow setSelectionRange — safe to ignore
+        }
+      }
+
       const typed = this.field.value.trim();
       let e164 = "";
       try {

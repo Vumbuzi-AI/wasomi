@@ -1085,7 +1085,7 @@ defmodule WasomiWeb.StudyHubLive do
           id="study-hub-scroll-boundary"
           phx-hook="ScrollContainerOnKeyChange"
           data-scroll-key={study_hub_scroll_key(assigns)}
-          class={if @embedded?, do: "w-full p-5 lg:p-8", else: "w-full px-5 py-8 lg:px-8"}
+          class={if @embedded?, do: "w-full", else: "w-full px-5 py-8 lg:px-8"}
         >
           <h1 :if={!@embedded?} class="text-3xl font-semibold tracking-tight text-ink sm:text-4xl">
             Study

@@ -24,18 +24,16 @@ defmodule WasomiWeb.ReferLive do
   def render(assigns) do
     ~H"""
     <.student_layout active={:refer} current_user={@current_user}>
-      <div class="mx-auto max-w-3xl px-5 py-10 lg:px-10 lg:py-12">
-        <div class="rounded-3xl border border-black/5 bg-white p-6 shadow-card sm:p-8">
-          <span class="grid h-12 w-12 place-items-center rounded-full bg-mint text-primary">
-            <.icon name="hero-user-plus" class="h-6 w-6" />
-          </span>
-          <h1 class="mt-4 text-3xl font-semibold text-ink sm:text-4xl">Refer a friend to Wasomi</h1>
-          <p class="mt-2 max-w-xl text-body">
-            Share your link with someone who'd get value from Wasomi. When they sign up through it,
-            we'll credit the referral to you.
-          </p>
+      <div class="mx-auto max-w-3xl px-5 py-8 lg:px-8">
+        <.learner_page_header eyebrow="Referrals" title="Refer a friend to Wasomi">
+          <:subtitle>
+            Share your link with someone who'd get value from Wasomi. When they sign up through
+            it, we'll credit the referral to you.
+          </:subtitle>
+        </.learner_page_header>
 
-          <div class="mt-6">
+        <div class="mt-8 rounded-3xl border border-black/5 bg-white p-6 shadow-card sm:p-8">
+          <div>
             <label class="text-sm font-semibold text-ink">Your referral link</label>
             <div class="mt-2 flex flex-col gap-2 sm:flex-row">
               <input

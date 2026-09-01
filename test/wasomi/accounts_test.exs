@@ -107,7 +107,7 @@ defmodule Wasomi.AccountsTest do
         })
 
       assert %{
-               email: ["must have the @ sign and no spaces"],
+               email: ["must be a valid email address"],
                password: ["should be at least 6 character(s)"]
              } = errors_on(changeset)
     end
@@ -240,7 +240,7 @@ defmodule Wasomi.AccountsTest do
       {:error, changeset} =
         Accounts.apply_user_email(user, valid_user_password(), %{email: "not valid"})
 
-      assert %{email: ["must have the @ sign and no spaces"]} = errors_on(changeset)
+      assert %{email: ["must be a valid email address"]} = errors_on(changeset)
     end
 
     test "validates maximum value for email for security", %{user: user} do

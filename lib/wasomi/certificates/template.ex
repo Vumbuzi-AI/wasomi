@@ -120,6 +120,10 @@ defmodule Wasomi.Certificates.Template do
   attr :qr_data_uri, :string, default: nil
   attr :preview?, :boolean, default: false
 
+  # A sample/marketing render (e.g. the course page preview) — suppresses the
+  # printed GDTI so a non-issued certificate never displays a real identifier.
+  attr :sample?, :boolean, default: false
+
   def certificate(assigns) do
     # `@name` inside `~H` always reads `assigns.name`, never a module
     # attribute — so the compiled font CSS has to be threaded through as an
@@ -127,7 +131,10 @@ defmodule Wasomi.Certificates.Template do
     # `Phoenix.Component.assign/2`: `render_html/1` calls this function
     # directly with a bare map rather than through `<.certificate .../>`, so
     # the change-tracking metadata `assign/2` requires isn't present.
-    assigns = Map.put(assigns, :font_face_css, @font_face_css)
+    assigns =
+      assigns
+      |> Map.put(:font_face_css, @font_face_css)
+      |> Map.put_new(:sample?, false)
 
     ~H"""
     <!doctype html>
@@ -399,7 +406,9 @@ defmodule Wasomi.Certificates.Template do
                 <span class="qr-eye tr"></span>
                 <span class="qr-eye bl"></span>
               </div>
-              <div class="serial">(253) {@gdti}</div>
+              <div :if={not @sample? and @gdti not in [nil, ""]} class="serial">
+                (253) {@gdti}
+              </div>
             </div>
 
             <div class="top-rule"></div>

@@ -407,3 +407,18 @@ body {
   background: #fff7ed;
   color: #f97316;
 }
+
+/* driver.js product tour — "Skip tour" control added to every popover footer */
+.driver-popover .driver-tour-skip {
+  margin-right: auto;
+  background: none;
+  border: 0;
+  padding: 0 4px;
+  font-size: 13px;
+  color: #737373;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.driver-popover .driver-tour-skip:hover {
+  color: #012c6a;
+}

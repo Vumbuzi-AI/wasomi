@@ -86,6 +86,13 @@ defmodule WasomiWeb.UserSettingsLive do
                       placeholder="A short introduction — up to 500 characters."
                     />
 
+                    <.input
+                      field={@profile_form[:phone]}
+                      type="tel"
+                      label="Phone number"
+                      placeholder="+254 712 345 678"
+                    />
+
                     <.country_combobox field={@profile_form[:country]} />
 
                     <div class="grid gap-6 sm:grid-cols-2">

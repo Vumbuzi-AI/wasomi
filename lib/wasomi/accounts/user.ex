@@ -334,9 +334,11 @@ defmodule Wasomi.Accounts.User do
       :occupation,
       :experience_level,
       :learning_goal,
-      :avatar_key
+      :avatar_key,
+      :phone
     ])
     |> normalize_names()
+    |> validate_optional_phone()
     |> reject_blank_name_change([:first_name, :last_name])
     |> validate_length(:first_name, min: 2, max: 80)
     |> validate_length(:last_name, min: 2, max: 80)

@@ -50,6 +50,12 @@ defmodule WasomiWeb.AdminComponents do
       label: "Landing page",
       icon: "hero-photo",
       path: "/admin/landing-images"
+    },
+    %{
+      key: :settings,
+      label: "Account settings",
+      icon: "hero-cog-6-tooth",
+      path: "/admin/settings"
     }
   ]
 
@@ -59,7 +65,7 @@ defmodule WasomiWeb.AdminComponents do
   ## Attributes
 
     * `:active` - key of the active nav item (`:overview`, `:courses`,
-      `:students`, `:payments`, `:analytics`, `:landing_images`). Defaults
+      `:students`, `:payments`, `:analytics`, `:landing_images`, `:settings`). Defaults
       to `nil`.
     * `:current_user` - the signed-in admin, used for the profile footer.
   """
@@ -130,8 +136,12 @@ defmodule WasomiWeb.AdminComponents do
             navigate={~p"/admin/settings"}
             class="sidebar-row group relative flex items-center gap-3 rounded-2xl bg-surface px-3 py-3 transition hover:bg-mint"
           >
-            <span class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-mint font-semibold uppercase text-primary">
-              {String.first(@current_user.name || @current_user.email)}
+            <span class="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-full bg-mint font-semibold uppercase text-primary">
+              <%= if @current_user.avatar_key do %>
+                <img src={@current_user.avatar_key} alt="" class="h-full w-full object-cover" />
+              <% else %>
+                {String.first(@current_user.name || @current_user.email)}
+              <% end %>
             </span>
             <div class="sidebar-label min-w-0">
               <p class="truncate text-sm font-semibold text-ink">

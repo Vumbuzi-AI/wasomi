@@ -28,6 +28,7 @@ defmodule WasomiWeb.CatalogLive.Index do
     page =
       Catalog.list_courses_page(
         status: :published,
+        public_only: true,
         search: search,
         price: price,
         page: page_number

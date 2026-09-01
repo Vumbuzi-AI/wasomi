@@ -149,6 +149,14 @@ defmodule WasomiWeb.CourseLive.FormComponent do
 
         <.input field={@form[:is_free]} type="checkbox" label="This course is free" />
 
+        <div class="rounded-lg border border-black/10 bg-soft p-4">
+          <.input field={@form[:is_internal]} type="checkbox" label="Internal course" />
+          <p class="mt-2 text-sm text-muted">
+            Hide this course from the catalog. Learners can only access it when an admin grants
+            them access.
+          </p>
+        </div>
+
         <div :if={not free_course?(@form)} class="space-y-2">
           <.input
             field={@form[:price_minor]}
@@ -251,7 +259,7 @@ defmodule WasomiWeb.CourseLive.FormComponent do
 
         {:noreply,
          socket
-         |> put_flash(:info, "Course published — it's now visible in the public catalog.")
+         |> put_flash(:info, published_flash(course))
          |> assign(course: course, publish_checklist: nil)
          |> push_patch(to: socket.assigns.patch.(course))}
 
@@ -350,6 +358,12 @@ defmodule WasomiWeb.CourseLive.FormComponent do
   defp free_course?(form) do
     Form.normalize_value("checkbox", form[:is_free].value)
   end
+
+  defp published_flash(%{is_internal: true}) do
+    "Course published. It is internal, so learners still need granted access."
+  end
+
+  defp published_flash(_course), do: "Course published — it's now visible in the public catalog."
 
   defp normalize_price_params(params) do
     params = Map.new(params)

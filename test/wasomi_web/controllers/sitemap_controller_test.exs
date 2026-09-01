@@ -6,11 +6,13 @@ defmodule WasomiWeb.SitemapControllerTest do
   test "lists public pages and published courses only", %{conn: conn} do
     published = course_fixture(status: :published)
     draft = course_fixture(status: :draft)
+    internal = course_fixture(status: :published, is_internal: true)
 
     conn = get(conn, ~p"/sitemap.xml")
 
     assert response_content_type(conn, :xml) =~ "application/xml"
     assert response(conn, 200) =~ url(~p"/courses/#{published.slug}")
     refute response(conn, 200) =~ url(~p"/courses/#{draft.slug}")
+    refute response(conn, 200) =~ url(~p"/courses/#{internal.slug}")
   end
 end

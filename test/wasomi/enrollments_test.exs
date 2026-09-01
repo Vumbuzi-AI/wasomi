@@ -238,20 +238,51 @@ defmodule Wasomi.EnrollmentsTest do
       assert %{course_id: ["learner already has active access"]} = errors_on(changeset)
     end
 
-    test "refuses to grant access to a draft or archived course" do
+    test "allows access to a draft internal course" do
+      learner = user_fixture()
+      admin = admin_fixture()
+      course = course_fixture(status: :draft, is_internal: true)
+
+      assert {:ok, enrollment} =
+               Enrollments.grant_access(learner, admin, %{
+                 "course_id" => course.id,
+                 "reason" => "Manual enrollment for an internal pilot"
+               })
+
+      assert enrollment.status == :active
+      assert Enrollments.can_access_course?(learner, course)
+    end
+
+    test "allows access to a published internal course" do
+      learner = user_fixture()
+      admin = admin_fixture()
+      course = course_fixture(status: :published, is_internal: true)
+
+      assert {:ok, enrollment} =
+               Enrollments.grant_access(learner, admin, %{
+                 "course_id" => course.id,
+                 "reason" => "Manual enrollment for an internal published course"
+               })
+
+      assert enrollment.status == :active
+      assert Enrollments.can_access_course?(learner, course)
+    end
+
+    test "refuses to grant access to a non-internal draft or archived course" do
       learner = user_fixture()
       admin = admin_fixture()
       draft = course_fixture(status: :draft)
       archived = course_fixture(status: :archived)
+      archived_internal = course_fixture(status: :archived, is_internal: true)
 
-      for course <- [draft, archived] do
+      for course <- [draft, archived, archived_internal] do
         assert {:error, changeset} =
                  Enrollments.grant_access(learner, admin, %{
                    "course_id" => course.id,
                    "reason" => "Manual enrollment for a partner scholarship"
                  })
 
-        assert %{course_id: ["is not published"]} = errors_on(changeset)
+        assert %{course_id: ["must be published or marked internal"]} = errors_on(changeset)
         refute Enrollments.can_access_course?(learner, course)
       end
     end

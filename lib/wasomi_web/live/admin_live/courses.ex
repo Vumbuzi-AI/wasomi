@@ -245,6 +245,12 @@ defmodule WasomiWeb.AdminLive.Courses do
                     <span class="absolute left-4 top-4 z-10">
                       <.status_badge status={row.course.status} />
                     </span>
+                    <span
+                      :if={row.course.is_internal}
+                      class="absolute left-4 top-14 z-10 inline-flex items-center rounded-full bg-white/95 px-2.5 py-1 text-xs font-semibold text-ink shadow-sm"
+                    >
+                      Internal
+                    </span>
                     <div class="absolute right-4 top-4 z-10 flex items-center gap-2">
                       <.link
                         patch={~p"/admin/courses/#{row.course.slug}/edit"}

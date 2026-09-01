@@ -44,6 +44,19 @@ defmodule WasomiWeb.AdminLive.StudentShowTest do
       refute has_element?(view, "#grant-access-modal option", already_enrolled.title)
     end
 
+    test "offers draft internal courses because they are grant-only", %{conn: conn} do
+      learner = user_fixture()
+      internal = course_fixture(title: "Internal onboarding", status: :draft, is_internal: true)
+      _draft_public = course_fixture(title: "Unready public course", status: :draft)
+
+      {:ok, view, _html} = live(conn, ~p"/admin/students/#{learner.id}")
+
+      view |> element("button", "Grant access") |> render_click()
+
+      assert has_element?(view, "#grant-access-modal option", internal.title)
+      refute has_element?(view, "#grant-access-modal option", "Unready public course")
+    end
+
     test "grants access, records the audit, and notifies the learner", %{conn: conn} do
       admin = user_fixture(%{name: "Admin Sean"})
       {:ok, admin} = Wasomi.Accounts.update_user_role(admin, :admin)

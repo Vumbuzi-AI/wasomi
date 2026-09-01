@@ -45,6 +45,29 @@ if System.get_env("PHX_SERVER") do
   config :wasomi, WasomiWeb.Endpoint, server: true
 end
 
+if config_env() != :test do
+  postal_api_key = System.get_env("POSTAL_API_KEY")
+
+  if postal_api_key || config_env() == :prod do
+    if config_env() == :prod && postal_api_key in [nil, ""] do
+      raise """
+      environment variable POSTAL_API_KEY is missing.
+      Create a MailSafi Postal server API key and expose it to the release.
+      """
+    end
+
+    config :wasomi, :email_delivery_provider, Wasomi.Postal
+
+    config :wasomi, Wasomi.Postal,
+      api_url:
+        System.get_env("POSTAL_API_URL") ||
+          "https://postalmail.mailsafi.com/api/v1/send/message",
+      api_key: postal_api_key,
+      from: System.get_env("POSTAL_FROM_ADDRESS") || "no-reply@gs1kenya.org",
+      from_name: System.get_env("POSTAL_FROM_NAME") || "Wasomi"
+  end
+end
+
 if paystack_secret_key = System.get_env("PAYSTACK_SECRET_KEY") do
   config :wasomi, paystack_secret_key: paystack_secret_key
 end

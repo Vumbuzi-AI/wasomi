@@ -7,11 +7,13 @@ defmodule WasomiWeb.CatalogLiveTest do
   test "lists published courses and hides drafts", %{conn: conn} do
     published = course_fixture(status: :published, title: "Published Course")
     _draft = course_fixture(status: :draft, title: "Draft Course")
+    _internal = course_fixture(status: :published, title: "Internal Course", is_internal: true)
 
     {:ok, _view, html} = live(conn, ~p"/courses")
 
     assert html =~ published.title
     refute html =~ "Draft Course"
+    refute html =~ "Internal Course"
   end
 
   test "shows an ordered public curriculum without video asset identifiers", %{conn: conn} do

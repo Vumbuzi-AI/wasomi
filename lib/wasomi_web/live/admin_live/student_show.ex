@@ -74,7 +74,7 @@ defmodule WasomiWeb.AdminLive.StudentShow do
 
     grantable_courses =
       Catalog.list_courses()
-      |> Enum.filter(&(&1.status == :published))
+      |> Enum.filter(&Catalog.grant_access_allowed?/1)
       |> Enum.reject(&MapSet.member?(enrolled_course_ids, &1.id))
 
     socket

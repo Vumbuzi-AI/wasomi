@@ -31,6 +31,7 @@ defmodule WasomiWeb.CatalogLive.Portal do
     page =
       Catalog.list_courses_page(
         status: :published,
+        public_only: true,
         search: search,
         price: price,
         exclude_ids: exclude_ids,

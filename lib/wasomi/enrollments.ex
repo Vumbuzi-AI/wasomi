@@ -319,11 +319,13 @@ defmodule Wasomi.Enrollments do
 
   defp do_grant_access(learner, course, admin, reason, changeset) do
     cond do
-      # Draft courses aren't ready for learners yet, and archived courses are
-      # retired — both stay off the public catalog/checkout for the same
-      # reason, so admin-granted access shouldn't offer a side door around it.
-      course.status != :published ->
-        {:error, Ecto.Changeset.add_error(changeset, :course_id, "is not published")}
+      not Catalog.grant_access_allowed?(course) ->
+        {:error,
+         Ecto.Changeset.add_error(
+           changeset,
+           :course_id,
+           "must be published or marked internal"
+         )}
 
       can_access_course?(learner, course) ->
         {:error,

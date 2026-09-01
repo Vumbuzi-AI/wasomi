@@ -752,7 +752,7 @@ defmodule Wasomi.AccountsTest do
     end
 
     test "confirms the email with a valid token", %{user: user, token: token} do
-      assert_email_sent(subject: "Confirmation instructions")
+      assert_email_sent(subject: "Confirm your Wasomi account")
       assert {:ok, confirmed_user} = Accounts.confirm_user(token)
       assert confirmed_user.confirmed_at
       assert confirmed_user.confirmed_at != user.confirmed_at

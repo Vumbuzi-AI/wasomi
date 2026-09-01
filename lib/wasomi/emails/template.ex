@@ -57,9 +57,7 @@ defmodule Wasomi.Emails.Template do
             </tr>
           </table>
           <div style="margin-top:28px;text-align:center;font-size:12px;color:#{@muted};line-height:1.6;font-family:'Outfit',Helvetica,Arial,sans-serif;">
-            <p style="margin:0 0 4px;font-weight:600;color:#{@navy};">Wasomi Business Institute</p>
-            <p style="margin:0;">Practical business & technology learning for professionals.</p>
-            <p style="margin:8px 0 0;color:#94a3b8;">
+            <p style="margin:0;color:#94a3b8;">
               #{esc(assigns[:footer_note] || "If you did not request this email, you can safely ignore it.")}
             </p>
           </div>

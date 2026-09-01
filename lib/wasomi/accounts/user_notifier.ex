@@ -28,7 +28,7 @@ defmodule Wasomi.Accounts.UserNotifier do
   def deliver_confirmation_instructions(user, url) do
     name = recipient_name(user)
 
-    deliver(user.email, "Confirmation instructions", %{
+    deliver(user.email, "Confirm your Wasomi account", %{
       title: "Welcome to Wasomi! Let's confirm your email",
       intro: "Hi #{name},",
       body: [
@@ -280,7 +280,7 @@ defmodule Wasomi.Accounts.UserNotifier do
   def deliver_reset_password_instructions(user, url) do
     name = recipient_name(user)
 
-    deliver(user.email, "Reset password instructions", %{
+    deliver(user.email, "Reset your Wasomi password", %{
       title: "Need to reset your password?",
       intro: "Hi #{name},",
       body: [
@@ -297,7 +297,7 @@ defmodule Wasomi.Accounts.UserNotifier do
   def deliver_update_email_instructions(user, url) do
     name = recipient_name(user)
 
-    deliver(user.email, "Update email instructions", %{
+    deliver(user.email, "Confirm your new Wasomi email address", %{
       title: "Confirm your new email address",
       intro: "Hi #{name},",
       body: [

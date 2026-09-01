@@ -118,7 +118,7 @@ defmodule Wasomi.Emails.Template do
   end
 
   defp logo do
-    url = "#{WasomiWeb.Endpoint.url()}/images/logo.png"
+    url = "https://wasomi-ai.com/images/logo.png"
 
     """
     <div style="display:block;margin-bottom:12px;">

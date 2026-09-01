@@ -1,7 +1,7 @@
 defmodule WasomiWeb.AdminLive.CourseShow do
   use WasomiWeb, :live_view
 
-  alias Wasomi.{Assessments, Catalog, Enrollments, Learning, Payments}
+  alias Wasomi.{Accounts, Assessments, Catalog, Enrollments, Learning, Payments}
   alias Wasomi.Catalog.{CourseModule, Lecture}
   alias Wasomi.Catalog.PublishGuard
   alias WasomiWeb.CourseLive
@@ -15,6 +15,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
      |> assign(:modal, nil)
      |> assign(:course_module, nil)
      |> assign(:lecture, nil)
+     |> assign(:grant_access_form, nil)
      |> assign(:quiz_lecture_id, nil)
      |> assign(:quiz_modal_tab, :generate)
      |> assign(:form_title, nil)
@@ -47,6 +48,80 @@ defmodule WasomiWeb.AdminLive.CourseShow do
      socket
      |> assign(:modal, :course)
      |> assign(:form_title, "Edit course")}
+  end
+
+  def handle_event("open_grant_access", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:modal, :grant_access)
+     |> assign(
+       :grant_access_form,
+       to_form(Enrollments.change_grant_access(%{"course_id" => socket.assigns.course.id}))
+     )}
+  end
+
+  def handle_event("validate_grant_access", %{"grant_access_form" => params}, socket) do
+    params = Map.put(params, "course_id", socket.assigns.course.id)
+
+    form =
+      params
+      |> Enrollments.change_grant_access()
+      |> Map.put(:action, :validate)
+      |> to_form()
+
+    {:noreply, assign(socket, :grant_access_form, form)}
+  end
+
+  def handle_event(
+        "grant_access",
+        %{"learner_id" => learner_id, "grant_access_form" => params},
+        socket
+      ) do
+    params = Map.put(params, "course_id", socket.assigns.course.id)
+
+    case find_grantable_learner(socket.assigns.grantable_learners, learner_id) do
+      nil ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Choose a learner who does not already have access.")
+         |> assign(
+           :grant_access_form,
+           to_form(Enrollments.change_grant_access(params), action: :validate)
+         )}
+
+      learner ->
+        case Enrollments.grant_access(learner, socket.assigns.current_user, params) do
+          {:ok, _enrollment} ->
+            {:noreply,
+             socket
+             |> put_flash(
+               :info,
+               "Access granted. The learner has been notified by email and in-app."
+             )
+             |> load_course(socket.assigns.course.slug)
+             |> close_modal()}
+
+          {:error, %Ecto.Changeset{} = changeset} ->
+            {:noreply, assign(socket, :grant_access_form, to_form(changeset, action: :validate))}
+
+          {:error, :forbidden} ->
+            {:noreply,
+             put_flash(socket, :error, "You are not authorized to grant course access.")}
+        end
+    end
+  end
+
+  def handle_event("grant_access", %{"grant_access_form" => params}, socket) do
+    {:noreply,
+     socket
+     |> put_flash(:error, "Choose a learner who does not already have access.")
+     |> assign(
+       :grant_access_form,
+       to_form(
+         Enrollments.change_grant_access(Map.put(params, "course_id", socket.assigns.course.id)),
+         action: :validate
+       )
+     )}
   end
 
   def handle_event("publish_course", _params, socket) do
@@ -299,11 +374,14 @@ defmodule WasomiWeb.AdminLive.CourseShow do
     {:noreply, socket |> load_course(socket.assigns.course.slug) |> close_modal()}
   end
 
+  def handle_info({:email, _email}, socket), do: {:noreply, socket}
+
   defp close_modal(socket) do
     assign(socket,
       modal: nil,
       course_module: nil,
       lecture: nil,
+      grant_access_form: nil,
       quiz_lecture_id: nil,
       form_title: nil
     )
@@ -332,6 +410,12 @@ defmodule WasomiWeb.AdminLive.CourseShow do
         }
       end)
 
+    enrolled_user_ids = MapSet.new(enrollments, & &1.user_id)
+
+    grantable_learners =
+      Accounts.list_users(role: :learner)
+      |> Enum.reject(&MapSet.member?(enrolled_user_ids, &1.id))
+
     lecture_count = Enum.sum(Enum.map(course.modules, &length(&1.lectures)))
 
     socket
@@ -342,6 +426,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
     |> assign(:reviews, Wasomi.Reviews.list_course_reviews(course.id))
     |> assign(:students, students)
     |> assign(:student_count, length(enrollments))
+    |> assign(:grantable_learners, grantable_learners)
     |> assign(:lecture_count, lecture_count)
     |> assign(:revenue_minor, Payments.revenue_minor_for_course(course.id))
     |> assign(:draft_question_counts, Assessments.count_draft_questions_by_module(course.id))
@@ -358,6 +443,10 @@ defmodule WasomiWeb.AdminLive.CourseShow do
 
   defp module_ready_for_quiz_generation?(module, lecture_quiz_question_counts) do
     Enum.all?(module.lectures, &Map.has_key?(lecture_quiz_question_counts, &1.id))
+  end
+
+  defp find_grantable_learner(learners, learner_id) do
+    Enum.find(learners, &(to_string(&1.id) == to_string(learner_id)))
   end
 
   @impl true
@@ -845,7 +934,32 @@ defmodule WasomiWeb.AdminLive.CourseShow do
           aria-labelledby="students-tab"
           class="rounded-3xl border border-black/5 bg-white p-6 shadow-card lg:p-8"
         >
-          <h2 class="text-xl font-semibold text-ink">Enrolled students</h2>
+          <div class="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h2 class="text-xl font-semibold text-ink">Course access</h2>
+              <p class="mt-1 text-sm text-body">
+                Grant learners direct access to this course and track current enrollment.
+              </p>
+            </div>
+            <button
+              type="button"
+              phx-click="open_grant_access"
+              disabled={@course.status != :published || @grantable_learners == []}
+              title={
+                cond do
+                  @course.status != :published -> "Publish this course before granting access."
+                  @grantable_learners == [] -> "Every learner already has access to this course."
+                  true -> "Grant course access"
+                end
+              }
+              class="group inline-flex shrink-0 items-center gap-2 rounded-full bg-ink py-1.5 pl-5 pr-1.5 text-sm font-medium text-white transition hover:bg-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-ink"
+            >
+              Add learner
+              <span class="grid h-8 w-8 place-items-center rounded-full bg-primary text-white transition group-hover:bg-ink">
+                <.icon name="hero-key" class="h-4 w-4" />
+              </span>
+            </button>
+          </div>
 
           <div :if={@students != []} class="mt-5 overflow-x-auto">
             <table class="w-full text-left text-sm">
@@ -903,7 +1017,8 @@ defmodule WasomiWeb.AdminLive.CourseShow do
           </div>
 
           <p :if={@students == []} class="mt-5 rounded-2xl bg-surface p-5 text-body">
-            No students have enrolled in this course yet.
+            No learners have access to this course yet. Add a learner manually or share the public
+            course page.
           </p>
 
           <div class="mt-10 border-t border-black/5 pt-8">
@@ -1020,6 +1135,68 @@ defmodule WasomiWeb.AdminLive.CourseShow do
             "embedded" => true
           }
         )}
+      </.modal>
+
+      <%!-- Course-first access grant modal --%>
+      <.modal
+        :if={@modal == :grant_access}
+        id="grant-access-modal"
+        show
+        on_cancel={JS.push("close_modal")}
+      >
+        <.header>
+          Grant access to {@course.title}
+          <:subtitle>
+            Choose an existing learner. Access activates immediately and the learner is notified by
+            email and in-app.
+          </:subtitle>
+        </.header>
+
+        <.simple_form
+          for={@grant_access_form}
+          id="grant-access-form"
+          phx-change="validate_grant_access"
+          phx-submit="grant_access"
+        >
+          <div>
+            <p class="text-sm font-medium text-ink">Course</p>
+            <p class="mt-1 rounded-xl bg-surface px-3 py-2.5 text-sm text-body">
+              {@course.title}
+            </p>
+          </div>
+
+          <div>
+            <label for="grant-access-learner" class="mb-2 block text-sm font-semibold text-ink">
+              Learner
+            </label>
+            <select
+              id="grant-access-learner"
+              name="learner_id"
+              required
+              class="block w-full rounded-lg border border-black/15 bg-white px-4 py-3 text-sm text-ink focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/10"
+            >
+              <option value="">Select a learner</option>
+              <option :for={learner <- @grantable_learners} value={learner.id}>
+                {learner.name || "Learner"} · {learner.email}
+              </option>
+            </select>
+          </div>
+
+          <input type="hidden" name="grant_access_form[course_id]" value={@course.id} />
+
+          <.input
+            field={@grant_access_form[:reason]}
+            type="textarea"
+            label="Reason for granting access"
+            placeholder="e.g. Manual enrollment for a partner scholarship"
+            rows="3"
+            required
+          />
+
+          <:actions>
+            <.button phx-disable-with="Granting access...">Grant access</.button>
+          </:actions>
+        </.simple_form>
       </.modal>
 
       <%!-- Publish readiness checklist --%>

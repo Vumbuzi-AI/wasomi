@@ -30,6 +30,7 @@ defmodule Wasomi.Catalog do
   ## Options
 
     * `:status` - only courses in this status (`:draft`, `:published`, `:archived`).
+    * `:public_only` - excludes internal grant-only courses.
     * `:search` - case-insensitive match against title or slug.
 
   ## Examples
@@ -76,6 +77,7 @@ defmodule Wasomi.Catalog do
     Course
     |> order_by([course], desc: course.inserted_at, desc: course.id)
     |> filter_by_status(Keyword.get(opts, :status))
+    |> filter_public_only(Keyword.get(opts, :public_only, false))
     |> filter_by_search(Keyword.get(opts, :search))
     |> filter_by_price(Keyword.get(opts, :price))
     |> exclude_course_ids(Keyword.get(opts, :exclude_ids))
@@ -83,6 +85,9 @@ defmodule Wasomi.Catalog do
 
   defp filter_by_status(query, nil), do: query
   defp filter_by_status(query, status), do: where(query, [course], course.status == ^status)
+
+  defp filter_public_only(query, true), do: where(query, [course], course.is_internal == false)
+  defp filter_public_only(query, _public_only), do: query
 
   defp filter_by_search(query, search) when search in [nil, ""], do: query
 
@@ -153,7 +158,7 @@ defmodule Wasomi.Catalog do
   """
   def list_published_courses do
     Course
-    |> where([course], course.status == :published)
+    |> where([course], course.status == :published and course.is_internal == false)
     |> order_by([course], asc: course.position, asc: course.title)
     |> Repo.all()
     |> preload_outline()
@@ -189,9 +194,24 @@ defmodule Wasomi.Catalog do
   """
   def get_published_course_by_slug!(slug) when is_binary(slug) do
     Course
-    |> where([course], course.status == :published and course.slug == ^slug)
+    |> where(
+      [course],
+      course.status == :published and course.is_internal == false and course.slug == ^slug
+    )
     |> Repo.one!()
     |> preload_outline()
+  end
+
+  def catalog_visible?(%Course{} = course) do
+    course.status == :published and not course.is_internal
+  end
+
+  def grant_access_allowed?(%Course{} = course) do
+    case course.status do
+      :published -> true
+      :draft -> course.is_internal
+      :archived -> false
+    end
   end
 
   @doc """

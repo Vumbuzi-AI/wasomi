@@ -9,11 +9,13 @@ defmodule WasomiWeb.HomeLiveTest do
   test "renders published backend courses on the homepage", %{conn: conn} do
     published = course_fixture(status: :published, title: "Backend Course")
     _draft = course_fixture(status: :draft, title: "Hidden Draft")
+    _internal = course_fixture(status: :published, title: "Hidden Internal", is_internal: true)
 
     {:ok, _view, html} = live(conn, ~p"/")
 
     assert html =~ published.title
     refute html =~ "Hidden Draft"
+    refute html =~ "Hidden Internal"
   end
 
   test "shows a learner dashboard button for logged-in learners", %{conn: conn} do

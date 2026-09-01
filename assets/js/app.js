@@ -122,6 +122,68 @@ Hooks.ScrollContainerOnKeyChange = {
   },
 };
 
+Hooks.ReviewCarousel = {
+  mounted() {
+    this.container = this.el;
+    this.prevBtn = document.getElementById("reviews-prev-btn");
+    this.nextBtn = document.getElementById("reviews-next-btn");
+
+    this.updateButtonStates = () => {
+      if (!this.prevBtn || !this.nextBtn || !this.container) return;
+      const isAtStart = this.container.scrollLeft <= 6;
+      const isAtEnd =
+        this.container.scrollLeft + this.container.clientWidth >=
+        this.container.scrollWidth - 6;
+      this.prevBtn.disabled = isAtStart;
+      this.nextBtn.disabled = isAtEnd;
+    };
+
+    this.onPrevClick = () => this.scroll("prev");
+    this.onNextClick = () => this.scroll("next");
+
+    if (this.prevBtn) this.prevBtn.addEventListener("click", this.onPrevClick);
+    if (this.nextBtn) this.nextBtn.addEventListener("click", this.onNextClick);
+
+    this.container.addEventListener("scroll", this.updateButtonStates, {
+      passive: true,
+    });
+    window.addEventListener("resize", this.updateButtonStates, {
+      passive: true,
+    });
+
+    setTimeout(this.updateButtonStates, 100);
+  },
+
+  updated() {
+    this.prevBtn = document.getElementById("reviews-prev-btn");
+    this.nextBtn = document.getElementById("reviews-next-btn");
+    if (this.updateButtonStates) {
+      setTimeout(this.updateButtonStates, 50);
+    }
+  },
+
+  destroyed() {
+    if (this.prevBtn) this.prevBtn.removeEventListener("click", this.onPrevClick);
+    if (this.nextBtn) this.nextBtn.removeEventListener("click", this.onNextClick);
+    if (this.container && this.updateButtonStates) {
+      this.container.removeEventListener("scroll", this.updateButtonStates);
+    }
+    if (this.updateButtonStates) {
+      window.removeEventListener("resize", this.updateButtonStates);
+    }
+  },
+
+  scroll(direction) {
+    if (!this.container) return;
+    const card = this.container.querySelector("article");
+    const scrollAmount = card ? card.offsetWidth + 16 : 380;
+    this.container.scrollBy({
+      left: direction === "next" ? scrollAmount : -scrollAmount,
+      behavior: "smooth",
+    });
+  },
+};
+
 Hooks.SortableList = {
   mounted() {
     this.draggedItem = null;
@@ -3366,6 +3428,92 @@ Hooks.SearchableSelect = {
     this.value.dispatchEvent(new Event("input", { bubbles: true }));
     this.triggerLabel.textContent = nextValue || this.placeholder;
     this.close();
+  },
+};
+
+// Searchable checkbox dropdown for small multi-select admin forms. Filtering is
+// client-side; selected values still submit through normal checkbox inputs.
+Hooks.SearchableMultiSelect = {
+  mounted() {
+    this.trigger = this.el.querySelector("[data-role='trigger']");
+    this.panel = this.el.querySelector("[data-role='panel']");
+    this.search = this.el.querySelector("[data-role='search']");
+    this.options = Array.from(this.el.querySelectorAll("[data-role='option']"));
+    this.empty = this.el.querySelector("[data-role='empty']");
+    if (!this.trigger || !this.panel || !this.search) return;
+    this.isOpen = false;
+
+    this.onDocumentClick = (event) => {
+      if (!this.el.contains(event.target)) this.close();
+    };
+
+    this.trigger.addEventListener("click", () => this.toggle());
+
+    this.search.addEventListener("input", () => this.filter());
+
+    this.search.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        this.close();
+        this.trigger.focus();
+      }
+    });
+
+    document.addEventListener("click", this.onDocumentClick);
+  },
+
+  updated() {
+    this.trigger = this.el.querySelector("[data-role='trigger']");
+    this.panel = this.el.querySelector("[data-role='panel']");
+    this.search = this.el.querySelector("[data-role='search']");
+    this.options = Array.from(this.el.querySelectorAll("[data-role='option']"));
+    this.empty = this.el.querySelector("[data-role='empty']");
+
+    if (!this.search || !this.panel) return;
+
+    this.filter();
+
+    if (this.isOpen) {
+      this.panel.classList.remove("hidden");
+    }
+  },
+
+  destroyed() {
+    document.removeEventListener("click", this.onDocumentClick);
+  },
+
+  toggle() {
+    if (this.panel.classList.contains("hidden")) {
+      this.open();
+    } else {
+      this.close();
+    }
+  },
+
+  open() {
+    this.isOpen = true;
+    this.panel.classList.remove("hidden");
+    this.search.value = "";
+    this.filter();
+    this.search.focus();
+  },
+
+  close() {
+    this.isOpen = false;
+    this.panel.classList.add("hidden");
+  },
+
+  filter() {
+    const query = this.search.value.trim().toLowerCase();
+    let anyVisible = false;
+
+    this.options.forEach((option) => {
+      const matches = option.textContent.toLowerCase().includes(query);
+      option.classList.toggle("hidden", !matches);
+      if (matches) anyVisible = true;
+    });
+
+    if (this.empty) this.empty.classList.toggle("hidden", anyVisible);
   },
 };
 

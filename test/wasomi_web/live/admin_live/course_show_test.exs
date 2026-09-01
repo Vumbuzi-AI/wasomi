@@ -31,27 +31,28 @@ defmodule WasomiWeb.AdminLive.CourseShowTest do
 
       assert has_element?(view, "#students-panel", "Course access")
 
-      view |> element("button", "Add learner") |> render_click()
+      view |> element("button", "Grant access") |> render_click()
 
       assert has_element?(view, "#grant-access-modal", "Grant access to GS1 Basics")
-      assert has_element?(view, "#grant-access-modal option", grantable.email)
-      refute has_element?(view, "#grant-access-modal option", already_enrolled.email)
+      assert has_element?(view, "#grant-access-modal", grantable.email)
+      refute has_element?(view, "#grant-access-modal", already_enrolled.email)
     end
 
-    test "grants the selected learner access, records audit, and notifies them", %{conn: conn} do
+    test "grants selected learners access, records audit, and notifies them", %{conn: conn} do
       admin = admin_fixture(%{name: "Admin Sean"})
       conn = log_in_user(conn, admin)
       learner = user_fixture(%{name: "Manual Learner"})
+      other_learner = user_fixture(%{name: "Second Learner"})
       course = course_fixture(title: "Applied Negotiation", status: :published)
 
       {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}?tab=students")
 
-      view |> element("button", "Add learner") |> render_click()
+      view |> element("button", "Grant access") |> render_click()
 
       html =
         view
         |> form("#grant-access-form",
-          learner_id: learner.id,
+          learner_ids: [learner.id, other_learner.id],
           grant_access_form: %{
             reason: "Manual enrollment for a partner scholarship"
           }
@@ -59,13 +60,21 @@ defmodule WasomiWeb.AdminLive.CourseShowTest do
         |> render_submit()
 
       refute has_element?(view, "#grant-access-modal")
-      assert html =~ "Access granted"
+      assert html =~ "Access granted to 2 learners"
       assert html =~ "Manual Learner"
+      assert html =~ "Second Learner"
       assert Enrollments.can_access_course?(learner, course)
+      assert Enrollments.can_access_course?(other_learner, course)
 
       enrollment = Enrollments.active_enrollment(learner, course)
       assert [audit] = Enrollments.list_audits_for_enrollment(enrollment.id)
       assert audit.admin_user_id == admin.id
+
+      other_enrollment = Enrollments.active_enrollment(other_learner, course)
+      assert [other_audit] = Enrollments.list_audits_for_enrollment(other_enrollment.id)
+      assert other_audit.admin_user_id == admin.id
+
+      assert_email_sent(subject: "You now have access to Applied Negotiation")
       assert_email_sent(subject: "You now have access to Applied Negotiation")
     end
 
@@ -75,12 +84,12 @@ defmodule WasomiWeb.AdminLive.CourseShowTest do
 
       {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}?tab=students")
 
-      view |> element("button", "Add learner") |> render_click()
+      view |> element("button", "Grant access") |> render_click()
 
       html =
         view
         |> form("#grant-access-form",
-          learner_id: learner.id,
+          learner_ids: [learner.id],
           grant_access_form: %{reason: "too short"}
         )
         |> render_submit()
@@ -90,13 +99,38 @@ defmodule WasomiWeb.AdminLive.CourseShowTest do
       refute Enrollments.can_access_course?(learner, course)
     end
 
-    test "disables adding learners until the course is published", %{conn: conn} do
+    test "disables adding learners until a course is public or internal", %{conn: conn} do
       course = course_fixture(status: :draft)
       _learner = user_fixture()
 
       {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}?tab=students")
 
-      assert has_element?(view, "button[disabled]", "Add learner")
+      assert has_element?(view, "button[disabled]", "Grant access")
+    end
+
+    test "allows granting access to a draft internal course", %{conn: conn} do
+      learner = user_fixture(%{name: "Internal Learner"})
+      course = course_fixture(title: "Staff Onboarding", status: :draft, is_internal: true)
+
+      {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}?tab=students")
+
+      refute has_element?(view, "button[disabled]", "Grant access")
+
+      view |> element("button", "Grant access") |> render_click()
+
+      html =
+        view
+        |> form("#grant-access-form",
+          learner_ids: [learner.id],
+          grant_access_form: %{
+            reason: "Internal staff onboarding cohort"
+          }
+        )
+        |> render_submit()
+
+      assert html =~ "Access granted"
+      assert html =~ "Internal Learner"
+      assert Enrollments.can_access_course?(learner, course)
     end
   end
 end

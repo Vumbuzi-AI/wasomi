@@ -16,6 +16,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
      |> assign(:course_module, nil)
      |> assign(:lecture, nil)
      |> assign(:grant_access_form, nil)
+     |> assign(:selected_grant_learner_ids, [])
      |> assign(:quiz_lecture_id, nil)
      |> assign(:quiz_modal_tab, :generate)
      |> assign(:form_title, nil)
@@ -51,77 +52,77 @@ defmodule WasomiWeb.AdminLive.CourseShow do
   end
 
   def handle_event("open_grant_access", _params, socket) do
-    {:noreply,
-     socket
-     |> assign(:modal, :grant_access)
-     |> assign(
-       :grant_access_form,
-       to_form(Enrollments.change_grant_access(%{"course_id" => socket.assigns.course.id}))
-     )}
+    if Catalog.grant_access_allowed?(socket.assigns.course) do
+      {:noreply,
+       socket
+       |> assign(:modal, :grant_access)
+       |> assign(
+         :grant_access_form,
+         to_form(Enrollments.change_grant_access(%{"course_id" => socket.assigns.course.id}))
+       )
+       |> assign(:selected_grant_learner_ids, [])}
+    else
+      {:noreply,
+       put_flash(
+         socket,
+         :error,
+         "Publish this course or mark it internal before granting access."
+       )}
+    end
   end
 
-  def handle_event("validate_grant_access", %{"grant_access_form" => params}, socket) do
-    params = Map.put(params, "course_id", socket.assigns.course.id)
+  def handle_event("validate_grant_access", params, socket) do
+    form_params = Map.get(params, "grant_access_form", %{})
+    selected_learner_ids = selected_learner_ids(params)
 
     form =
-      params
+      form_params
+      |> Map.put("course_id", socket.assigns.course.id)
       |> Enrollments.change_grant_access()
       |> Map.put(:action, :validate)
       |> to_form()
 
-    {:noreply, assign(socket, :grant_access_form, form)}
+    {:noreply,
+     socket
+     |> assign(:grant_access_form, form)
+     |> assign(:selected_grant_learner_ids, selected_learner_ids)}
   end
 
   def handle_event(
         "grant_access",
-        %{"learner_id" => learner_id, "grant_access_form" => params},
+        %{"learner_ids" => learner_ids, "grant_access_form" => params},
         socket
       ) do
     params = Map.put(params, "course_id", socket.assigns.course.id)
+    selected_learners = find_grantable_learners(socket.assigns.grantable_learners, learner_ids)
 
-    case find_grantable_learner(socket.assigns.grantable_learners, learner_id) do
-      nil ->
+    cond do
+      selected_learners == [] ->
         {:noreply,
          socket
-         |> put_flash(:error, "Choose a learner who does not already have access.")
+         |> put_flash(:error, "Choose at least one learner who does not already have access.")
          |> assign(
            :grant_access_form,
            to_form(Enrollments.change_grant_access(params), action: :validate)
          )}
 
-      learner ->
-        case Enrollments.grant_access(learner, socket.assigns.current_user, params) do
-          {:ok, _enrollment} ->
-            {:noreply,
-             socket
-             |> put_flash(
-               :info,
-               "Access granted. The learner has been notified by email and in-app."
-             )
-             |> load_course(socket.assigns.course.slug)
-             |> close_modal()}
-
-          {:error, %Ecto.Changeset{} = changeset} ->
-            {:noreply, assign(socket, :grant_access_form, to_form(changeset, action: :validate))}
-
-          {:error, :forbidden} ->
-            {:noreply,
-             put_flash(socket, :error, "You are not authorized to grant course access.")}
-        end
+      true ->
+        grant_access_to_learners(socket, selected_learners, params)
     end
   end
 
   def handle_event("grant_access", %{"grant_access_form" => params}, socket) do
     {:noreply,
      socket
-     |> put_flash(:error, "Choose a learner who does not already have access.")
+     |> put_flash(:error, "Choose at least one learner who does not already have access.")
      |> assign(
        :grant_access_form,
        to_form(
          Enrollments.change_grant_access(Map.put(params, "course_id", socket.assigns.course.id)),
          action: :validate
        )
-     )}
+     )
+     |> assign(:selected_grant_learner_ids, [])}
   end
 
   def handle_event("publish_course", _params, socket) do
@@ -129,7 +130,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
       {:ok, course} ->
         {:noreply,
          socket
-         |> put_flash(:info, "Course published — it's now visible in the public catalog.")
+         |> put_flash(:info, published_flash(course))
          |> load_course(course.slug)}
 
       {:error, issues} when is_list(issues) ->
@@ -382,10 +383,17 @@ defmodule WasomiWeb.AdminLive.CourseShow do
       course_module: nil,
       lecture: nil,
       grant_access_form: nil,
+      selected_grant_learner_ids: [],
       quiz_lecture_id: nil,
       form_title: nil
     )
   end
+
+  defp published_flash(%{is_internal: true}) do
+    "Course published. It is internal, so learners still need granted access."
+  end
+
+  defp published_flash(_course), do: "Course published — it's now visible in the public catalog."
 
   defp load_course(socket, slug) do
     course = Catalog.get_course_by_slug!(slug)
@@ -445,8 +453,81 @@ defmodule WasomiWeb.AdminLive.CourseShow do
     Enum.all?(module.lectures, &Map.has_key?(lecture_quiz_question_counts, &1.id))
   end
 
-  defp find_grantable_learner(learners, learner_id) do
-    Enum.find(learners, &(to_string(&1.id) == to_string(learner_id)))
+  defp selected_learner_ids(params) do
+    params
+    |> Map.get("learner_ids", [])
+    |> List.wrap()
+    |> Enum.reject(&(&1 in [nil, ""]))
+  end
+
+  defp find_grantable_learners(learners, learner_ids) do
+    selected_ids = MapSet.new(List.wrap(learner_ids), &to_string/1)
+    Enum.filter(learners, &MapSet.member?(selected_ids, to_string(&1.id)))
+  end
+
+  defp learner_selected?(learner, selected_learner_ids) do
+    to_string(learner.id) in selected_learner_ids
+  end
+
+  defp selected_learner_label(_learners, []), do: "Select learners"
+
+  defp selected_learner_label(learners, selected_learner_ids) do
+    learners
+    |> find_grantable_learners(selected_learner_ids)
+    |> Enum.map(&(&1.name || &1.email))
+    |> case do
+      [] ->
+        "Select learners"
+
+      names ->
+        visible_names = Enum.take(names, 4)
+        remaining_count = length(names) - length(visible_names)
+
+        case remaining_count do
+          0 -> Enum.join(visible_names, ", ")
+          count -> "#{Enum.join(visible_names, ", ")} +#{count} more"
+        end
+    end
+  end
+
+  defp grant_access_to_learners(socket, learners, params) do
+    learners
+    |> Enum.reduce_while({:ok, 0}, fn learner, {:ok, count} ->
+      case Enrollments.grant_access(learner, socket.assigns.current_user, params) do
+        {:ok, _enrollment} -> {:cont, {:ok, count + 1}}
+        {:error, failure} -> {:halt, {:error, failure}}
+      end
+    end)
+    |> case do
+      {:ok, count} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, grant_access_success_message(count))
+         |> load_course(socket.assigns.course.slug)
+         |> close_modal()}
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        {:noreply, assign(socket, :grant_access_form, to_form(changeset, action: :validate))}
+
+      {:error, :forbidden} ->
+        {:noreply, put_flash(socket, :error, "You are not authorized to grant course access.")}
+    end
+  end
+
+  defp grant_access_success_message(1) do
+    "Access granted. The learner has been notified by email and in-app."
+  end
+
+  defp grant_access_success_message(count) do
+    "Access granted to #{count} learners. They have been notified by email and in-app."
+  end
+
+  defp grant_access_button_label([]), do: "Grant access"
+
+  defp grant_access_button_label([_learner_id]), do: "Grant access to 1 learner"
+
+  defp grant_access_button_label(learner_ids) do
+    "Grant access to #{length(learner_ids)} learners"
   end
 
   @impl true
@@ -470,6 +551,12 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                   Course
                 </span>
                 <.status_badge status={@course.status} />
+                <span
+                  :if={@course.is_internal}
+                  class="inline-flex items-center rounded-full bg-soft px-2.5 py-1 text-xs font-semibold text-ink"
+                >
+                  Internal
+                </span>
               </div>
               <h1 class="mt-4 text-3xl font-semibold leading-tight text-ink sm:text-4xl">
                 {@course.title}
@@ -507,7 +594,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                   </span>
                 </button>
                 <.link
-                  :if={@course.status == :published}
+                  :if={Catalog.catalog_visible?(@course)}
                   href={~p"/courses/#{@course.slug}"}
                   target="_blank"
                   class="inline-flex items-center gap-2 rounded-full border border-ink px-5 py-2.5 text-sm font-medium text-ink transition hover:bg-ink hover:text-white"
@@ -944,17 +1031,22 @@ defmodule WasomiWeb.AdminLive.CourseShow do
             <button
               type="button"
               phx-click="open_grant_access"
-              disabled={@course.status != :published || @grantable_learners == []}
+              disabled={not Catalog.grant_access_allowed?(@course) || @grantable_learners == []}
               title={
                 cond do
-                  @course.status != :published -> "Publish this course before granting access."
-                  @grantable_learners == [] -> "Every learner already has access to this course."
-                  true -> "Grant course access"
+                  not Catalog.grant_access_allowed?(@course) ->
+                    "Publish this course or mark it internal before granting access."
+
+                  @grantable_learners == [] ->
+                    "Every learner already has access to this course."
+
+                  true ->
+                    "Grant course access"
                 end
               }
               class="group inline-flex shrink-0 items-center gap-2 rounded-full bg-ink py-1.5 pl-5 pr-1.5 text-sm font-medium text-white transition hover:bg-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-ink"
             >
-              Add learner
+              Grant access
               <span class="grid h-8 w-8 place-items-center rounded-full bg-primary text-white transition group-hover:bg-ink">
                 <.icon name="hero-key" class="h-4 w-4" />
               </span>
@@ -1022,39 +1114,77 @@ defmodule WasomiWeb.AdminLive.CourseShow do
           </p>
 
           <div class="mt-10 border-t border-black/5 pt-8">
-            <div class="flex flex-wrap items-baseline justify-between gap-3">
-              <h2 class="text-xl font-semibold text-ink">Course reviews</h2>
-              <p :if={@review_summary.count > 0} class="text-sm text-body">
-                <span class="font-semibold text-ink">{@review_summary.average}</span>
-                / 5 · {@review_summary.count} {if @review_summary.count == 1,
-                  do: "review",
-                  else: "reviews"}
-              </p>
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 class="text-xl font-semibold text-ink">Course reviews</h2>
+                <p :if={@review_summary.count > 0} class="mt-0.5 text-sm text-body">
+                  <span class="font-semibold text-ink">{@review_summary.average}</span>
+                  / 5 · {@review_summary.count} {if @review_summary.count == 1,
+                    do: "review",
+                    else: "reviews"}
+                </p>
+              </div>
+
+              <div :if={@reviews != []} class="flex items-center gap-2">
+                <button
+                  type="button"
+                  id="reviews-prev-btn"
+                  class="grid h-9 w-9 place-items-center rounded-full border border-black/10 text-ink transition hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:border-black/10 disabled:hover:text-ink"
+                  aria-label="Previous reviews"
+                  disabled
+                >
+                  <.icon name="hero-chevron-left" class="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  id="reviews-next-btn"
+                  class="grid h-9 w-9 place-items-center rounded-full border border-black/10 text-ink transition hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:border-black/10 disabled:hover:text-ink"
+                  aria-label="Next reviews"
+                >
+                  <.icon name="hero-chevron-right" class="h-4 w-4" />
+                </button>
+              </div>
             </div>
 
-            <div :if={@reviews != []} class="mt-5 space-y-3">
+            <div
+              :if={@reviews != []}
+              id="course-reviews-scroll"
+              phx-hook="ReviewCarousel"
+              class="no-scrollbar mt-5 flex gap-4 overflow-x-auto scroll-smooth snap-x snap-mandatory pb-3"
+            >
               <article
                 :for={review <- @reviews}
-                class="rounded-2xl border border-black/5 bg-surface p-4"
+                class="snap-start shrink-0 w-[300px] sm:w-[360px] md:w-[400px] flex flex-col justify-between rounded-2xl border border-black/5 bg-surface p-5 transition hover:border-black/10"
               >
-                <div class="flex flex-wrap items-center justify-between gap-2">
-                  <div class="flex items-center gap-2">
-                    <span class="flex gap-0.5">
-                      <.icon
-                        :for={n <- 1..5}
-                        name="hero-star-solid"
-                        class={"h-4 w-4 #{if review.rating >= n, do: "text-primary", else: "text-black/15"}"}
-                      />
-                    </span>
-                    <span class="text-sm font-medium text-ink">
-                      {review.user.name || review.user.email}
-                    </span>
+                <div>
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <div class="flex items-center gap-2">
+                      <span class="flex gap-0.5">
+                        <.icon
+                          :for={n <- 1..5}
+                          name="hero-star-solid"
+                          class={"h-4 w-4 #{if review.rating >= n, do: "text-amber-400", else: "text-black/15"}"}
+                        />
+                      </span>
+                      <span class="text-sm font-semibold text-ink">
+                        {review.user.name || review.user.email}
+                      </span>
+                    </div>
+                    <span class="text-xs text-muted">{format_date(review.inserted_at)}</span>
                   </div>
-                  <span class="text-xs text-muted">{format_date(review.inserted_at)}</span>
+                  <p
+                    :if={review.body}
+                    class="mt-3 whitespace-pre-line text-sm text-body leading-relaxed"
+                  >
+                    {review.body}
+                  </p>
+                  <p
+                    :if={is_nil(review.body) || review.body == ""}
+                    class="mt-3 text-xs italic text-muted"
+                  >
+                    No written comment provided.
+                  </p>
                 </div>
-                <p :if={review.body} class="mt-2 whitespace-pre-line text-sm text-body">
-                  {review.body}
-                </p>
               </article>
             </div>
 
@@ -1147,8 +1277,8 @@ defmodule WasomiWeb.AdminLive.CourseShow do
         <.header>
           Grant access to {@course.title}
           <:subtitle>
-            Choose an existing learner. Access activates immediately and the learner is notified by
-            email and in-app.
+            Choose one or more learners. Access activates immediately and each learner is notified
+            by email and in-app.
           </:subtitle>
         </.header>
 
@@ -1166,20 +1296,78 @@ defmodule WasomiWeb.AdminLive.CourseShow do
           </div>
 
           <div>
-            <label for="grant-access-learner" class="mb-2 block text-sm font-semibold text-ink">
-              Learner
-            </label>
-            <select
-              id="grant-access-learner"
-              name="learner_id"
-              required
-              class="block w-full rounded-lg border border-black/15 bg-white px-4 py-3 text-sm text-ink focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/10"
-            >
-              <option value="">Select a learner</option>
-              <option :for={learner <- @grantable_learners} value={learner.id}>
-                {learner.name || "Learner"} · {learner.email}
-              </option>
-            </select>
+            <div class="mb-2 flex items-center justify-between gap-3">
+              <p class="text-sm font-semibold text-ink">Learners</p>
+              <p class="text-xs font-semibold uppercase text-muted">
+                {length(@selected_grant_learner_ids)} selected
+              </p>
+            </div>
+
+            <div id="grant-access-learners-combobox" phx-hook="SearchableMultiSelect" class="relative">
+              <button
+                type="button"
+                data-role="trigger"
+                class="flex w-full items-center justify-between rounded-lg border border-black/15 bg-white px-4 py-3 text-left text-sm text-ink transition focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/10"
+              >
+                <span>
+                  <span :if={@selected_grant_learner_ids == []} class="text-muted">
+                    Select learners
+                  </span>
+                  <span :if={@selected_grant_learner_ids != []} class="block truncate">
+                    {selected_learner_label(@grantable_learners, @selected_grant_learner_ids)}
+                  </span>
+                </span>
+                <.icon name="hero-chevron-up-down" class="h-4 w-4 shrink-0 text-muted" />
+              </button>
+
+              <div
+                data-role="panel"
+                class="absolute z-20 mt-1 hidden w-full overflow-hidden rounded-2xl border border-black/10 bg-white shadow-lg"
+              >
+                <div class="p-2">
+                  <input
+                    type="text"
+                    data-role="search"
+                    placeholder="Search learners..."
+                    autocomplete="off"
+                    class="block w-full rounded-lg border border-black/10 px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/10"
+                  />
+                </div>
+
+                <div class="max-h-64 overflow-y-auto px-1 pb-2">
+                  <label
+                    :for={learner <- @grantable_learners}
+                    data-role="option"
+                    class={[
+                      "flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 transition hover:bg-soft",
+                      learner_selected?(learner, @selected_grant_learner_ids) && "bg-mint/40"
+                    ]}
+                  >
+                    <input
+                      type="checkbox"
+                      name="learner_ids[]"
+                      value={learner.id}
+                      checked={learner_selected?(learner, @selected_grant_learner_ids)}
+                      class="h-4 w-4 rounded border-black/20 text-primary focus:ring-primary/20"
+                    />
+                    <span class="min-w-0">
+                      <span class="block truncate text-sm font-semibold text-ink">
+                        {learner.name || "Learner"}
+                      </span>
+                      <span class="block truncate text-xs text-muted">{learner.email}</span>
+                    </span>
+                  </label>
+
+                  <p data-role="empty" class="hidden px-3 py-5 text-center text-sm text-muted">
+                    No learners match.
+                  </p>
+
+                  <div :if={@grantable_learners == []} class="px-3 py-5 text-sm text-body">
+                    Every learner already has access to this course.
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <input type="hidden" name="grant_access_form[course_id]" value={@course.id} />
@@ -1194,7 +1382,9 @@ defmodule WasomiWeb.AdminLive.CourseShow do
           />
 
           <:actions>
-            <.button phx-disable-with="Granting access...">Grant access</.button>
+            <.button phx-disable-with="Granting access...">
+              {grant_access_button_label(@selected_grant_learner_ids)}
+            </.button>
           </:actions>
         </.simple_form>
       </.modal>

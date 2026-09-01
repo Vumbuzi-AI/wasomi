@@ -78,6 +78,24 @@ defmodule Wasomi.CatalogTest do
       assert course.slug == "some-course"
       assert course.thumbnail_key == "some thumbnail_key"
       assert course.price_minor == 42
+      assert course.is_internal == false
+    end
+
+    test "create_course/1 supports internal grant-only courses" do
+      assert {:ok, %Course{} = course} =
+               Catalog.create_course(%{
+                 position: 1,
+                 status: :draft,
+                 description: "Internal training",
+                 title: "Internal Training",
+                 currency: "KES",
+                 slug: "internal-training",
+                 thumbnail_key: "some thumbnail_key",
+                 price_minor: 42,
+                 is_internal: true
+               })
+
+      assert course.is_internal
     end
 
     test "create_course/1 auto-assigns the next position when none is given" do
@@ -117,6 +135,7 @@ defmodule Wasomi.CatalogTest do
       assert course.slug == "some-updated-slug"
       assert course.thumbnail_key == "some updated thumbnail_key"
       assert course.price_minor == 43
+      assert course.is_internal == false
     end
 
     test "update_course/2 silently ignores an attempt to set status: :published directly" do
@@ -144,8 +163,26 @@ defmodule Wasomi.CatalogTest do
       _draft = course_fixture(position: 1, status: :draft)
       second = course_fixture(position: 2, status: :published)
       first = course_fixture(position: 1, status: :published)
+      _internal = course_fixture(position: 3, status: :published, is_internal: true)
 
       assert Enum.map(Catalog.list_published_courses(), & &1.id) == [first.id, second.id]
+    end
+
+    test "public course page listing excludes internal courses" do
+      public = course_fixture(status: :published, title: "Public Course")
+      _internal = course_fixture(status: :published, title: "Internal Course", is_internal: true)
+
+      page = Catalog.list_courses_page(status: :published, public_only: true)
+
+      assert Enum.map(page.entries, & &1.id) == [public.id]
+    end
+
+    test "published slug lookup only returns public catalog courses" do
+      internal = course_fixture(status: :published, is_internal: true)
+
+      assert_raise Ecto.NoResultsError, fn ->
+        Catalog.get_published_course_by_slug!(internal.slug)
+      end
     end
 
     test "pricing helpers preserve integer minor units and currency" do

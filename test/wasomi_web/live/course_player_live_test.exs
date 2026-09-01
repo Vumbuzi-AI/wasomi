@@ -51,6 +51,21 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
     assert has_element?(view, "#lecture-watch-progress")
   end
 
+  test "active learners can render granted draft internal course content", %{
+    conn: conn,
+    user: user
+  } do
+    course = course_fixture(status: :draft, is_internal: true, title: "Internal Pilot")
+    module = course_module_fixture(course_id: course.id)
+    lecture = lecture_fixture(module_id: module.id, title: "Internal pilot lecture")
+    {:ok, pending} = Enrollments.create_pending_enrollment(user, course)
+    {:ok, _active} = Enrollments.activate_enrollment(pending)
+
+    assert {:ok, _view, html} = live(conn, ~p"/learn/courses/#{course.slug}")
+    assert html =~ course.title
+    assert html =~ lecture.title
+  end
+
   test "a reading-only lecture is completed by marking its PDFs as read, with no video player",
        %{conn: conn, user: user} do
     course = course_fixture(status: :published)

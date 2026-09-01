@@ -12,6 +12,7 @@ defmodule Wasomi.Catalog.Course do
     field :thumbnail_key, :string
     field :price_minor, :integer
     field :is_free, :boolean, default: false
+    field :is_internal, :boolean, default: false
     # The admin's own estimate of how long the whole course takes, in minutes.
     # Optional: left blank, the learner side falls back to summing video
     # durations, which is all it ever had. Set, it wins — because it can account
@@ -48,6 +49,7 @@ defmodule Wasomi.Catalog.Course do
       :status,
       :position,
       :is_free,
+      :is_internal,
       :estimated_minutes
     ])
     |> validate_required([

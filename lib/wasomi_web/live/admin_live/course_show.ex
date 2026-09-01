@@ -338,6 +338,8 @@ defmodule WasomiWeb.AdminLive.CourseShow do
     |> assign(:page_title, course.title)
     |> assign(:course, course)
     |> assign(:channel_stats, Wasomi.Channels.stats_for_course(course))
+    |> assign(:review_summary, Wasomi.Reviews.course_review_summary(course.id))
+    |> assign(:reviews, Wasomi.Reviews.list_course_reviews(course.id))
     |> assign(:students, students)
     |> assign(:student_count, length(enrollments))
     |> assign(:lecture_count, lecture_count)
@@ -903,6 +905,49 @@ defmodule WasomiWeb.AdminLive.CourseShow do
           <p :if={@students == []} class="mt-5 rounded-2xl bg-surface p-5 text-body">
             No students have enrolled in this course yet.
           </p>
+
+          <div class="mt-10 border-t border-black/5 pt-8">
+            <div class="flex flex-wrap items-baseline justify-between gap-3">
+              <h2 class="text-xl font-semibold text-ink">Course reviews</h2>
+              <p :if={@review_summary.count > 0} class="text-sm text-body">
+                <span class="font-semibold text-ink">{@review_summary.average}</span>
+                / 5 · {@review_summary.count} {if @review_summary.count == 1,
+                  do: "review",
+                  else: "reviews"}
+              </p>
+            </div>
+
+            <div :if={@reviews != []} class="mt-5 space-y-3">
+              <article
+                :for={review <- @reviews}
+                class="rounded-2xl border border-black/5 bg-surface p-4"
+              >
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <div class="flex items-center gap-2">
+                    <span class="flex gap-0.5">
+                      <.icon
+                        :for={n <- 1..5}
+                        name="hero-star-solid"
+                        class={"h-4 w-4 #{if review.rating >= n, do: "text-primary", else: "text-black/15"}"}
+                      />
+                    </span>
+                    <span class="text-sm font-medium text-ink">
+                      {review.user.name || review.user.email}
+                    </span>
+                  </div>
+                  <span class="text-xs text-muted">{format_date(review.inserted_at)}</span>
+                </div>
+                <p :if={review.body} class="mt-2 whitespace-pre-line text-sm text-body">
+                  {review.body}
+                </p>
+              </article>
+            </div>
+
+            <p :if={@reviews == []} class="mt-5 rounded-2xl bg-surface p-5 text-body">
+              No reviews yet. Learners are asked to rate the course when they finish the
+              final lecture.
+            </p>
+          </div>
         </section>
       </div>
 

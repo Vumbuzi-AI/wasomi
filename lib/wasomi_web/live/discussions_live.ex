@@ -72,11 +72,12 @@ defmodule WasomiWeb.DiscussionsLive do
     ~H"""
     <.student_layout active={:discussions} current_user={@current_user}>
       <div class="px-5 py-8 lg:px-8">
-        <h1 class="text-3xl font-semibold tracking-tight text-ink sm:text-4xl">Discussions</h1>
-        <p class="mt-2 text-body">Your course cohorts, all in one place.</p>
+        <.learner_page_header eyebrow="Community" title="Discussions">
+          <:subtitle>Your course cohorts, all in one place.</:subtitle>
+        </.learner_page_header>
 
-        <div class="mt-6 grid gap-5 lg:grid-cols-[320px_minmax(0,1fr)]">
-          <div class="rounded-3xl border border-black/5 bg-white p-4 shadow-sm">
+        <div class="mt-8 grid gap-5 lg:grid-cols-[320px_minmax(0,1fr)]">
+          <div class="rounded-3xl border border-black/5 bg-white p-4 shadow-card">
             <form phx-change="search" class="relative">
               <.icon
                 name="hero-magnifying-glass"
@@ -134,7 +135,7 @@ defmodule WasomiWeb.DiscussionsLive do
             </ul>
           </div>
 
-          <div class="overflow-hidden rounded-3xl border border-black/5 bg-white shadow-sm">
+          <div class="overflow-hidden rounded-3xl border border-black/5 bg-white shadow-card">
             <%= if @selected do %>
               {live_render(@socket, WasomiWeb.ChannelLive,
                 id: "learner-channel-#{@selected.course.slug}",

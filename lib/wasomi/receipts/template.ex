@@ -4,9 +4,9 @@ defmodule Wasomi.Receipts.Template do
 
   A formal document: logo + "Receipt / Paid in full / No. / Issued" header,
   then calm left-aligned sections separated by full-width hairlines —
-  order summary, totals (with the one navy accent), a small "next step"
-  link, a Purchaser / Seller / Platform / Payment grid, and a full-width
-  transaction-reference row above a legal footer. Typeset in Wasomi's Outfit.
+  order summary, totals (with the one navy accent), and a compact legal footer.
+  The payment reference sits with the purchased item so the receipt reads as one
+  tidy transaction. Typeset in Wasomi's Outfit.
 
   The logo and fonts are embedded as base64 data URIs at compile time, so a
   render never touches the network or the filesystem.
@@ -128,7 +128,7 @@ defmodule Wasomi.Receipts.Template do
           .rule { border: 0; border-top: 1px solid var(--hair); margin: 30px 0; }
 
           h2 {
-            margin: 0 0 12px; font-size: 10px; font-weight: 700; letter-spacing: 0.9px;
+            margin: 0 0 14px; font-size: 12px; font-weight: 700; letter-spacing: 0.7px;
             text-transform: uppercase; color: var(--muted);
           }
 
@@ -148,11 +148,22 @@ defmodule Wasomi.Receipts.Template do
           }
           .totals .grand .v { font-size: 15px; font-weight: 700; }
 
-          .details .row { display: flex; gap: 20px; padding: 9px 0; }
-          .details .k { flex: 0 0 96px; padding-top: 2px; }
-          .details .v { flex: 1; color: var(--ink); }
-          .details .v .soft { color: var(--muted); }
-          .details .v .ref { word-break: break-all; }
+          /* Two parties, laid out as facing address blocks. */
+          .parties {
+            display: flex; justify-content: space-between; align-items: flex-start;
+            gap: 48px; margin-bottom: 28px;
+          }
+          .party { max-width: 46%; }
+          .party.from { text-align: right; }
+          .party h3 {
+            margin: 0 0 6px; font-size: 12.5px; font-weight: 700;
+            color: var(--text); text-transform: none; letter-spacing: 0;
+          }
+          .party .name { color: var(--ink); font-weight: 600; }
+          .party .addr { color: var(--muted); font-size: 11.5px; line-height: 1.7; }
+          .party .addr div { word-break: break-word; }
+
+          .ref { word-break: break-all; }
 
           .foot {
             font-size: 10.5px; color: var(--muted); line-height: 1.7;
@@ -172,11 +183,31 @@ defmodule Wasomi.Receipts.Template do
           </div>
         </div>
 
+        <div class="parties">
+          <div class="party to">
+            <h3>Billed to</h3>
+            <div class="name">{@billed_to_name}</div>
+            <div class="addr">
+              <div>{@billed_to_email}</div>
+            </div>
+          </div>
+          <div class="party from">
+            <h3>From</h3>
+            <div class="name">{@issuer_name}</div>
+            <div class="addr">
+              <div :for={line <- @address_lines}>{line}</div>
+              <div :if={@issuer_email}>{@issuer_email}</div>
+              <div :if={@issuer_website}>{@issuer_website}</div>
+            </div>
+          </div>
+        </div>
+
         <h2>Order summary</h2>
         <div class="line item">
           <div>
             <div class="t">{@course_title}</div>
             <div class="s">Course enrolment · Qty 1</div>
+            <div class="s">Payment ref · <span class="ref">{@reference}</span></div>
           </div>
           <div class="amt num">{@amount}</div>
         </div>
@@ -193,46 +224,12 @@ defmodule Wasomi.Receipts.Template do
 
         <hr class="rule" />
 
-        <div class="details">
-          <div class="row">
-            <div class="k label">Purchaser</div>
-            <div class="v">
-              {@billed_to_name} <span class="soft">· {@billed_to_email}</span>
-            </div>
-          </div>
-          <div class="row">
-            <div class="k label">Seller</div>
-            <div class="v">
-              {@issuer_name}<span class="soft">{seller_contact(assigns)}</span>
-            </div>
-          </div>
-          <div class="row">
-            <div class="k label">Payment</div>
-            <div class="v">{@payment_method}</div>
-          </div>
-          <div class="row">
-            <div class="k label">Reference</div>
-            <div class="v"><span class="ref">{@reference}</span></div>
-          </div>
-        </div>
-
-        <hr class="rule" />
-
         <div class="foot">
-          <strong>This is a computer-generated receipt; no signature is required.</strong>
-          Payment has been received in full — please retain this document for your records. Issued
-          via the Wasomi platform on behalf of {@issuer_name}.
+          <strong>Computer-generated receipt — no signature required.</strong>
+          Issued via Wasomi on behalf of {@issuer_name}.
         </div>
       </body>
     </html>
     """
-  end
-
-  # " · addr, addr · email · website", omitting whatever the branding config
-  # doesn't provide.
-  defp seller_contact(assigns) do
-    [Enum.join(assigns.address_lines, ", "), assigns[:issuer_email], assigns[:issuer_website]]
-    |> Enum.reject(&(&1 in [nil, ""]))
-    |> Enum.map_join("", &(" · " <> &1))
   end
 end

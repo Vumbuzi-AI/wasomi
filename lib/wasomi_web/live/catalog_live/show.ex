@@ -5,7 +5,7 @@ defmodule WasomiWeb.CatalogLive.Show do
 
   alias Phoenix.LiveView.JS
   alias Wasomi.{Catalog, Enrollments}
-  alias Wasomi.Certificates.Branding
+  alias Wasomi.Certificates.{Branding, Template}
 
   @impl true
   def mount(%{"slug" => slug}, _session, socket) do
@@ -21,10 +21,38 @@ defmodule WasomiWeb.CatalogLive.Show do
      |> assign(:meta_image, seo_image(course.thumbnail_key))
      |> assign(:meta_image_alt, course.title)
      |> assign(:course, course)
+     |> assign(:certificate_preview_html, certificate_preview_html(course))
      |> assign(:lecture_count, Catalog.lecture_count(course))
      |> assign(:duration_label, duration_label(Catalog.duration_seconds(course)))
      |> assign(:learner_count, Enrollments.count_active_for_course(course.id))}
   end
+
+  # Renders the real certificate template (same module the PDF and admin
+  # editor use) so the course page preview can't drift from the issued
+  # certificate — but as a *sample*: placeholder name and signatory, the CSS
+  # QR placeholder, and no printed GDTI. Nothing course- or person-specific
+  # beyond the title is revealed on this public page.
+  defp certificate_preview_html(%{certificate_enabled: true} = course) do
+    Branding.assigns()
+    |> Map.merge(%{
+      learner_name: "Your Name",
+      title: course.title,
+      issued_on: Calendar.strftime(Date.utc_today(), "%B %-d, %Y"),
+      gdti: nil,
+      qr_data_uri: nil,
+      signatory_name: "Authorised signatory",
+      signatory_title: "Wasomi course team",
+      signature_url: nil,
+      signatory_two_name: nil,
+      signatory_two_title: nil,
+      signatory_two_signature_url: nil,
+      sample?: true
+    })
+    |> Map.put(:preview?, true)
+    |> Template.render_html()
+  end
+
+  defp certificate_preview_html(_course), do: nil
 
   defp seo_description(course) do
     description =
@@ -90,7 +118,7 @@ defmodule WasomiWeb.CatalogLive.Show do
           </.link>
 
           <div class="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-stretch">
-            <div class="grid overflow-hidden rounded-3xl border border-black/5 bg-white shadow-sm sm:grid-cols-[280px_minmax(0,1fr)]">
+            <div class="grid overflow-hidden rounded-3xl border border-black/5 bg-white shadow-card sm:grid-cols-[280px_minmax(0,1fr)]">
               <div class="relative aspect-[4/3] bg-ink sm:aspect-auto sm:h-full">
                 <img
                   :if={@course.thumbnail_key}
@@ -108,7 +136,7 @@ defmodule WasomiWeb.CatalogLive.Show do
               </div>
             </div>
 
-            <div id="enroll" class="rounded-3xl border border-black/5 bg-white p-6 shadow-sm">
+            <div id="enroll" class="rounded-3xl border border-black/5 bg-white p-6 shadow-card">
               <p class="text-xs font-semibold uppercase tracking-wider text-muted">
                 Course fee
               </p>
@@ -180,25 +208,26 @@ defmodule WasomiWeb.CatalogLive.Show do
         </div>
       </section>
 
-      <section id="how-it-works" class="py-8 lg:py-10">
+      <section id="how-it-works" class="py-10 lg:py-14">
         <div class="mx-auto max-w-container px-5 lg:px-8">
-          <h2 class="text-3xl font-semibold text-ink sm:text-4xl">How learning works</h2>
+          <p class="text-xs font-semibold uppercase tracking-wider text-muted">Before you enrol</p>
+          <h2 class="mt-2 text-3xl font-semibold text-ink sm:text-4xl">How learning works</h2>
 
-          <dl class="mt-8 grid gap-x-8 sm:grid-cols-2">
+          <dl class="mt-8 grid gap-x-10 rounded-3xl border border-black/5 bg-white px-6 shadow-card sm:grid-cols-2 sm:px-10">
             <div class="flex items-center gap-4 border-b border-black/5 py-4 sm:py-5">
-              <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-primary text-white">
+              <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-mint text-primary">
                 <.icon name="hero-book-open" class="h-5 w-5" />
               </span>
               <dt class="text-body">Follow the modules in order or study at your own pace.</dt>
             </div>
             <div class="flex items-center gap-4 border-b border-black/5 py-4 sm:py-5">
-              <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-primary text-white">
+              <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-mint text-primary">
                 <.icon name="hero-clock" class="h-5 w-5" />
               </span>
               <dt class="text-body">See every lesson title and duration before enrolment.</dt>
             </div>
             <div class="flex items-center gap-4 border-b border-black/5 py-4 sm:border-b-0 sm:py-5">
-              <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-primary text-white">
+              <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-mint text-primary">
                 <.icon name="hero-check-circle" class="h-5 w-5" />
               </span>
               <dt class="text-body">
@@ -208,7 +237,7 @@ defmodule WasomiWeb.CatalogLive.Show do
               </dt>
             </div>
             <div class="flex items-center gap-4 py-4 sm:py-5">
-              <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-primary text-white">
+              <span class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-mint text-primary">
                 <.icon name="hero-device-phone-mobile" class="h-5 w-5" />
               </span>
               <dt class="text-body">Learn on desktop, tablet or mobile.</dt>
@@ -217,65 +246,52 @@ defmodule WasomiWeb.CatalogLive.Show do
         </div>
       </section>
 
-      <section :if={@course.certificate_enabled} id="certificate" class="py-8 lg:py-10">
+      <section :if={@course.certificate_enabled} id="certificate" class="py-10 lg:py-14">
         <div class="mx-auto max-w-container px-5 lg:px-8">
           <div class="grid gap-8 lg:grid-cols-[2fr_3fr] lg:gap-16">
             <div class="flex flex-col justify-center">
-              <h2 class="text-3xl font-semibold text-ink sm:text-4xl">Certificate</h2>
+              <p class="text-xs font-semibold uppercase tracking-wider text-muted">On completion</p>
+              <h2 class="mt-2 text-3xl font-semibold text-ink sm:text-4xl">Certificate</h2>
               <p class="mt-4 max-w-md text-body">
                 Your certificate shows your name, this course title and the completion date
                 after you finish the required lessons and checks.
               </p>
               <ul class="mt-6 space-y-3">
                 <li class="flex items-center gap-2.5 text-sm font-medium text-ink">
-                  <.icon name="hero-check" class="h-4 w-4 shrink-0 text-green-600" />
+                  <.icon name="hero-check" class="h-4 w-4 shrink-0 text-primary" />
                   {@course.title}
                 </li>
                 <li class="flex items-center gap-2.5 text-sm font-medium text-ink">
-                  <.icon name="hero-check" class="h-4 w-4 shrink-0 text-green-600" />
+                  <.icon name="hero-check" class="h-4 w-4 shrink-0 text-primary" />
                   Downloadable after completion
                 </li>
                 <li class="flex items-center gap-2.5 text-sm font-medium text-ink">
-                  <.icon name="hero-check" class="h-4 w-4 shrink-0 text-green-600" />
+                  <.icon name="hero-check" class="h-4 w-4 shrink-0 text-primary" />
                   Suitable for a portfolio or training record
                 </li>
               </ul>
             </div>
 
-            <div class="flex items-center bg-soft p-6 sm:p-10">
-              <div class="w-full rounded-2xl border-2 border-ink/80 p-1">
-                <div class="rounded-xl border border-ink/30 px-6 py-10 text-center sm:px-10">
-                  <span class="mx-auto grid h-12 w-12 place-items-center rounded-full bg-primary text-white">
-                    <.icon name="hero-academic-cap" class="h-6 w-6" />
-                  </span>
-                  <p class="mt-3 text-xs font-semibold uppercase tracking-widest text-muted">
-                    Wasomi · {Branding.issuer_name()}
-                  </p>
-                  <h3 class="mt-4 font-serif text-2xl font-semibold text-ink sm:text-3xl">
-                    Certificate of Completion
-                  </h3>
-                  <p class="mt-4 text-sm text-muted">This confirms successful completion of</p>
-                  <p class="mt-1 text-xl font-bold text-primary sm:text-2xl">{@course.title}</p>
-
-                  <p class="mx-auto mt-8 max-w-[220px] border-b border-ink/30 pb-1.5 font-serif italic text-body">
-                    Learner name
-                  </p>
-
-                  <div class="mt-6 flex items-center justify-between text-xs text-muted">
-                    <span>{@course.certificate_signatory_name || "Course team"}</span>
-                    <span>Completion date</span>
-                  </div>
-                </div>
-              </div>
+            <div class="flex items-center rounded-2xl bg-soft p-4 sm:p-6">
+              <iframe
+                :if={@certificate_preview_html}
+                srcdoc={@certificate_preview_html}
+                title={"#{@course.title} certificate preview"}
+                loading="lazy"
+                sandbox=""
+                class="aspect-[1.414] w-full rounded-xl border border-black/10 bg-white shadow-card"
+              >
+              </iframe>
             </div>
           </div>
         </div>
       </section>
 
-      <section id="curriculum" class="py-8 lg:py-10">
+      <section id="curriculum" class="py-10 lg:py-14">
         <div class="mx-auto max-w-container px-5 lg:px-8">
           <div>
-            <div class="flex flex-wrap items-end justify-between gap-4">
+            <p class="text-xs font-semibold uppercase tracking-wider text-muted">What you'll cover</p>
+            <div class="mt-2 flex flex-wrap items-end justify-between gap-4">
               <h2 class="text-3xl font-semibold text-ink sm:text-4xl">Modules</h2>
               <p class="text-sm font-medium text-muted">
                 {length(@course.modules)} modules · {@lecture_count} lessons
@@ -293,6 +309,8 @@ defmodule WasomiWeb.CatalogLive.Show do
               >
                 <button
                   type="button"
+                  aria-expanded={to_string(index == 1)}
+                  aria-controls={"module-#{module.id}-panel"}
                   phx-click={
                     JS.toggle(
                       to: "#module-#{module.id}-panel",
@@ -303,6 +321,7 @@ defmodule WasomiWeb.CatalogLive.Show do
                         {"transition-all ease-in duration-150", "opacity-100 translate-y-0",
                          "opacity-0 -translate-y-1"}
                     )
+                    |> JS.toggle_attribute({"aria-expanded", "true", "false"})
                     |> JS.toggle_class("rotate-180 bg-primary border-primary text-white",
                       to: "#module-#{module.id}-chevron"
                     )

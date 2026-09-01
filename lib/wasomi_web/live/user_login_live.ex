@@ -157,17 +157,9 @@ defmodule WasomiWeb.UserLoginLive do
         <input type="hidden" name="user[email]" value={@email} />
 
         <div>
-          <div class="flex items-center justify-between">
-            <label for="login_password" class="mb-2 block text-sm font-semibold text-dark">
-              Password
-            </label>
-            <.link
-              href={~p"/users/reset_password"}
-              class="mb-2 text-sm font-medium text-primary hover:underline"
-            >
-              Forgot your password?
-            </.link>
-          </div>
+          <label for="login_password" class="mb-2 block text-sm font-semibold text-dark">
+            Password
+          </label>
           <div class="flex items-center gap-2 rounded-lg border border-black/15 bg-white px-3.5 py-3 focus-within:border-primary focus-within:ring-4 focus-within:ring-primary/10">
             <span class="shrink-0 text-muted"><.lock_icon /></span>
             <input
@@ -183,15 +175,23 @@ defmodule WasomiWeb.UserLoginLive do
           </div>
         </div>
 
-        <label class="flex items-center gap-2.5 text-sm font-medium text-dark">
-          <input
-            type="checkbox"
-            name="user[remember_me]"
-            value="true"
-            checked
-            class="h-4 w-4 rounded border-black/20 text-primary focus:ring-primary/30"
-          /> Remember me
-        </label>
+        <div class="flex items-center justify-between">
+          <label class="flex items-center gap-2.5 text-sm font-medium text-dark">
+            <input
+              type="checkbox"
+              name="user[remember_me]"
+              value="true"
+              checked
+              class="h-4 w-4 rounded border-black/20 text-primary focus:ring-primary/30"
+            /> Remember me
+          </label>
+          <.link
+            href={~p"/users/reset_password"}
+            class="text-sm font-medium text-primary hover:underline"
+          >
+            Forgot your password?
+          </.link>
+        </div>
 
         <p
           :if={@captcha_error}

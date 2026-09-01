@@ -301,7 +301,8 @@ defmodule WasomiWeb.LectureLive.FormComponentTest do
       |> Enum.find(&(&1.title == "Resource-only lecture"))
 
     assert lecture.video_asset_id == nil
-    assert [%{name: "Slides.pdf"}] = lecture.resources
+    assert [%{name: name}] = lecture.resources
+    assert name =~ ~r/^\[M\d+·L\d+\] Slides\.pdf$/
   end
 
   test "the wizard blocks jumping to an unreached step but allows free navigation once reached",

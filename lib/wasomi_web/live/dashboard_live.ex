@@ -197,52 +197,6 @@ defmodule WasomiWeb.DashboardLive do
               </.link>
             </div>
           </div>
-
-          <section
-            :if={!@first_run?}
-            id="dashboard-receipts"
-            class="rounded-3xl border border-black/5 bg-white p-6 shadow-card sm:p-8"
-          >
-            <div class="flex items-start justify-between gap-4">
-              <div>
-                <p class="text-sm font-semibold uppercase tracking-wider text-primary">Billing</p>
-                <h2 class="mt-2 text-2xl font-semibold text-ink">Payment receipts</h2>
-              </div>
-              <span class="grid h-11 w-11 place-items-center rounded-full bg-mint text-primary">
-                <.icon name="hero-receipt-percent" class="h-6 w-6" />
-              </span>
-            </div>
-
-            <div :if={@receipts != []} class="mt-6 divide-y divide-black/5">
-              <article
-                :for={receipt <- @receipts}
-                id={"payment-receipt-#{receipt.id}"}
-                class="py-4 first:pt-0 last:pb-0"
-              >
-                <div class="flex items-start justify-between gap-4">
-                  <div class="min-w-0">
-                    <h3 class="truncate font-medium text-ink">{receipt.course.title}</h3>
-                    <p class="mt-1 text-sm text-muted">
-                      Paid {format_date(receipt.paid_at)} via {provider_name(receipt.provider)}
-                    </p>
-                  </div>
-                  <p class="shrink-0 font-semibold text-ink">
-                    {Payments.format_amount(receipt)}
-                  </p>
-                </div>
-                <div class="mt-3 flex items-center justify-between gap-4 rounded-2xl bg-surface px-4 py-3 text-xs">
-                  <span class="text-muted">Receipt reference</span>
-                  <span class="break-all text-right font-medium text-ink">
-                    {receipt.provider_reference}
-                  </span>
-                </div>
-              </article>
-            </div>
-
-            <p :if={@receipts == []} class="mt-6 rounded-2xl bg-surface p-5 text-body">
-              Successful course payments will appear here.
-            </p>
-          </section>
         </div>
       </section>
     </.student_layout>
@@ -407,11 +361,4 @@ defmodule WasomiWeb.DashboardLive do
       end
     end) || List.last(lectures)
   end
-
-  defp provider_name(:paystack), do: "Paystack"
-  defp provider_name(:mpesa), do: "M-Pesa"
-  defp provider_name(provider), do: provider |> to_string() |> String.capitalize()
-
-  defp format_date(%DateTime{} = datetime), do: Calendar.strftime(datetime, "%b %-d, %Y")
-  defp format_date(_), do: "—"
 end

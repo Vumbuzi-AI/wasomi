@@ -132,10 +132,21 @@ defmodule WasomiWeb.StudentComponents do
             </div>
             <.sidebar_tooltip label={@current_user.name || @current_user.email} />
           </div>
+          <button
+            id="sidebar-product-tour"
+            type="button"
+            phx-hook="ProductTour"
+            data-replay
+            class="sidebar-row group relative mt-3 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-body transition hover:bg-surface hover:text-primary"
+          >
+            <.icon name="hero-map" class="h-5 w-5 shrink-0" />
+            <span class="sidebar-label inline-block">Take a tour</span>
+            <.sidebar_tooltip label="Take a tour" />
+          </button>
           <.link
             href={~p"/users/log_out"}
             method="delete"
-            class="sidebar-row group relative mt-3 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-body transition hover:bg-surface hover:text-primary"
+            class="sidebar-row group relative mt-1 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-body transition hover:bg-surface hover:text-primary"
           >
             <.icon name="hero-arrow-left-on-rectangle" class="h-5 w-5 shrink-0" />
             <span class="sidebar-label inline-block">Log out</span>
@@ -148,6 +159,30 @@ defmodule WasomiWeb.StudentComponents do
       <main class="min-w-0 flex-1 lg:h-screen lg:overflow-y-auto">
         {render_slot(@inner_block)}
       </main>
+    </div>
+    """
+  end
+
+  @doc """
+  The standard learner-area page header: an uppercase accent eyebrow, the
+  page `<h1>`, an optional subtitle, and an optional right-aligned `:actions`
+  slot (usually a small count). Sits directly on the page background — never
+  inside a card.
+  """
+  attr :eyebrow, :string, required: true
+  attr :title, :string, required: true
+  slot :subtitle
+  slot :actions
+
+  def learner_page_header(assigns) do
+    ~H"""
+    <div class="flex flex-wrap items-end justify-between gap-4">
+      <div>
+        <p class="text-sm font-semibold uppercase tracking-wider text-primary">{@eyebrow}</p>
+        <h1 class="mt-2 text-3xl font-semibold text-ink">{@title}</h1>
+        <p :if={@subtitle != []} class="mt-2 max-w-2xl text-body">{render_slot(@subtitle)}</p>
+      </div>
+      <div :if={@actions != []} class="shrink-0 text-sm text-muted">{render_slot(@actions)}</div>
     </div>
     """
   end

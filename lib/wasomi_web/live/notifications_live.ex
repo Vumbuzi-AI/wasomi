@@ -60,24 +60,12 @@ defmodule WasomiWeb.NotificationsLive do
   def render(assigns) do
     ~H"""
     <.student_layout active={:notifications} current_user={@current_user}>
-      <div class="px-5 py-8 lg:px-8 lg:py-10">
-        <section class="rounded-[1.75rem] border border-black/5 bg-white px-6 py-8 shadow-sm sm:px-8">
-          <div class="flex flex-wrap items-center justify-between gap-5">
-            <div>
-              <h1 class="text-4xl font-semibold leading-tight text-ink sm:text-5xl">
-                Notifications
-              </h1>
-              <p class="mt-3 max-w-2xl text-lg text-body">
-                Keep track of course access, learning nudges and account updates.
-              </p>
-            </div>
-            <span class="grid h-14 w-14 place-items-center rounded-full bg-mint text-primary">
-              <.icon name="hero-bell" class="h-7 w-7" />
-            </span>
-          </div>
-        </section>
+      <div class="w-full px-5 py-8 lg:px-8">
+        <.learner_page_header eyebrow="Activity" title="Notifications">
+          <:subtitle>Keep track of course access, learning nudges and account updates.</:subtitle>
+        </.learner_page_header>
 
-        <section class="mt-6 rounded-[1.75rem] border border-black/5 bg-white p-6 shadow-sm sm:p-8">
+        <section class="mt-8 rounded-3xl border border-black/5 bg-white p-6 shadow-card sm:p-8">
           <div class="flex flex-wrap items-end justify-between gap-4">
             <div>
               <p class="text-sm font-semibold uppercase tracking-wider text-primary">

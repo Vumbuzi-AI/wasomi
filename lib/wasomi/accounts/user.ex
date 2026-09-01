@@ -229,6 +229,8 @@ defmodule Wasomi.Accounts.User do
       |> trim_change(:first_name)
       |> trim_change(:last_name)
       |> trim_change(:name)
+      |> titlecase_change(:first_name)
+      |> titlecase_change(:last_name)
 
     cond do
       name_part_changed?(changeset, :first_name) or name_part_changed?(changeset, :last_name) ->
@@ -272,6 +274,22 @@ defmodule Wasomi.Accounts.User do
     update_change(changeset, field, fn
       value when is_binary(value) -> String.trim(value)
       value -> value
+    end)
+  end
+
+  # "john" -> "John", "jean-paul" -> "Jean-Paul". A word that already carries
+  # an uppercase letter is left as typed ("McDonald", "van der Berg").
+  defp titlecase_change(changeset, field) do
+    update_change(changeset, field, fn
+      value when is_binary(value) ->
+        value
+        |> String.split(~r/([\s-])/u, include_captures: true, trim: false)
+        |> Enum.map_join("", fn
+          part -> if part =~ ~r/\p{Lu}/u, do: part, else: String.capitalize(part)
+        end)
+
+      value ->
+        value
     end)
   end
 
@@ -567,7 +585,9 @@ defmodule Wasomi.Accounts.User do
   defp validate_email(changeset, opts) do
     changeset
     |> validate_required([:email])
-    |> validate_format(:email, ~r/^[^\s]+@[^\s]+$/, message: "must have the @ sign and no spaces")
+    |> validate_format(:email, ~r/^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+      message: "must be a valid email address"
+    )
     |> validate_length(:email, max: 160)
     |> maybe_validate_unique_email(opts)
   end

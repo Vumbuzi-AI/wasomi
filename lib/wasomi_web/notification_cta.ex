@@ -11,6 +11,16 @@ defmodule WasomiWeb.NotificationCTA do
 
   @channel_kinds [:channel_announcement, :channel_mention]
 
+  @doc """
+  Whether the admin inbox should show a CTA button for this notification.
+
+  Admins act on channel mentions/announcements from the discussions hub, but a
+  student-payment notification has no admin destination worth a button — the
+  Payments area is where those are managed — so it carries no CTA there.
+  """
+  def admin_cta?(%{kind: kind}) when kind in @channel_kinds, do: true
+  def admin_cta?(_notification), do: false
+
   @doc "Button label for a notification's CTA."
   def label(%{kind: kind}) when kind in @channel_kinds, do: "Open discussion"
   def label(_notification), do: "Go to course"

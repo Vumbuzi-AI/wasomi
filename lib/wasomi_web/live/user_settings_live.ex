@@ -11,19 +11,12 @@ defmodule WasomiWeb.UserSettingsLive do
   def render(assigns) do
     ~H"""
     <.student_layout active={:account} current_user={@current_user}>
-      <div class="mx-auto max-w-6xl px-5 py-10 lg:px-10 lg:py-12">
-        <div class="rounded-3xl border border-black/5 bg-white p-6">
-          <div>
-            <h1 class="text-3xl font-semibold leading-tight text-ink sm:text-4xl">
-              Account Settings
-            </h1>
-            <p class="mt-2 max-w-2xl text-body">
-              Manage your profile, learning preferences, email and password.
-            </p>
-          </div>
-        </div>
+      <div class="mx-auto max-w-6xl px-5 py-8 lg:px-8">
+        <.learner_page_header eyebrow="Settings" title="Account Settings">
+          <:subtitle>Manage your profile, learning preferences, email and password.</:subtitle>
+        </.learner_page_header>
 
-        <div class="mt-6 grid gap-6 lg:grid-cols-[220px_minmax(0,1fr)] lg:items-start">
+        <div class="mt-8 grid gap-6 lg:grid-cols-[220px_minmax(0,1fr)] lg:items-start">
           <nav
             aria-label="Account settings sections"
             class="rounded-3xl border border-black/5 bg-white p-3 shadow-card"

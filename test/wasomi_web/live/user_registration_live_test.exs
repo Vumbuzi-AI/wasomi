@@ -59,7 +59,7 @@ defmodule WasomiWeb.UserRegistrationLiveTest do
         |> render_change(user: %{"email" => "with spaces", "password" => "short"})
 
       assert result =~ "Create your account"
-      assert result =~ "must have the @ sign and no spaces"
+      assert result =~ "must be a valid email address"
       assert result =~ "should be at least 6 character"
     end
   end

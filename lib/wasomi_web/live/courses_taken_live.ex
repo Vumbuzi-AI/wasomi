@@ -28,15 +28,11 @@ defmodule WasomiWeb.CoursesTakenLive do
     ~H"""
     <.student_layout active={:courses} current_user={@current_user}>
       <div class="w-full px-5 py-8 lg:px-8">
-        <div class="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <p class="text-sm font-semibold uppercase tracking-wider text-primary">My courses</p>
-            <h1 class="mt-2 text-3xl font-semibold text-ink">Courses you're taking.</h1>
-          </div>
-          <span :if={@course_cards != []} class="text-sm text-muted">
+        <.learner_page_header eyebrow="My courses" title="Courses you're taking.">
+          <:actions :if={@course_cards != []}>
             {pluralize(length(@course_cards), "course")}
-          </span>
-        </div>
+          </:actions>
+        </.learner_page_header>
 
         <div
           :if={@course_cards != []}

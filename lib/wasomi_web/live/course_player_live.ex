@@ -29,7 +29,7 @@ defmodule WasomiWeb.CoursePlayerLive do
 
   use WasomiWeb, :live_view
 
-  alias Wasomi.{Assessments, Catalog, Certificates, Channels, Enrollments, Learning}
+  alias Wasomi.{Assessments, Catalog, Certificates, Channels, Enrollments, Learning, Reviews}
 
   require Logger
 
@@ -84,6 +84,13 @@ defmodule WasomiWeb.CoursePlayerLive do
             Assessments.completed_quiz_ids_for_user(socket.assigns.current_user.id, course.id)
           end
 
+        course_review =
+          if preview? do
+            nil
+          else
+            Reviews.get_user_course_review(socket.assigns.current_user, course)
+          end
+
         {:ok,
          socket
          |> assign(:page_title, preview_page_title(course, preview?))
@@ -110,6 +117,11 @@ defmodule WasomiWeb.CoursePlayerLive do
          |> assign(:lecture_quiz_answers, %{})
          |> assign(:lecture_quiz_result, nil)
          |> assign(:celebrating_certificate, nil)
+         |> assign(:awaiting_certificate?, false)
+         |> assign(:certificate_slow?, false)
+         |> assign(:course_review, course_review)
+         |> assign(:review_form_rating, nil)
+         |> assign(:review_form_body, "")
          |> assign_lecture_quiz_gating()
          |> refresh_progress()
          |> load_lecture_quiz()}
@@ -217,7 +229,7 @@ defmodule WasomiWeb.CoursePlayerLive do
 
   @impl true
   def handle_event("select-lesson-tab", %{"tab" => tab}, socket)
-      when tab in ["overview", "materials", "practice", "quiz"] do
+      when tab in ["overview", "practice", "quiz"] do
     {:noreply, assign(socket, :lesson_tab, String.to_existing_atom(tab))}
   end
 
@@ -511,6 +523,51 @@ defmodule WasomiWeb.CoursePlayerLive do
     end
   end
 
+  # One "mark complete" click for the whole lesson, from the end of its body.
+  # A reading-only lesson completes by marking all its PDFs read (preserving the
+  # existing per-resource events); any other non-video lesson completes directly.
+  def handle_event("complete-lesson", %{"lecture_id" => lecture_id}, socket) do
+    case current_lecture(socket, lecture_id) do
+      nil ->
+        {:noreply, socket}
+
+      %{duration_seconds: seconds} when is_integer(seconds) ->
+        # A video governs its own completion — nothing to click here.
+        {:noreply, socket}
+
+      lecture ->
+        cond do
+          socket.assigns.preview? ->
+            socket =
+              lecture
+              |> lecture_pdfs()
+              |> Enum.reduce(socket, fn resource, acc ->
+                update(acc, :preview_read_resource_ids, &MapSet.put(&1, resource.id))
+              end)
+              |> put_preview_progress(lecture.id, :completed, 0)
+              |> refresh_progress()
+              |> focus_pending_quiz(lecture)
+
+            {:noreply, put_flash(socket, :info, "Lesson marked complete — preview only.")}
+
+          reading_only_lecture?(lecture) ->
+            Enum.each(
+              lecture_pdfs(lecture),
+              &Learning.mark_resource_read(socket.assigns.current_user, &1)
+            )
+
+            {:noreply,
+             socket
+             |> refresh_progress()
+             |> focus_pending_quiz(lecture)
+             |> put_flash(:info, "Lesson marked as read.")}
+
+          true ->
+            persist_progress(socket, lecture, lecture.duration_seconds, true)
+        end
+    end
+  end
+
   @impl true
   def handle_event("mark-resource-read", %{"resource_id" => resource_id}, socket) do
     case find_current_resource(socket, resource_id) do
@@ -578,6 +635,86 @@ defmodule WasomiWeb.CoursePlayerLive do
 
   def handle_event("dismiss-certificate-celebration", _params, socket) do
     {:noreply, assign(socket, :celebrating_certificate, nil)}
+  end
+
+  def handle_event("dismiss-awaiting-certificate", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:awaiting_certificate?, false)
+     |> assign(:certificate_slow?, false)}
+  end
+
+  @impl true
+  def handle_event("select-rating", %{"rating" => rating_str}, socket) do
+    case Integer.parse(rating_str) do
+      {rating, ""} when rating in 1..5 ->
+        {:noreply, assign(socket, :review_form_rating, rating)}
+
+      _ ->
+        {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_event("submit-course-review", params, socket) do
+    rating =
+      socket.assigns.review_form_rating ||
+        case params["rating"] do
+          r when is_binary(r) ->
+            case Integer.parse(r) do
+              {val, ""} when val in 1..5 -> val
+              _ -> nil
+            end
+
+          r when is_integer(r) and r in 1..5 ->
+            r
+
+          _ ->
+            nil
+        end
+
+    body = params["body"]
+
+    if rating in 1..5 do
+      case Reviews.upsert_course_review(
+             socket.assigns.current_user,
+             socket.assigns.course,
+             %{"rating" => rating, "body" => body}
+           ) do
+        {:ok, review} ->
+          socket =
+            socket
+            |> assign(:course_review, review)
+            |> put_flash(:info, "Thank you for rating the course!")
+            |> trigger_certificate_flow()
+
+          {:noreply, socket}
+
+        {:error, _changeset} ->
+          {:noreply,
+           put_flash(socket, :error, "Could not save rating. Please select 1 to 5 stars.")}
+      end
+    else
+      {:noreply, put_flash(socket, :error, "Please select a star rating.")}
+    end
+  end
+
+  defp trigger_certificate_flow(socket) do
+    socket = refresh_certificates(socket)
+
+    case List.first(socket.assigns.certificates) do
+      nil ->
+        Process.send_after(self(), :recheck_certificate, 4_000)
+        Process.send_after(self(), :certificate_wait_elapsed, 5_000)
+        assign(socket, :awaiting_certificate?, true)
+
+      certificate ->
+        certificate = %{certificate | course: socket.assigns.course}
+
+        socket
+        |> assign(:celebrating_certificate, certificate)
+        |> assign(:awaiting_certificate?, false)
+    end
   end
 
   defp safe_section(section_str) do
@@ -728,8 +865,29 @@ defmodule WasomiWeb.CoursePlayerLive do
 
   @impl true
   def handle_info({event, _subject}, socket)
-      when event in [:lecture_completed, :module_completed, :course_completed] do
+      when event in [:lecture_completed, :module_completed] do
     {:noreply, refresh_progress(socket)}
+  end
+
+  # When the course is fully completed, refresh progress.
+  # If the learner hasn't rated the course yet, we let them rate inline on the page.
+  # If already rated, we trigger the certificate flow directly.
+  def handle_info({:course_completed, _subject}, socket) do
+    socket = refresh_progress(socket)
+
+    cond do
+      socket.assigns.preview? ->
+        {:noreply, socket}
+
+      not is_nil(socket.assigns.celebrating_certificate) ->
+        {:noreply, socket}
+
+      is_nil(socket.assigns.course_review) ->
+        {:noreply, socket}
+
+      true ->
+        {:noreply, trigger_certificate_flow(socket)}
+    end
   end
 
   # Presence diffs on the channel topic are for the nested `ChannelLive`, not
@@ -766,16 +924,114 @@ defmodule WasomiWeb.CoursePlayerLive do
 
     if course_id == socket.assigns.course.id do
       certificate = %{certificate | course: socket.assigns.course}
-      {:noreply, assign(socket, :celebrating_certificate, certificate)}
+
+      # If the learner just completed the course and hasn't rated it yet,
+      # hold the celebration modal until they submit/skip the rating prompt on the page.
+      if is_nil(socket.assigns.course_review) and
+           socket.assigns.course_progress.complete? and
+           not socket.assigns.awaiting_certificate? and
+           not socket.assigns.preview? do
+        {:noreply, socket}
+      else
+        {:noreply,
+         socket
+         |> assign(:celebrating_certificate, certificate)
+         |> assign(:awaiting_certificate?, false)}
+      end
     else
       {:noreply, socket}
     end
   end
 
+  # Backup for a missed `:certificate_ready` (e.g. a LiveView reconnect while the
+  # generation job was running): poll once the "preparing" modal is up.
+  def handle_info(:recheck_certificate, socket) do
+    socket = refresh_certificates(socket)
+
+    cond do
+      not socket.assigns.awaiting_certificate? or
+          not is_nil(socket.assigns.celebrating_certificate) ->
+        {:noreply, socket}
+
+      certificate = List.first(socket.assigns.certificates) ->
+        {:noreply,
+         socket
+         |> assign(
+           :celebrating_certificate,
+           %{certificate | course: socket.assigns.course}
+         )
+         |> assign(:awaiting_certificate?, false)}
+
+      not socket.assigns.certificate_slow? ->
+        Process.send_after(self(), :recheck_certificate, 4_000)
+        {:noreply, socket}
+
+      true ->
+        {:noreply, socket}
+    end
+  end
+
+  # The certificate is taking longer than a learner should wait on a modal —
+  # swap to copy that sends them on their way.
+  def handle_info(:certificate_wait_elapsed, socket) do
+    {:noreply, assign(socket, :certificate_slow?, socket.assigns.awaiting_certificate?)}
+  end
+
   @impl true
   def render(assigns) do
     ~H"""
-    <.student_layout active={:courses} current_user={@current_user}>
+    <div class="min-h-screen bg-surface text-body">
+      <div
+        :if={@awaiting_certificate? && is_nil(@celebrating_certificate)}
+        id="certificate-preparing"
+        phx-window-keydown="dismiss-awaiting-certificate"
+        phx-key="Escape"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 px-4 backdrop-blur-sm"
+      >
+        <div class="relative w-full max-w-md rounded-3xl bg-white p-8 text-center shadow-2xl">
+          <button
+            type="button"
+            phx-click="dismiss-awaiting-certificate"
+            class="absolute right-4 top-4 text-muted transition hover:text-ink"
+            aria-label="Close"
+          >
+            <.icon name="hero-x-mark" class="h-5 w-5" />
+          </button>
+
+          <div class="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-mint">
+            <.icon name="hero-sparkles" class="h-8 w-8 text-primary" />
+          </div>
+          <h2 class="mt-4 text-2xl font-semibold text-ink">Thanks — you're all done!</h2>
+          <p class="mt-1 text-body">
+            You've completed <span class="font-semibold text-ink">{@course.title}</span>.
+          </p>
+          <p :if={!@certificate_slow?} class="mt-4 inline-flex items-center gap-2 text-sm text-muted">
+            <.icon name="hero-arrow-path" class="h-4 w-4 animate-spin" /> Preparing your certificate…
+          </p>
+          <p :if={@certificate_slow?} class="mt-4 text-sm text-body">
+            Your certificate is taking a little longer than usual. It'll be waiting under
+            <span class="font-semibold text-ink">Certificates</span>
+            shortly — no need to stay here.
+          </p>
+
+          <div class="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-center">
+            <.link
+              navigate={~p"/certificates"}
+              class="inline-flex items-center justify-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-ink"
+            >
+              <.icon name="hero-trophy" class="h-4 w-4" /> Go to my certificates
+            </.link>
+            <button
+              type="button"
+              phx-click="dismiss-awaiting-certificate"
+              class="inline-flex items-center justify-center gap-2 rounded-full border border-black/10 px-5 py-2.5 text-sm font-semibold text-ink transition hover:border-primary hover:text-primary"
+            >
+              Keep learning
+            </button>
+          </div>
+        </div>
+      </div>
+
       <div
         :if={@celebrating_certificate}
         id="certificate-celebration"
@@ -828,42 +1084,44 @@ defmodule WasomiWeb.CoursePlayerLive do
               <.icon name="hero-arrow-top-right-on-square" class="h-4 w-4" /> Add to LinkedIn
             </.link>
           </div>
-
-          <button
-            type="button"
-            phx-click="dismiss-certificate-celebration"
-            class="mt-4 text-sm font-medium text-muted transition hover:text-ink"
-          >
-            Continue learning
-          </button>
         </div>
       </div>
 
-      <div class="course-workspace min-h-screen bg-surface pb-10 text-body">
-        <div id="course-player" {capture_guard_attrs(@current_user)}>
-          <div class="border-b border-black/70 bg-white px-5 py-5 sm:px-8 lg:px-12">
-            <div class="relative flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
-              <.link
-                navigate={
-                  if @preview?, do: ~p"/admin/courses/#{@course.slug}", else: ~p"/courses-taken"
-                }
-                class="inline-flex w-fit items-center gap-3 rounded-2xl border border-black/80 px-5 py-3 font-semibold text-[#333] transition hover:bg-[#111] hover:text-white"
-              >
-                <.icon name="hero-arrow-left" class="h-5 w-5" /> Back to courses
-                <span :if={!@preview?} class="sr-only">My courses</span>
-              </.link>
-              <div class="text-left sm:absolute sm:left-1/2 sm:-translate-x-1/2 sm:text-center">
-                <p class="text-[11px] font-bold uppercase tracking-[0.12em] text-primary">
-                  Course workspace
-                </p>
-                <p id="course-progress-percent" class="mt-1 text-base font-bold text-dark">
-                  {@course_progress.percent}% complete
-                </p>
-              </div>
-            </div>
+      <header class="sticky top-0 z-40 border-b border-black/10 bg-white">
+        <div class="flex items-center justify-between gap-4 px-4 py-2.5 sm:px-6">
+          <div class="flex min-w-0 items-center gap-3">
+            <img src={~p"/images/logo.png"} alt="Wasomi" class="h-6 w-auto shrink-0" />
+            <span class="hidden h-5 w-px bg-black/10 sm:block"></span>
+            <p class="min-w-0 truncate text-sm font-medium text-dark">{@course.title}</p>
+            <span
+              id="course-progress-percent"
+              class="hidden shrink-0 text-xs font-semibold text-primary sm:inline"
+            >
+              {@course_progress.percent}% complete
+            </span>
           </div>
+          <.link
+            navigate={if @preview?, do: ~p"/admin/courses/#{@course.slug}", else: ~p"/courses-taken"}
+            class="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-black/15 px-3 py-1.5 text-sm font-semibold text-dark transition hover:border-dark hover:bg-dark hover:text-white"
+            aria-label="Exit course"
+          >
+            <.icon name="hero-x-mark" class="h-5 w-5" />
+            <span class="hidden sm:inline">Exit</span>
+          </.link>
+        </div>
+        <div class="h-1 w-full bg-surface">
+          <div
+            id="course-progress-bar"
+            class="h-full bg-primary transition-all duration-500"
+            style={"width: #{@course_progress.percent}%"}
+          >
+          </div>
+        </div>
+      </header>
 
-          <div class="mx-auto max-w-[1720px] px-5 py-8 sm:px-8 lg:px-12">
+      <div class="course-workspace pb-12">
+        <div id="course-player" {capture_guard_attrs(@current_user)}>
+          <div class="mx-auto max-w-[1720px] px-5 py-6 sm:px-8 lg:px-12">
             <div
               :if={@preview?}
               id="admin-preview-banner"
@@ -886,840 +1144,94 @@ defmodule WasomiWeb.CoursePlayerLive do
               </.link>
             </div>
 
-            <section class="rounded-[2rem] bg-white px-6 py-9 sm:px-10 lg:flex lg:items-center lg:justify-between lg:gap-12 lg:px-14 lg:py-14">
-              <div class="max-w-3xl">
-                <h1 class="text-3xl font-medium tracking-tight text-dark sm:text-4xl lg:text-5xl">
-                  {@course.title}
-                </h1>
-                <p class="mt-4 max-w-2xl text-base leading-relaxed text-body">
-                  {@course.description}
-                </p>
-              </div>
-              <div class="mt-8 grid grid-cols-3 gap-2 lg:mt-0 lg:w-[510px] lg:gap-4">
-                <div class="rounded-2xl border border-black/80 p-4 sm:p-6">
-                  <p class="text-xs font-bold uppercase tracking-wider">Modules</p>
-                  <p class="mt-2 text-xl font-bold">{length(@course.modules)}</p>
+            <div class="mt-2 lg:grid lg:grid-cols-[320px_minmax(0,1fr)] lg:items-start lg:gap-5">
+              <aside class="mb-4 flex max-h-[calc(100vh-2rem)] flex-col overflow-hidden rounded-2xl bg-white lg:mb-0 lg:sticky lg:top-4">
+                <% course_resources = course_resources(@course) %>
+                <div class="flex border-b border-black/10">
+                  <button
+                    id="outline-tab"
+                    type="button"
+                    phx-click={switch_outline_tab(:outline)}
+                    class="flex-1 border-b-2 border-primary px-4 py-3 text-sm font-semibold text-dark transition"
+                  >
+                    Outline
+                  </button>
+                  <button
+                    id="resources-tab"
+                    type="button"
+                    phx-click={switch_outline_tab(:resources)}
+                    class="flex flex-1 items-center justify-center gap-1.5 border-b-2 border-transparent px-4 py-3 text-sm font-semibold text-muted transition"
+                  >
+                    Resources
+                    <span
+                      :if={course_resources != []}
+                      class="rounded-full bg-surface px-1.5 text-[11px] font-bold text-muted"
+                    >
+                      {length(course_resources)}
+                    </span>
+                  </button>
                 </div>
-                <div class="rounded-2xl border border-black/80 p-4 sm:p-6">
-                  <p class="text-xs font-bold uppercase tracking-wider">Lessons</p>
-                  <p class="mt-2 text-xl font-bold">{@course_progress.total}</p>
-                </div>
-                <div class="rounded-2xl border border-black/80 p-4 sm:p-6">
-                  <p class="text-xs font-bold uppercase tracking-wider">Learning time</p>
-                  <p class="mt-2 text-xl font-bold">{course_minutes(@course)} min</p>
-                </div>
-              </div>
-            </section>
-            <div class="mt-5 h-3 overflow-hidden rounded-full bg-white">
-              <div
-                id="course-progress-bar"
-                class="h-full rounded-full bg-primary transition-all duration-500"
-                style={"width: #{@course_progress.percent}%"}
-              >
-              </div>
-            </div>
 
-            <section class="mt-5 rounded-[2rem] bg-white p-6 sm:p-8 lg:p-10">
-              <h2 class="text-lg font-medium tracking-tight text-dark sm:text-xl">
-                Study this lesson your way
-              </h2>
-              <nav class="mt-6 flex gap-3 overflow-x-auto pb-2">
-                <button
-                  :for={{section, label, icon} <- section_nav_items()}
-                  type="button"
-                  phx-click="select-section"
-                  phx-value-section={section}
-                  class={[
-                    "inline-flex min-h-20 min-w-[190px] flex-1 items-center justify-start gap-3 rounded-2xl border border-black/80 px-5 py-4 text-left text-sm font-semibold transition",
-                    is_nil(@active_study_tool) && @active_section == section &&
-                      "border-dark bg-white text-primary sm:bg-dark sm:text-white",
-                    (!is_nil(@active_study_tool) || @active_section != section) &&
-                      "text-body hover:border-primary hover:text-primary"
-                  ]}
-                >
-                  <.icon name={icon} class="h-6 w-6 shrink-0" />
-                  <span>
-                    <span class="block text-sm">{label}</span>
-                    <span :if={section == :lessons} class="sr-only">Lessons</span>
-                    <span class="mt-1 block text-[11px] font-normal leading-snug opacity-90">
-                      Watch the lesson and follow the course outline.
-                    </span>
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  phx-click="select-section"
-                  phx-value-section="module_quiz"
-                  class="sr-only"
-                >
-                  Module quiz
-                </button>
-                <button
-                  type="button"
-                  phx-click="select-section"
-                  phx-value-section="discussion"
-                  class={[
-                    "relative inline-flex min-h-20 min-w-[190px] flex-1 items-center justify-start gap-3 rounded-2xl border border-black/80 px-5 py-4 text-left text-sm font-semibold transition",
-                    is_nil(@active_study_tool) && @active_section == :discussion &&
-                      "border-dark bg-white text-primary sm:bg-dark sm:text-white",
-                    (!is_nil(@active_study_tool) || @active_section != :discussion) &&
-                      "text-body hover:border-primary hover:text-primary"
-                  ]}
-                >
-                  <.icon name="hero-chat-bubble-left-right" class="h-6 w-6 shrink-0" />
-                  <span>
-                    <span class="flex items-center gap-2 text-sm">
-                      Discussion
-                      <span
-                        :if={@channel_unread > 0}
-                        class="grid h-5 min-w-5 place-items-center rounded-full bg-primary px-1.5 text-[11px] font-bold leading-none text-white"
-                      >
-                        {min(@channel_unread, 99)}
-                      </span>
-                    </span>
-                    <span class="mt-1 block text-[11px] font-normal leading-snug opacity-90">
-                      Talk with your cohort and course team.
-                    </span>
-                  </span>
-                </button>
-                <button
-                  :for={{mode, label, icon, description} <- study_hub_nav_items()}
-                  type="button"
-                  phx-click="select-study-tool"
-                  phx-value-tool={mode}
-                  class={[
-                    "inline-flex min-h-20 min-w-[190px] flex-1 items-center justify-start gap-3 rounded-2xl border border-black/80 px-5 py-4 text-left text-sm font-semibold transition",
-                    @active_study_tool == mode && "border-dark bg-dark text-white",
-                    @active_study_tool != mode && "text-body hover:border-primary hover:text-primary"
-                  ]}
-                >
-                  <.icon
-                    name={icon}
-                    class={"h-6 w-6 shrink-0 #{if @active_study_tool == mode, do: "text-white", else: "text-primary"}"}
-                  />
-                  <span>
-                    <span class="block text-sm">{label}</span>
-                    <span class="mt-1 block text-[11px] font-normal leading-snug opacity-90">
-                      {description}
-                    </span>
-                  </span>
-                </button>
-              </nav>
-            </section>
-
-            <section :if={@active_study_tool} class="mt-8 overflow-hidden rounded-[2rem] bg-white">
-              {live_render(@socket, WasomiWeb.EmbeddedStudyHubLive,
-                id:
-                  "embedded-study-tool-#{@active_study_tool}-#{@study_guide_resource_id || "lesson"}",
-                session:
-                  embedded_study_hub_session(
-                    @current_user,
-                    @course,
-                    current_module(assigns),
-                    @active_study_tool,
-                    @study_guide_resource_id
-                  )
-              )}
-            </section>
-
-            <section
-              :if={@active_section == :discussion && is_nil(@active_study_tool)}
-              class="mt-8 overflow-hidden rounded-[2rem] bg-white"
-            >
-              {live_render(@socket, WasomiWeb.ChannelLive,
-                id: "course-channel",
-                sticky: true,
-                session: %{
-                  "current_user_id" => @current_user.id,
-                  "course_slug" => @course.slug,
-                  "highlight_message_id" => @channel_highlight_message_id
-                }
-              )}
-            </section>
-
-            <div
-              :if={@active_section == :lessons && is_nil(@active_study_tool)}
-              class="mt-8 grid items-start gap-7 xl:grid-cols-[minmax(0,1fr)_440px]"
-            >
-              <section class="overflow-hidden rounded-[2rem] bg-white">
-                <%= if @current_quiz do %>
-                  <.quiz_taking_panel
-                    current_quiz={@current_quiz}
-                    quiz_result={@quiz_result}
-                    quiz_answers={@quiz_answers}
-                    current_question_index={@current_question_index}
-                  />
-                <% else %>
-                  <%= if @current_lecture do %>
-                    <% module = current_module(assigns) %>
-                    <header class="px-7 py-8 sm:px-10 sm:py-10">
-                      <div class="flex flex-wrap items-center gap-3 text-sm font-semibold text-body">
-                        <span>{@course.title}</span>
-                        <.icon name="hero-chevron-right" class="h-4 w-4 text-primary" />
-                        <span>{module && module.title}</span>
-                      </div>
-                      <h2 class="mt-6 text-3xl font-medium tracking-tight text-dark sm:text-4xl lg:text-5xl">
-                        {@current_lecture.title}
-                      </h2>
-                      <div class="mt-5 flex flex-wrap items-center gap-6 text-sm font-semibold text-body">
-                        <span class="inline-flex items-center gap-2">
-                          <.icon name="hero-book-open" class="h-5 w-5 text-primary" />
-                          Lesson {lecture_number(@course, @current_lecture)} of {@course_progress.total}
-                        </span>
-                        <% lesson_minutes = lecture_estimated_minutes(@current_lecture) %>
-                        <span :if={lesson_minutes} class="inline-flex items-center gap-2">
-                          <.icon name="hero-clock" class="h-5 w-5 text-primary" />
-                          {lesson_minutes} min
-                        </span>
-                        <%!-- What this lesson is made of, before the learner scrolls: a
-                        recording, reading, practice, a graded quiz, or some mix. --%>
-                        <span class="flex flex-wrap items-center gap-2">
-                          <span
-                            :for={badge <- resource_type_badges(assigns, @current_lecture)}
-                            class="inline-flex items-center gap-1.5 rounded-full bg-mint px-2.5 py-1 text-xs font-semibold text-primary"
-                          >
-                            <.icon name={badge.icon} class="h-3.5 w-3.5" />
-                            {badge.label}
-                          </span>
-                        </span>
-                      </div>
-                    </header>
-
-                    <div :if={@current_lecture.duration_seconds} class="bg-dark p-4 sm:p-6">
-                      <div
-                        id={"protected-player-#{@current_lecture.id}"}
-                        phx-hook="ProtectedVideo"
-                        phx-update="ignore"
-                        data-playback-url={playback_url_path(@current_lecture.id, @preview?)}
-                        data-video-title={@current_lecture.title}
-                        data-viewer-id={@current_user.id}
-                        data-lecture-id={@current_lecture.id}
-                        data-preview={to_string(@preview?)}
-                        data-start-position={progress_position(@progress, @current_lecture.id)}
-                        data-seek-unlocked={
-                          to_string(progress_status(@progress, @current_lecture.id) == :completed)
-                        }
-                        data-watermark={watermark_text(@current_user)}
-                        class="relative mx-auto aspect-video w-full overflow-hidden rounded-2xl bg-black shadow-2xl ring-1 ring-white/15"
-                        oncontextmenu="return false"
-                      >
-                        <div
-                          data-role="player"
-                          class="absolute inset-0 grid place-items-center text-sm text-white/70"
-                        >
-                          Loading protected video…
-                        </div>
-                        <div
-                          :if={!@preview?}
-                          data-role="watermark"
-                          class="pointer-events-none absolute left-[6%] top-[8%] z-20 max-w-[80%] select-none rounded-full bg-black/30 px-3 py-1 text-xs font-medium text-white/60 backdrop-blur-sm transition-all duration-1000"
-                        >
-                          {watermark_text(@current_user)}
-                        </div>
-                      </div>
-                    </div>
-                    <% completed? = progress_status(@progress, @current_lecture.id) == :completed %>
-                    <% has_video? = not is_nil(@current_lecture.duration_seconds) %>
-                    <% watched_enough? =
-                      not has_video? or
-                        Learning.watched_enough?(
-                          progress_position(@progress, @current_lecture.id),
-                          @current_lecture.duration_seconds
-                        ) %>
-                    <% reading_only? = reading_only_lecture?(@current_lecture) %>
-                    <% unread_pdfs = unread_pdf_count(@read_resource_ids, @current_lecture) %>
-                    <% quiz_pending? = lecture_quiz_pending?(assigns, @current_lecture) %>
-                    <% next_lesson = next_lecture(@course, @current_lecture) %>
-                    <% tabs = lesson_tabs(assigns) %>
-                    <% active_tab =
-                      if Enum.any?(tabs, &(&1.id == @lesson_tab)), do: @lesson_tab, else: :overview %>
-
-                    <%!-- The lesson names its own next move, directly under the player. The
-                    graded quiz used to be the last thing on a very long page — below the
-                    notes, the downloads and the practice questions — which made the one step
-                    that unlocks the next lesson the easiest one to scroll past.
-
-                    There is no "Mark complete" button for a recording any more: a video
-                    reports its own position, so it completes itself once watched (see
-                    Learning.record_progress/3's auto-complete and the player's `ended`
-                    handler). Only material that can't report on itself — a PDF, which is
-                    marked read per document — still needs a click. --%>
-                    <div
-                      id="lesson-next-step"
-                      class="flex flex-wrap items-center justify-between gap-5 border-y border-black/5 bg-mint px-7 py-6 sm:px-10"
-                    >
-                      <div class="flex min-w-0 items-start gap-4">
-                        <span class="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-white text-primary">
-                          <.icon
-                            name={
-                              cond do
-                                not completed? and reading_only? -> "hero-document-text"
-                                not completed? -> "hero-play-circle"
-                                quiz_pending? -> "hero-clipboard-document-check"
-                                true -> "hero-check-circle"
-                              end
-                            }
-                            class="h-6 w-6"
-                          />
-                        </span>
-                        <div class="min-w-0">
-                          <p class="text-[11px] font-bold uppercase tracking-[0.12em] text-primary">
-                            Next step
-                          </p>
-                          <p class="mt-1 text-base font-semibold text-ink">
-                            {cond do
-                              not completed? and reading_only? and unread_pdfs > 0 ->
-                                "Read this lesson's material"
-
-                              not completed? and has_video? and not watched_enough? ->
-                                "Keep watching this lesson"
-
-                              not completed? and has_video? ->
-                                "Finish the video to complete this lesson"
-
-                              not completed? ->
-                                "Mark this lesson complete"
-
-                              quiz_pending? ->
-                                "Pass the lesson quiz to unlock the next lesson"
-
-                              next_lesson ->
-                                "Up next — #{next_lesson.title}"
-
-                              true ->
-                                "You have finished the last lesson here"
-                            end}
-                          </p>
-                          <p class="mt-1 text-sm text-body">
-                            {cond do
-                              not completed? and reading_only? and unread_pdfs == 1 ->
-                                "Mark the PDF below as read and this lesson is done."
-
-                              not completed? and reading_only? and unread_pdfs > 1 ->
-                                "#{unread_pdfs} PDFs to go — mark each one as read below."
-
-                              not completed? and has_video? and not watched_enough? ->
-                                "This lesson completes on its own once you have watched the video — no button to press."
-
-                              not completed? and has_video? ->
-                                "Almost there. Play it through to the end and it completes itself."
-
-                              not completed? ->
-                                "There is nothing to watch or read here, so mark it complete when you are ready."
-
-                              quiz_pending? ->
-                                "#{length(@lecture_quiz.questions)} questions · score #{@lecture_quiz.quiz.passing_score_percent}% to pass."
-
-                              next_lesson ->
-                                "Everything for this lesson is done."
-
-                              true ->
-                                "Nothing left to do in this lesson."
-                            end}
-                          </p>
-                        </div>
-                      </div>
-                      <div class="flex flex-wrap items-center gap-3">
-                        <span
-                          :if={completed?}
-                          class="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-semibold text-primary"
-                        >
-                          <.icon name="hero-check-circle" class="h-5 w-5" /> Completed
-                        </span>
-                        <%!-- A recording's progress is worth showing precisely because there
-                        is no button next to it: this is the learner's only feedback that
-                        the lesson is tracking towards completing itself. --%>
-                        <span
-                          :if={!completed? && has_video?}
-                          id="lecture-watch-progress"
-                          class="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-semibold text-primary"
-                        >
-                          <.icon name="hero-play-circle" class="h-5 w-5" />
-                          {progress_percent(@progress, @current_lecture)}% watched
-                        </span>
-                        <button
-                          :if={!completed? && reading_only? && unread_pdfs > 0}
-                          id="go-to-lesson-reading"
-                          type="button"
-                          phx-click={
-                            JS.push("select-lesson-tab", value: %{tab: "overview"})
-                            |> JS.dispatch("wasomi:scroll-into-view", to: "#lesson-pdfs")
-                          }
-                          class="inline-flex items-center gap-2 rounded-2xl bg-primary px-6 py-3 text-sm font-semibold text-white transition hover:bg-ink"
-                        >
-                          Go to the reading <.icon name="hero-arrow-down" class="h-4 w-4" />
-                        </button>
-                        <%!-- The manual button survives only for a lesson with neither a
-                        video nor a PDF (a links-only or questions-only lesson): nothing
-                        there can complete itself, and nothing there can be marked read. --%>
-                        <button
-                          :if={!completed? && !has_video? && !reading_only?}
-                          id="mark-lecture-complete"
-                          type="button"
-                          phx-click="complete-lecture"
-                          phx-value-lecture_id={@current_lecture.id}
-                          class="rounded-2xl bg-primary px-6 py-3 text-sm font-semibold text-white transition hover:bg-ink"
-                        >
-                          Mark complete
-                        </button>
-                        <button
-                          :if={completed? && quiz_pending?}
-                          id="start-lesson-quiz"
-                          type="button"
-                          phx-click={
-                            JS.push("select-lesson-tab", value: %{tab: "quiz"})
-                            |> JS.dispatch("wasomi:scroll-into-view", to: "#lesson-tabs")
-                          }
-                          class="inline-flex items-center gap-2 rounded-2xl bg-primary px-6 py-3 text-sm font-semibold text-white transition hover:bg-ink"
-                        >
-                          Take the lesson quiz <.icon name="hero-arrow-right" class="h-4 w-4" />
-                        </button>
-                        <button
-                          :if={completed? && !quiz_pending? && next_lesson}
-                          type="button"
-                          phx-click="select-lecture"
-                          phx-value-id={next_lesson.id}
-                          class="inline-flex items-center gap-2 rounded-2xl bg-primary px-6 py-3 text-sm font-semibold text-white transition hover:bg-ink"
-                        >
-                          Next lesson <.icon name="hero-arrow-right" class="h-4 w-4" />
-                        </button>
-                      </div>
-                    </div>
-
-                    <div
-                      id="lesson-tabs"
-                      role="tablist"
-                      aria-label="Lesson material"
-                      class="flex gap-1 overflow-x-auto border-b border-black/5 px-7 sm:px-10"
-                    >
-                      <button
-                        :for={tab <- tabs}
-                        id={"lesson-tab-#{tab.id}"}
-                        type="button"
-                        role="tab"
-                        aria-selected={to_string(active_tab == tab.id)}
-                        phx-click={
-                          JS.push("select-lesson-tab", value: %{tab: to_string(tab.id)})
-                          |> JS.dispatch("wasomi:scroll-into-view", to: "#lesson-tabs")
-                        }
-                        class={[
-                          "-mb-px inline-flex shrink-0 items-center gap-2 border-b-2 px-3 py-4 text-sm font-semibold transition",
-                          active_tab == tab.id && "border-primary text-primary",
-                          active_tab != tab.id &&
-                            "border-transparent text-body hover:border-black/20 hover:text-ink"
-                        ]}
-                      >
-                        <.icon name={tab.icon} class="h-4 w-4 shrink-0" />
-                        <span>{tab.label}</span>
-                        <span
-                          :if={tab.count && tab.flag != :required}
-                          class="rounded-full bg-black/5 px-1.5 py-0.5 text-[11px] font-bold"
-                        >
-                          {tab.count}
-                        </span>
-                        <span
-                          :if={tab.flag == :required}
-                          class="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-primary"
-                        >
-                          <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-primary"></span>
-                          Required
-                        </span>
-                        <.icon
-                          :if={tab.flag == :passed}
-                          name="hero-check-circle"
-                          class="h-4 w-4 shrink-0 text-primary"
-                        />
-                      </button>
-                    </div>
-
-                    <div
-                      id="lesson-overview"
-                      role="tabpanel"
-                      aria-labelledby="lesson-tab-overview"
-                      class={[
-                        "space-y-8 bg-white p-7 sm:p-10",
-                        active_tab != :overview && "hidden"
-                      ]}
-                    >
-                      <p
-                        :if={@current_lecture.description not in [nil, ""]}
-                        class="max-w-2xl leading-relaxed text-body"
-                      >
-                        {@current_lecture.description}
-                      </p>
-                      <p
-                        :if={
-                          @current_lecture.description in [nil, ""] &&
-                            !Enum.any?(@current_lecture.resources, &pdf_resource?/1)
-                        }
-                        class="text-sm text-muted"
-                      >
-                        This lesson is the recording above — it has no written notes.
-                      </p>
-
-                      <div
-                        :if={Enum.any?(@current_lecture.resources, &pdf_resource?/1)}
-                        id="lesson-pdfs"
-                        class="space-y-5"
-                      >
-                        <div
-                          :for={
-                            resource <-
-                              Enum.filter(@current_lecture.resources, &pdf_resource?/1)
-                          }
-                          id={"pdf-resource-#{resource.id}"}
-                          class="overflow-hidden rounded-2xl border border-black/10 bg-surface"
-                        >
-                          <% read? = resource_read?(@read_resource_ids, resource) %>
-                          <div class="flex flex-wrap items-center justify-between gap-3 border-b border-black/10 bg-white px-4 py-3">
-                            <span class="flex min-w-0 items-center gap-2">
-                              <.icon
-                                :if={read?}
-                                name="hero-check-circle"
-                                class="h-4 w-4 shrink-0 text-primary"
-                              />
-                              <span class="min-w-0 truncate text-sm font-semibold text-ink">
-                                {resource.name}
-                              </span>
-                            </span>
-                            <div class="flex shrink-0 flex-wrap items-center gap-2">
-                              <.link
-                                href={resource_download_path(resource.id, @preview?)}
-                                target="_blank"
-                                class="text-xs font-semibold text-primary hover:text-ink"
-                              >
-                                Open PDF
-                              </.link>
-                              <%!-- Notes on this one document, not the whole lesson — the
-                              narrowest study-guide scope, see StudyGuide.validate_scope/1. --%>
-                              <button
-                                type="button"
-                                phx-click="resource-study-guide"
-                                phx-value-resource_id={resource.id}
-                                class="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-white px-3 py-1.5 text-xs font-semibold text-ink transition hover:border-primary/40 hover:bg-mint/40 hover:text-primary"
-                              >
-                                <.icon name="hero-light-bulb" class="h-3.5 w-3.5 text-primary" />
-                                Study guide
-                              </button>
-                              <%!-- Nothing about an embedded PDF tells us it has been read, so
-                              this click is the signal. On a reading-only lesson, the last of
-                              these completes the lesson (Learning.mark_resource_read/2). --%>
-                              <button
-                                :if={!read?}
-                                id={"mark-resource-read-#{resource.id}"}
-                                type="button"
-                                phx-click="mark-resource-read"
-                                phx-value-resource_id={resource.id}
-                                class="inline-flex items-center gap-1.5 rounded-full bg-primary px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-ink"
-                              >
-                                <.icon name="hero-check" class="h-3.5 w-3.5" /> Mark as read
-                              </button>
-                              <button
-                                :if={read?}
-                                id={"unmark-resource-read-#{resource.id}"}
-                                type="button"
-                                phx-click="unmark-resource-read"
-                                phx-value-resource_id={resource.id}
-                                title="Undo this read mark. Your lesson completion is kept."
-                                class="inline-flex items-center gap-1.5 rounded-full bg-mint px-3.5 py-1.5 text-xs font-semibold text-primary transition hover:bg-primary hover:text-white"
-                              >
-                                <.icon name="hero-check-circle" class="h-3.5 w-3.5" /> Read
-                              </button>
-                            </div>
-                          </div>
-                          <iframe
-                            src={resource_download_path(resource.id, @preview?)}
-                            title={resource.name}
-                            loading="lazy"
-                            class="h-[70vh] min-h-[520px] w-full bg-white"
-                          >
-                          </iframe>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div
-                      :if={@current_lecture.resources != []}
-                      id="lecture-resources"
-                      role="tabpanel"
-                      aria-labelledby="lesson-tab-materials"
-                      class={["bg-white p-8 lg:p-10", active_tab != :materials && "hidden"]}
-                    >
-                      <h3 class="text-xs font-medium uppercase tracking-widest text-muted">
-                        Resources
-                      </h3>
-                      <p class="mt-1 text-xs text-muted">
-                        Every uploaded resource is a PDF. Reading marks and per-document study
-                        guides live alongside each one in the reader on the Lesson tab.
-                      </p>
-
-                      <ul class="mt-4 space-y-2.5">
-                        <li
-                          :for={resource <- @current_lecture.resources}
-                          class="flex flex-wrap items-center gap-2 rounded-xl border border-black/5 px-4 py-3"
-                        >
-                          <span class="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-mint text-primary">
-                            <.icon name={resource_icon(resource.kind)} class="h-4 w-4" />
-                          </span>
-                          <.link
-                            href={resource_download_path(resource.id, @preview?)}
-                            target={if resource.kind == :link, do: "_blank"}
-                            class="min-w-0 flex-1 truncate text-sm font-medium text-body transition hover:text-primary"
-                          >
-                            {resource.name}
-                          </.link>
-                          <span
-                            :if={
-                              pdf_resource?(resource) && resource_read?(@read_resource_ids, resource)
-                            }
-                            class="inline-flex shrink-0 items-center gap-1 rounded-full bg-mint px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-primary"
-                          >
-                            <.icon name="hero-check-circle" class="h-3.5 w-3.5" /> Read
-                          </span>
-                          <button
-                            :if={
-                              pdf_resource?(resource) && !resource_read?(@read_resource_ids, resource)
-                            }
-                            type="button"
-                            phx-click="mark-resource-read"
-                            phx-value-resource_id={resource.id}
-                            class="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-ink"
-                          >
-                            <.icon name="hero-check" class="h-3.5 w-3.5" /> Mark as read
-                          </button>
-                          <button
-                            :if={pdf_resource?(resource)}
-                            type="button"
-                            phx-click="resource-study-guide"
-                            phx-value-resource_id={resource.id}
-                            class="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-black/10 px-3 py-1.5 text-[11px] font-semibold text-ink transition hover:border-primary/40 hover:bg-mint/40 hover:text-primary"
-                          >
-                            <.icon name="hero-light-bulb" class="h-3.5 w-3.5 text-primary" />
-                            Study guide
-                          </button>
-                          <.icon
-                            :if={resource.kind == :link}
-                            name="hero-arrow-top-right-on-square"
-                            class="h-4 w-4 shrink-0 text-muted"
-                          />
-                        </li>
-                      </ul>
-                    </div>
-
-                    <div
-                      :if={@current_lecture.questions != []}
-                      id="lecture-faq"
-                      role="tabpanel"
-                      aria-labelledby="lesson-tab-practice"
-                      class={["bg-white p-8 lg:p-10", active_tab != :practice && "hidden"]}
-                    >
-                      <h3 class="text-xs font-medium uppercase tracking-widest text-muted">
-                        Practice questions
-                      </h3>
-                      <p class="mt-1 text-xs text-muted">
-                        Type your answer and submit — you'll get instant feedback. These are not
-                        graded.
-                      </p>
-                      <div class="mt-4 space-y-4">
-                        <%= for question <- @current_lecture.questions do %>
-                          <% submission = Map.get(@lq_submissions, question.id) %>
-                          <div class="rounded-2xl border border-black/5 p-5">
-                            <p class="text-sm font-medium text-ink">{question.question}</p>
-                            <%= if submission do %>
-                              <% band = lq_feedback_band(submission.similarity_score) %>
-                              <div class={[
-                                "mt-3 rounded-xl px-4 py-3 text-sm font-medium",
-                                band.class
-                              ]}>
-                                {band.label}
-                              </div>
-                              <p
-                                :if={submission.similarity_score < 0.5}
-                                class="mt-3 text-sm text-body"
-                              >
-                                <span class="font-medium text-ink">Model answer:</span>
-                                {question.answer}
-                              </p>
-                            <% else %>
-                              <form phx-submit="submit-lecture-question" class="mt-3 space-y-2">
-                                <input type="hidden" name="question-id" value={question.id} />
-                                <textarea
-                                  name="answer"
-                                  rows="3"
-                                  placeholder="Type your answer here…"
-                                  required
-                                  class="block w-full rounded-xl border border-black/10 bg-soft px-4 py-2.5 text-sm text-ink placeholder-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                                ></textarea>
-                                <button
-                                  type="submit"
-                                  class="rounded-full bg-primary px-5 py-2 text-sm font-semibold text-white transition hover:bg-ink"
-                                >
-                                  Submit answer
-                                </button>
-                              </form>
-                            <% end %>
-                          </div>
-                        <% end %>
-                      </div>
-                    </div>
-
-                    <div
-                      :if={@lecture_quiz}
-                      id="lesson-quiz"
-                      role="tabpanel"
-                      aria-labelledby="lesson-tab-quiz"
-                      class={["bg-white p-8 lg:p-10", active_tab != :quiz && "hidden"]}
-                    >
-                      <% total = length(@lecture_quiz.questions) %>
-                      <div class="flex flex-wrap items-start justify-between gap-4">
-                        <div>
-                          <h3 class="text-xs font-medium uppercase tracking-widest text-muted">
-                            Lesson quiz
-                          </h3>
-                          <p class="mt-1 text-sm text-body">
-                            {total} questions · score
-                            <span class="font-semibold text-primary">
-                              {@lecture_quiz.quiz.passing_score_percent}%
-                            </span>
-                            to unlock the next lesson.
-                          </p>
-                        </div>
-                        <span
-                          :if={@lecture_quiz_result && @lecture_quiz_result.passed}
-                          class="inline-flex items-center gap-2 rounded-full bg-mint px-3 py-1 text-xs font-semibold text-primary"
-                        >
-                          <.icon name="hero-check-circle" class="h-4 w-4" /> Passed
-                        </span>
-                      </div>
-
-                      <div
-                        :if={@lecture_quiz_result}
-                        class={[
-                          "mt-5 rounded-2xl p-5 text-sm text-ink",
-                          if(@lecture_quiz_result.passed, do: "bg-mint", else: "bg-red-50")
-                        ]}
-                      >
-                        <p class="font-semibold">
-                          You scored {@lecture_quiz_result.score_percent}% — {if(
-                            @lecture_quiz_result.passed,
-                            do: "passed.",
-                            else: "not passed yet."
-                          )}
-                        </p>
-                        <p
-                          :if={Map.get(@lecture_quiz_result, :preview?, false)}
-                          class="mt-1 text-xs text-muted"
-                        >
-                          Admin preview result — scored in memory and not saved.
-                        </p>
-                        <p :if={!@lecture_quiz_result.passed} class="mt-1 text-body">
-                          Review the lesson, then try again — the next lesson stays locked
-                          until you pass.
-                        </p>
-                        <button
-                          type="button"
-                          phx-click="retake-lecture-quiz"
-                          class="mt-4 rounded-full border border-black/10 bg-white px-5 py-2.5 text-sm font-semibold text-ink transition hover:bg-ink hover:text-white"
-                        >
-                          Retake quiz
-                        </button>
-                      </div>
-
-                      <form
-                        :if={is_nil(@lecture_quiz_result)}
-                        phx-submit="submit-lecture-quiz"
-                        class="mt-5 space-y-4"
-                      >
-                        <div
-                          :for={{question, index} <- Enum.with_index(@lecture_quiz.questions, 1)}
-                          class="rounded-2xl border border-black/5 p-5"
-                        >
-                          <p class="text-xs font-semibold uppercase tracking-wider text-primary">
-                            Question {index} of {total}
-                          </p>
-                          <p class="mt-2 text-sm font-medium text-ink">{question.prompt}</p>
-                          <div class="mt-3 space-y-2.5">
-                            <label
-                              :for={option <- question.question_options}
-                              class={[
-                                "flex cursor-pointer items-center gap-3 rounded-xl border p-3.5 transition",
-                                if(
-                                  to_string(Map.get(@lecture_quiz_answers, to_string(question.id))) ==
-                                    to_string(option.id),
-                                  do: "border-primary bg-mint font-medium text-ink",
-                                  else:
-                                    "border-black/10 text-body hover:border-primary/40 hover:bg-mint/40"
-                                )
-                              ]}
-                            >
-                              <input
-                                type="radio"
-                                name={"lecture_quiz_question_#{question.id}"}
-                                value={option.id}
-                                checked={
-                                  to_string(Map.get(@lecture_quiz_answers, to_string(question.id))) ==
-                                    to_string(option.id)
-                                }
-                                phx-click="select-lecture-quiz-option"
-                                phx-value-question-id={question.id}
-                                phx-value-option-id={option.id}
-                                class="h-4 w-4 border-black/20 bg-white text-primary focus:ring-primary"
-                              />
-                              <span class="text-sm">{option.label}</span>
-                            </label>
-                          </div>
-                        </div>
-
-                        <div class="flex flex-wrap items-center justify-between gap-3 border-t border-black/5 pt-5">
-                          <span class="text-xs text-muted">
-                            Answered {map_size(@lecture_quiz_answers)} of {total} questions
-                          </span>
-                          <button
-                            type="submit"
-                            disabled={map_size(@lecture_quiz_answers) < total}
-                            class="rounded-full bg-primary px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-ink disabled:cursor-not-allowed disabled:opacity-40"
-                          >
-                            Submit quiz
-                          </button>
-                        </div>
-                      </form>
-                    </div>
-                  <% else %>
-                    <div class="grid min-h-80 place-items-center bg-white p-8 text-center text-muted">
-                      This course does not have any content selected.
-                    </div>
-                  <% end %>
-                <% end %>
-              </section>
-
-              <aside class="flex max-h-[calc(100vh-2rem)] flex-col overflow-hidden rounded-[2rem] bg-white xl:sticky xl:top-4">
-                <div class="border-b border-black/10 p-7 lg:p-8">
-                  <h2 class="text-xl font-semibold text-dark">Course outline</h2>
-                  <p class="mt-2 text-sm">
-                    {length(@course.modules)} modules · {@course_progress.total} lessons · {course_minutes(
-                      @course
-                    )} min
+                <div id="resources-panel" class="hidden overflow-y-auto p-3">
+                  <p :if={course_resources == []} class="p-4 text-sm text-muted">
+                    No downloadable resources for this course yet.
                   </p>
+                  <ul class="space-y-1">
+                    <li :for={resource <- course_resources}>
+                      <.link
+                        href={resource_download_path(resource.id, @preview?)}
+                        target={if resource.kind == :link, do: "_blank"}
+                        class="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-body transition hover:bg-surface"
+                      >
+                        <span class="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-mint text-primary">
+                          <.icon name={resource_icon(resource.kind)} class="h-4 w-4" />
+                        </span>
+                        <span class="min-w-0 flex-1 truncate">{resource.name}</span>
+                        <.icon
+                          name={
+                            if resource.kind == :link,
+                              do: "hero-arrow-top-right-on-square",
+                              else: "hero-arrow-down-tray"
+                          }
+                          class="h-4 w-4 shrink-0 text-muted"
+                        />
+                      </.link>
+                    </li>
+                  </ul>
                 </div>
+
                 <%!-- Separators are drawn with divide-y rather than a border-b per row: the
                 last row in the list then has no trailing line to collide with the card's
                 rounded bottom corners. --%>
-                <div class="divide-y divide-black/10 overflow-y-auto">
+                <div id="outline-panel" class="divide-y divide-black/10 overflow-y-auto">
                   <section :for={module <- @course.modules} class="divide-y divide-black/10">
-                    <div class="bg-[#f5f5f5] px-7 py-6">
-                      <div class="flex flex-wrap items-center justify-between gap-2">
-                        <p class="text-sm font-bold uppercase tracking-wider text-primary">
+                    <button
+                      type="button"
+                      aria-expanded="true"
+                      aria-controls={"module-#{module.id}-lectures"}
+                      phx-click={
+                        JS.toggle(to: "#module-#{module.id}-lectures")
+                        |> JS.toggle_attribute({"aria-expanded", "true", "false"})
+                        |> JS.toggle_class("-rotate-90", to: "#module-#{module.id}-chevron")
+                      }
+                      class="group/module flex w-full items-center justify-between gap-3 bg-[#f5f5f5] px-5 py-3.5 text-left transition hover:bg-[#efefef]"
+                    >
+                      <span class="min-w-0">
+                        <span class="text-[11px] font-bold uppercase tracking-wider text-primary">
                           Module {module.position}
-                        </p>
-                        <p class="inline-flex items-center gap-1.5 text-xs font-semibold text-body">
-                          <.icon name="hero-clock" class="h-3.5 w-3.5 text-primary" />
-                          {module_minutes(module)} min
-                        </p>
-                      </div>
-                      <h3 class="mt-2 text-lg font-medium text-body">{module.title}</h3>
-                      <p class="mt-2 text-sm leading-relaxed">{module.description}</p>
-                    </div>
-                    <div class="divide-y divide-black/10">
+                        </span>
+                        <span class="mt-0.5 block truncate text-sm font-semibold text-dark">
+                          {module.title}
+                        </span>
+                      </span>
+                      <span
+                        id={"module-#{module.id}-chevron"}
+                        class="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-black/10 bg-white text-dark shadow-sm transition group-hover/module:border-primary/20 group-hover/module:bg-mint group-hover/module:text-primary"
+                      >
+                        <.icon name="hero-chevron-down" class="h-4 w-4" />
+                      </span>
+                    </button>
+                    <div id={"module-#{module.id}-lectures"} class="divide-y divide-black/10">
                       <%!-- The tooltip is the answer to "why can't I move on?" — it names the
                       one outstanding thing, whether that's watching, reading, or sitting the
                       lesson quiz. `title` carries it for screen readers and for the disabled
@@ -1738,9 +1250,9 @@ defmodule WasomiWeb.CoursePlayerLive do
                               else: "true"
                           }
                           class={[
-                            "flex w-full items-center gap-4 px-7 py-5 text-left text-sm transition",
+                            "flex w-full items-center gap-3 px-5 py-3 text-left text-sm transition",
                             @current_lecture && @current_lecture.id == lecture.id &&
-                              "border-l-4 border-l-primary bg-[#f5f5f5] pl-6 font-semibold text-body",
+                              "border-l-4 border-l-primary bg-[#f5f5f5] pl-4 font-semibold text-body",
                             (!@current_lecture || @current_lecture.id != lecture.id) &&
                               lecture_unlocked?(@unlocked_lecture_ids, lecture.id) &&
                               "text-body hover:bg-[#f5f5f5]",
@@ -1782,10 +1294,11 @@ defmodule WasomiWeb.CoursePlayerLive do
                           </span>
                           <span class="min-w-0 flex-1">
                             <span class="block truncate">{lecture.title}</span>
-                            <%!-- How long this lesson takes, and what it is made of, without
-                            opening it. --%>
-                            <span class="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted">
-                              <% lesson_minutes = lecture_estimated_minutes(lecture) %>
+                            <% lesson_minutes = lecture_estimated_minutes(lecture) %>
+                            <span
+                              :if={lesson_minutes || resource_type_badges(assigns, lecture) != []}
+                              class="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted"
+                            >
                               <span :if={lesson_minutes} class="inline-flex items-center gap-1">
                                 <.icon name="hero-clock" class="h-3.5 w-3.5" />
                                 {lesson_minutes} min
@@ -1798,23 +1311,8 @@ defmodule WasomiWeb.CoursePlayerLive do
                                 {badge.label}
                               </span>
                             </span>
-                            <span
-                              :if={progress_status(@progress, lecture.id) == :in_progress}
-                              class="mt-0.5 block text-xs text-muted"
-                            >
-                              {progress_percent(@progress, lecture)}% watched
-                            </span>
-                            <span
-                              :if={
-                                reading_only_lecture?(lecture) &&
-                                  progress_status(@progress, lecture.id) != :completed
-                              }
-                              class="mt-0.5 block text-xs text-muted"
-                            >
-                              {unread_pdf_count(@read_resource_ids, lecture)} of {length(
-                                lecture_pdfs(lecture)
-                              )} PDFs left to read
-                            </span>
+                            <%!-- The one status worth a line: it's the answer to "why is the
+                            next lesson locked?" --%>
                             <span
                               :if={lecture_quiz_passed?(assigns, lecture)}
                               class="mt-1 inline-flex items-center gap-1 text-xs font-medium text-primary"
@@ -1850,9 +1348,9 @@ defmodule WasomiWeb.CoursePlayerLive do
                         disabled={!quiz_unlocked?}
                         data-locked={if quiz_unlocked?, do: "false", else: "true"}
                         class={[
-                          "flex w-full items-center gap-4 px-7 py-5 text-left text-sm transition",
+                          "flex w-full items-center gap-3 px-5 py-3 text-left text-sm transition",
                           @current_quiz && @current_quiz.quiz.id == module_quiz.id &&
-                            "border-l-4 border-l-primary bg-[#f5f5f5] pl-6 font-semibold text-primary",
+                            "border-l-4 border-l-primary bg-[#f5f5f5] pl-4 font-semibold text-primary",
                           (!@current_quiz || @current_quiz.quiz.id != module_quiz.id) &&
                             quiz_unlocked? &&
                             "text-body hover:bg-[#f5f5f5]",
@@ -1877,156 +1375,762 @@ defmodule WasomiWeb.CoursePlayerLive do
                   </section>
                 </div>
               </aside>
-            </div>
-
-            <section
-              :if={@active_section == :module_quiz && is_nil(@active_study_tool)}
-              class="mt-6 overflow-hidden rounded-3xl border border-black/5 bg-white"
-            >
-              <%= if @current_quiz do %>
-                <div class="flex items-center justify-between gap-4 border-b border-black/5 px-8 pt-6 lg:px-10">
+              <div class="min-w-0 space-y-6">
+                <nav class="flex items-center gap-1 overflow-x-auto rounded-2xl border border-black/10 bg-white p-1.5 lg:overflow-visible">
                   <button
-                    :if={length(@course.modules) > 1}
+                    :for={{section, label, icon, description} <- section_nav_items()}
                     type="button"
-                    phx-click="exit-quiz"
-                    class="inline-flex items-center gap-1.5 text-sm font-medium text-muted transition hover:text-primary"
+                    phx-click="select-section"
+                    phx-value-section={section}
+                    class={[
+                      "group/top-tooltip relative flex flex-1 basis-0 min-w-0 items-center justify-center gap-2 whitespace-nowrap rounded-xl px-3 py-2 text-sm font-semibold transition",
+                      is_nil(@active_study_tool) && @active_section == section &&
+                        "bg-dark text-white",
+                      (!is_nil(@active_study_tool) || @active_section != section) &&
+                        "text-body hover:bg-surface"
+                    ]}
                   >
-                    <.icon name="hero-arrow-left" class="h-4 w-4" /> Choose a different module
+                    <.icon name={icon} class="h-4 w-4 shrink-0" />
+                    {label}<span :if={section == :lessons} class="sr-only">Lessons</span>
+                    <.course_nav_tooltip label={description} />
                   </button>
-                </div>
-                <.quiz_taking_panel
-                  current_quiz={@current_quiz}
-                  quiz_result={@quiz_result}
-                  quiz_answers={@quiz_answers}
-                  current_question_index={@current_question_index}
-                />
-              <% else %>
-                <div class="p-8 lg:p-10">
-                  <span class="inline-flex items-center gap-2 rounded-full bg-mint px-3 py-1 text-xs font-semibold uppercase tracking-wider text-primary">
-                    <.icon name="hero-academic-cap" class="h-4 w-4" /> Module Quiz
-                  </span>
-                  <h2 class="mt-3 text-2xl font-semibold tracking-tight text-ink">
-                    Choose a module to take its quiz
-                  </h2>
-                  <p class="mt-2 text-body">
-                    Each module quiz covers everything in that module's lessons.
-                  </p>
-
-                  <div class="mt-6 grid gap-3 sm:grid-cols-2">
-                    <%= for module <- @course.modules do %>
-                      <% module_quiz = Map.get(@quizzes_by_module, module.id) %>
-                      <% unlocked? = module_quiz_unlocked?(module, @progress, @preview?) %>
-                      <button
-                        type="button"
-                        phx-click="select-quiz"
-                        phx-value-module_id={module.id}
-                        disabled={!module_quiz || !unlocked?}
-                        class={[
-                          "flex items-center justify-between gap-3 rounded-2xl border p-4 text-left text-sm transition",
-                          module_quiz && unlocked? &&
-                            "border-black/10 text-body hover:border-primary/40 hover:bg-mint/40 hover:text-ink",
-                          (!module_quiz || !unlocked?) &&
-                            "cursor-not-allowed border-black/5 text-muted"
-                        ]}
-                      >
-                        <span class="min-w-0">
-                          <span class="block truncate font-medium text-ink">
-                            Module {module.position}: {module.title}
-                          </span>
-                          <span class="mt-0.5 block text-xs text-muted">
-                            <%= cond do %>
-                              <% !module_quiz -> %>
-                                No quiz available yet
-                              <% !unlocked? -> %>
-                                Locked — finish this module's lessons first
-                              <% true -> %>
-                                {length(module.lectures)} lectures covered
-                            <% end %>
-                          </span>
-                        </span>
-                        <.icon
-                          :if={!module_quiz || !unlocked?}
-                          name="hero-lock-closed"
-                          class="h-4 w-4 shrink-0"
-                        />
-                        <.icon
-                          :if={module_quiz && unlocked?}
-                          name="hero-arrow-right"
-                          class="h-4 w-4 shrink-0 text-primary"
-                        />
-                      </button>
-                    <% end %>
-                  </div>
-                </div>
-              <% end %>
-            </section>
-
-            <section
-              :if={!@preview?}
-              id="course-certificates"
-              class="mt-8 rounded-3xl border border-black/5 bg-white p-6 lg:p-8"
-            >
-              <div class="flex flex-wrap items-start justify-between gap-4">
-                <div>
-                  <span class="rounded-full bg-mint px-3 py-1 text-sm font-medium text-primary">
-                    Achievements
-                  </span>
-                  <h2 class="mt-4 text-2xl font-semibold text-ink">Your certificates</h2>
-                  <p class="mt-2 text-body">
-                    Your course certificate appears here once every lecture is complete.
-                  </p>
-                </div>
-                <span
-                  :if={@course_progress.complete? && !course_certificate?(@certificates)}
-                  id="course-certificate-pending"
-                  class="rounded-full border border-black/10 px-4 py-2 text-sm font-medium text-body"
-                >
-                  Preparing course certificate…
-                </span>
-              </div>
-
-              <div :if={@certificates != []} class="mt-6 grid gap-4 md:grid-cols-2">
-                <article
-                  :for={certificate <- @certificates}
-                  id={"certificate-#{certificate.id}"}
-                  class="flex items-center justify-between gap-4 rounded-2xl border border-black/5 bg-soft p-5"
-                >
-                  <div class="min-w-0">
-                    <p class="text-xs font-semibold uppercase tracking-wider text-primary">
-                      Course certificate
-                    </p>
-                    <h3 class="mt-1 truncate font-medium text-ink">
-                      {certificate_title(certificate)}
-                    </h3>
-                    <p class="mt-1 text-xs text-muted">{certificate.gdti}</p>
-                  </div>
-                  <.link
-                    href={~p"/certificates/#{certificate.id}/download"}
-                    class="inline-flex shrink-0 items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm font-medium text-white transition hover:bg-primary"
+                  <button
+                    type="button"
+                    phx-click="select-section"
+                    phx-value-section="module_quiz"
+                    class="sr-only"
                   >
-                    <.icon name="hero-arrow-down-tray" class="h-4 w-4" /> Download
-                  </.link>
-                </article>
-              </div>
+                    Module quiz
+                  </button>
+                  <button
+                    type="button"
+                    phx-click="select-section"
+                    phx-value-section="discussion"
+                    class={[
+                      "group/top-tooltip relative flex flex-1 basis-0 min-w-0 items-center justify-center gap-2 whitespace-nowrap rounded-xl px-3 py-2 text-sm font-semibold transition",
+                      is_nil(@active_study_tool) && @active_section == :discussion &&
+                        "bg-dark text-white",
+                      (!is_nil(@active_study_tool) || @active_section != :discussion) &&
+                        "text-body hover:bg-surface"
+                    ]}
+                  >
+                    <.icon name="hero-chat-bubble-left-right" class="h-4 w-4 shrink-0" /> Discussion
+                    <span
+                      :if={@channel_unread > 0}
+                      class="grid h-4 min-w-4 place-items-center rounded-full bg-primary px-1 text-[10px] font-bold leading-none text-white"
+                    >
+                      {min(@channel_unread, 99)}
+                    </span>
+                    <.course_nav_tooltip label="Talk with your cohort and the course team." />
+                  </button>
+                  <button
+                    :for={{mode, label, icon, description} <- study_hub_nav_items()}
+                    type="button"
+                    phx-click="select-study-tool"
+                    phx-value-tool={mode}
+                    class={[
+                      "group/top-tooltip relative flex flex-1 basis-0 min-w-0 items-center justify-center gap-2 whitespace-nowrap rounded-xl px-3 py-2 text-sm font-semibold transition",
+                      @active_study_tool == mode && "bg-dark text-white",
+                      @active_study_tool != mode && "text-body hover:bg-surface"
+                    ]}
+                  >
+                    <.icon name={icon} class="h-4 w-4 shrink-0" />
+                    {label}
+                    <.course_nav_tooltip label={description} />
+                  </button>
+                </nav>
 
-              <p
-                :if={@certificates == [] && !@course_progress.complete?}
-                class="mt-6 rounded-2xl bg-mint p-5 text-sm text-body"
-              >
-                Complete your first module to earn your first certificate.
-              </p>
-            </section>
+                <section :if={@active_study_tool}>
+                  {live_render(@socket, WasomiWeb.EmbeddedStudyHubLive,
+                    id:
+                      "embedded-study-tool-#{@active_study_tool}-#{@study_guide_resource_id || "lesson"}",
+                    session:
+                      embedded_study_hub_session(
+                        @current_user,
+                        @course,
+                        current_module(assigns),
+                        @active_study_tool,
+                        @study_guide_resource_id
+                      )
+                  )}
+                </section>
+
+                <section
+                  :if={@active_section == :discussion && is_nil(@active_study_tool)}
+                  class="overflow-hidden rounded-3xl bg-white"
+                >
+                  {live_render(@socket, WasomiWeb.ChannelLive,
+                    id: "course-channel",
+                    sticky: true,
+                    session: %{
+                      "current_user_id" => @current_user.id,
+                      "course_slug" => @course.slug,
+                      "highlight_message_id" => @channel_highlight_message_id
+                    }
+                  )}
+                </section>
+
+                <div :if={@active_section == :lessons && is_nil(@active_study_tool)}>
+                  <section class="overflow-hidden rounded-3xl bg-white">
+                    <%= if @current_quiz do %>
+                      <.quiz_taking_panel
+                        current_quiz={@current_quiz}
+                        quiz_result={@quiz_result}
+                        quiz_answers={@quiz_answers}
+                        current_question_index={@current_question_index}
+                      />
+                    <% else %>
+                      <%= if @current_lecture do %>
+                        <% module = current_module(assigns) %>
+                        <% has_pdf_resources? =
+                          Enum.any?(@current_lecture.resources, &pdf_resource?/1) %>
+                        <header
+                          :if={!has_pdf_resources?}
+                          class="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-black/10 px-7 py-4 text-sm sm:px-10"
+                        >
+                          <h2 class="font-semibold text-dark">{@current_lecture.title}</h2>
+                          <span class="text-muted">
+                            · Lesson {lecture_number(@course, @current_lecture)} of {@course_progress.total}
+                          </span>
+                          <span :if={module} class="text-muted">· {module.title}</span>
+                        </header>
+
+                        <div :if={@current_lecture.duration_seconds} class="bg-dark p-4 sm:p-6">
+                          <div
+                            id={"protected-player-#{@current_lecture.id}"}
+                            phx-hook="ProtectedVideo"
+                            phx-update="ignore"
+                            data-playback-url={playback_url_path(@current_lecture.id, @preview?)}
+                            data-video-title={@current_lecture.title}
+                            data-viewer-id={@current_user.id}
+                            data-lecture-id={@current_lecture.id}
+                            data-preview={to_string(@preview?)}
+                            data-start-position={progress_position(@progress, @current_lecture.id)}
+                            data-seek-unlocked={
+                              to_string(progress_status(@progress, @current_lecture.id) == :completed)
+                            }
+                            data-watermark={watermark_text(@current_user)}
+                            class="relative mx-auto aspect-video w-full overflow-hidden rounded-2xl bg-black shadow-2xl ring-1 ring-white/15"
+                            oncontextmenu="return false"
+                          >
+                            <div
+                              data-role="player"
+                              class="absolute inset-0 grid place-items-center text-sm text-white/70"
+                            >
+                              Loading protected video…
+                            </div>
+                            <div
+                              :if={!@preview?}
+                              data-role="watermark"
+                              class="pointer-events-none absolute left-[6%] top-[8%] z-20 max-w-[80%] select-none rounded-full bg-black/30 px-3 py-1 text-xs font-medium text-white/60 backdrop-blur-sm transition-all duration-1000"
+                            >
+                              {watermark_text(@current_user)}
+                            </div>
+                          </div>
+                        </div>
+                        <% completed? = progress_status(@progress, @current_lecture.id) == :completed %>
+                        <% has_video? = not is_nil(@current_lecture.duration_seconds) %>
+                        <% reading_only? = reading_only_lecture?(@current_lecture) %>
+                        <% tabs = lesson_tabs(assigns) %>
+                        <% active_tab =
+                          if Enum.any?(tabs, &(&1.id == @lesson_tab)),
+                            do: @lesson_tab,
+                            else: :overview %>
+                        <% show_course_rating? =
+                          final_lecture?(@course, @current_lecture) && !@preview? &&
+                            (completed? || @course_progress.complete?) %>
+
+                        <%!-- One tab ("Lesson") means nothing to switch between — hide the strip. --%>
+                        <div
+                          :if={length(tabs) > 1}
+                          id="lesson-tabs"
+                          role="tablist"
+                          aria-label="Lesson material"
+                          class="flex gap-1 overflow-x-auto border-b border-black/5 px-7 sm:px-10"
+                        >
+                          <button
+                            :for={tab <- tabs}
+                            id={"lesson-tab-#{tab.id}"}
+                            type="button"
+                            role="tab"
+                            aria-selected={to_string(active_tab == tab.id)}
+                            phx-click={
+                              JS.push("select-lesson-tab", value: %{tab: to_string(tab.id)})
+                              |> JS.dispatch("wasomi:scroll-into-view", to: "#lesson-tabs")
+                            }
+                            class={[
+                              "-mb-px inline-flex shrink-0 items-center gap-2 border-b-2 px-3 py-4 text-sm font-semibold transition",
+                              active_tab == tab.id && "border-primary text-primary",
+                              active_tab != tab.id &&
+                                "border-transparent text-body hover:border-black/20 hover:text-ink"
+                            ]}
+                          >
+                            <.icon name={tab.icon} class="h-4 w-4 shrink-0" />
+                            <span>{tab.label}</span>
+                            <span
+                              :if={tab.count && tab.flag != :required}
+                              class="rounded-full bg-black/5 px-1.5 py-0.5 text-[11px] font-bold"
+                            >
+                              {tab.count}
+                            </span>
+                            <span
+                              :if={tab.flag == :required}
+                              class="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-primary"
+                            >
+                              <span class="h-1.5 w-1.5 animate-pulse rounded-full bg-primary"></span>
+                              Required
+                            </span>
+                            <.icon
+                              :if={tab.flag == :passed}
+                              name="hero-check-circle"
+                              class="h-4 w-4 shrink-0 text-primary"
+                            />
+                          </button>
+                        </div>
+
+                        <div
+                          id="lesson-overview"
+                          role="tabpanel"
+                          aria-labelledby="lesson-tab-overview"
+                          class={[
+                            "space-y-8 bg-white p-7 sm:p-10",
+                            active_tab != :overview && "hidden"
+                          ]}
+                        >
+                          <%!-- Skip the description when a PDF reader follows — the section
+                          header already names the lesson, and the reader is the content. --%>
+                          <p
+                            :if={
+                              !show_course_rating? &&
+                                @current_lecture.description not in [nil, ""] &&
+                                !Enum.any?(@current_lecture.resources, &pdf_resource?/1)
+                            }
+                            class="max-w-2xl leading-relaxed text-body"
+                          >
+                            {@current_lecture.description}
+                          </p>
+                          <p
+                            :if={
+                              !show_course_rating? &&
+                                @current_lecture.description in [nil, ""] &&
+                                !Enum.any?(@current_lecture.resources, &pdf_resource?/1)
+                            }
+                            class="text-sm text-muted"
+                          >
+                            This lesson is the recording above — it has no written notes.
+                          </p>
+
+                          <%!-- Final course feedback replaces the lesson PDF once the final
+                          lecture is complete, so the learner has one clear next action before
+                          the certificate celebration. --%>
+                          <div
+                            :if={show_course_rating?}
+                            id="course-rating-section"
+                            class="grid min-h-[360px] place-items-center rounded-2xl border border-black/10 bg-white px-5 py-8 sm:px-8"
+                          >
+                            <%= if is_nil(@course_review) do %>
+                              <div class="w-full max-w-2xl rounded-2xl bg-soft/70 p-5 sm:p-7">
+                                <div>
+                                  <span class="inline-flex items-center gap-1.5 rounded-full bg-mint px-3 py-1 text-xs font-semibold uppercase tracking-wider text-primary">
+                                    <.icon name="hero-star" class="h-4 w-4" /> Course feedback
+                                  </span>
+                                  <h3 class="mt-3 text-xl font-semibold text-ink">
+                                    Rate this course
+                                  </h3>
+                                  <p class="mt-2 text-sm text-body">
+                                    How was your experience with <span class="font-semibold">{@course.title}</span>? Your feedback helps us improve.
+                                  </p>
+                                </div>
+
+                                <form
+                                  id="course-review-form"
+                                  phx-submit="submit-course-review"
+                                  class="mt-6 space-y-5"
+                                >
+                                  <div class="rounded-2xl border border-black/5 bg-white p-4">
+                                    <label class="block text-xs font-semibold uppercase tracking-wider text-muted">
+                                      Rating <span class="text-red-500">*</span>
+                                    </label>
+                                    <div class="mt-3 flex flex-wrap items-center gap-1.5">
+                                      <button
+                                        :for={star <- 1..5}
+                                        type="button"
+                                        id={"rate-star-#{star}"}
+                                        phx-click="select-rating"
+                                        phx-value-rating={star}
+                                        class="group p-1 transition active:scale-95"
+                                        aria-label={"Rate #{star} out of 5 stars"}
+                                      >
+                                        <.icon
+                                          name="hero-star-solid"
+                                          class={"h-7 w-7 transition #{if((@review_form_rating || 0) >= star, do: "text-amber-400", else: "text-black/15 hover:text-amber-300")}"}
+                                        />
+                                      </button>
+                                      <span
+                                        :if={@review_form_rating}
+                                        class="ml-2 text-sm font-semibold text-ink"
+                                      >
+                                        {case @review_form_rating do
+                                          1 -> "1 - Poor"
+                                          2 -> "2 - Fair"
+                                          3 -> "3 - Good"
+                                          4 -> "4 - Very Good"
+                                          5 -> "5 - Excellent!"
+                                          _ -> ""
+                                        end}
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  <div class="rounded-2xl border border-black/5 bg-white p-4">
+                                    <label
+                                      for="review-body"
+                                      class="block text-xs font-semibold uppercase tracking-wider text-muted"
+                                    >
+                                      Written comment
+                                      <span class="font-normal lowercase text-muted/80">
+                                        (optional)
+                                      </span>
+                                    </label>
+                                    <textarea
+                                      id="review-body"
+                                      name="body"
+                                      rows="3"
+                                      placeholder="Share what you enjoyed or suggestions for improvement..."
+                                      class="mt-3 block w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-sm text-ink placeholder-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                                    >{@review_form_body}</textarea>
+                                  </div>
+
+                                  <div class="flex justify-end">
+                                    <button
+                                      type="submit"
+                                      id="submit-course-rating"
+                                      disabled={is_nil(@review_form_rating)}
+                                      class="rounded-full bg-primary px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-ink disabled:cursor-not-allowed disabled:opacity-40"
+                                    >
+                                      Submit & view certificate
+                                    </button>
+                                  </div>
+                                </form>
+                              </div>
+                            <% else %>
+                              <div class="w-full max-w-xl rounded-2xl bg-soft/70 p-6 text-center sm:p-8">
+                                <span class="inline-flex items-center gap-1.5 rounded-full bg-mint px-3 py-1 text-xs font-semibold uppercase tracking-wider text-primary">
+                                  <.icon name="hero-check-circle" class="h-4 w-4" />
+                                  Feedback submitted
+                                </span>
+                                <h3 class="mt-3 text-xl font-semibold text-ink">
+                                  Thanks for the feedback
+                                </h3>
+                                <div class="mt-4 flex flex-wrap items-center justify-center gap-1.5">
+                                  <.icon
+                                    :for={n <- 1..5}
+                                    name="hero-star-solid"
+                                    class={"h-6 w-6 #{if(@course_review.rating >= n, do: "text-amber-400", else: "text-black/15")}"}
+                                  />
+                                  <span class="ml-2 text-sm font-semibold text-ink">
+                                    {@course_review.rating}/5 stars
+                                  </span>
+                                </div>
+                                <p
+                                  :if={@course_review.body}
+                                  class="mx-auto mt-3 max-w-md text-sm italic text-body"
+                                >
+                                  "{@course_review.body}"
+                                </p>
+                                <p class="mt-3 text-sm text-muted">
+                                  Thank you for rating this course!
+                                </p>
+                                <.link
+                                  :if={@certificates != []}
+                                  href={~p"/certificates/#{List.first(@certificates).id}/download"}
+                                  class="mt-4 inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-ink"
+                                >
+                                  <.icon name="hero-arrow-down-tray" class="h-4 w-4" />
+                                  Download certificate
+                                </.link>
+                              </div>
+                            <% end %>
+                          </div>
+
+                          <div
+                            :if={
+                              !show_course_rating? &&
+                                Enum.any?(@current_lecture.resources, &pdf_resource?/1)
+                            }
+                            id="lesson-pdfs"
+                            class="space-y-5"
+                          >
+                            <div
+                              :for={
+                                resource <-
+                                  Enum.filter(@current_lecture.resources, &pdf_resource?/1)
+                              }
+                              id={"pdf-resource-#{resource.id}"}
+                              class="overflow-hidden rounded-2xl border border-black/10 bg-white"
+                            >
+                              <div
+                                id={"pdf-deck-#{resource.id}"}
+                                phx-hook="PdfDeck"
+                                phx-update="ignore"
+                                data-src={resource_download_path(resource.id, @preview?)}
+                                data-viewer-src={~p"/assets/pdf.min.mjs"}
+                                data-worker-src={~p"/assets/pdf.worker.min.mjs"}
+                                data-title={resource.name}
+                                class="bg-white"
+                              >
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div
+                          :if={@current_lecture.questions != []}
+                          id="lecture-faq"
+                          role="tabpanel"
+                          aria-labelledby="lesson-tab-practice"
+                          class={["bg-white p-8 lg:p-10", active_tab != :practice && "hidden"]}
+                        >
+                          <h3 class="text-xs font-medium uppercase tracking-widest text-muted">
+                            Practice questions
+                          </h3>
+                          <p class="mt-1 text-xs text-muted">
+                            Type your answer and submit — you'll get instant feedback. These are not
+                            graded.
+                          </p>
+                          <div class="mt-4 space-y-4">
+                            <%= for question <- @current_lecture.questions do %>
+                              <% submission = Map.get(@lq_submissions, question.id) %>
+                              <div class="rounded-2xl border border-black/5 p-5">
+                                <p class="text-sm font-medium text-ink">{question.question}</p>
+                                <%= if submission do %>
+                                  <% band = lq_feedback_band(submission.similarity_score) %>
+                                  <div class={[
+                                    "mt-3 rounded-xl px-4 py-3 text-sm font-medium",
+                                    band.class
+                                  ]}>
+                                    {band.label}
+                                  </div>
+                                  <p
+                                    :if={submission.similarity_score < 0.5}
+                                    class="mt-3 text-sm text-body"
+                                  >
+                                    <span class="font-medium text-ink">Model answer:</span>
+                                    {question.answer}
+                                  </p>
+                                <% else %>
+                                  <form phx-submit="submit-lecture-question" class="mt-3 space-y-2">
+                                    <input type="hidden" name="question-id" value={question.id} />
+                                    <textarea
+                                      name="answer"
+                                      rows="3"
+                                      placeholder="Type your answer here…"
+                                      required
+                                      class="block w-full rounded-xl border border-black/10 bg-soft px-4 py-2.5 text-sm text-ink placeholder-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                                    ></textarea>
+                                    <button
+                                      type="submit"
+                                      class="rounded-full bg-primary px-5 py-2 text-sm font-semibold text-white transition hover:bg-ink"
+                                    >
+                                      Submit answer
+                                    </button>
+                                  </form>
+                                <% end %>
+                              </div>
+                            <% end %>
+                          </div>
+                        </div>
+
+                        <div
+                          :if={@lecture_quiz}
+                          id="lesson-quiz"
+                          role="tabpanel"
+                          aria-labelledby="lesson-tab-quiz"
+                          class={["bg-white p-8 lg:p-10", active_tab != :quiz && "hidden"]}
+                        >
+                          <% total = length(@lecture_quiz.questions) %>
+                          <div class="flex flex-wrap items-start justify-between gap-4">
+                            <div>
+                              <h3 class="text-xs font-medium uppercase tracking-widest text-muted">
+                                Lesson quiz
+                              </h3>
+                              <p class="mt-1 text-sm text-body">
+                                {total} questions · score
+                                <span class="font-semibold text-primary">
+                                  {@lecture_quiz.quiz.passing_score_percent}%
+                                </span>
+                                to unlock the next lesson.
+                              </p>
+                            </div>
+                            <span
+                              :if={@lecture_quiz_result && @lecture_quiz_result.passed}
+                              class="inline-flex items-center gap-2 rounded-full bg-mint px-3 py-1 text-xs font-semibold text-primary"
+                            >
+                              <.icon name="hero-check-circle" class="h-4 w-4" /> Passed
+                            </span>
+                          </div>
+
+                          <div
+                            :if={@lecture_quiz_result}
+                            class={[
+                              "mt-5 rounded-2xl p-5 text-sm text-ink",
+                              if(@lecture_quiz_result.passed, do: "bg-mint", else: "bg-red-50")
+                            ]}
+                          >
+                            <p class="font-semibold">
+                              You scored {@lecture_quiz_result.score_percent}% — {if(
+                                @lecture_quiz_result.passed,
+                                do: "passed.",
+                                else: "not passed yet."
+                              )}
+                            </p>
+                            <p
+                              :if={Map.get(@lecture_quiz_result, :preview?, false)}
+                              class="mt-1 text-xs text-muted"
+                            >
+                              Admin preview result — scored in memory and not saved.
+                            </p>
+                            <p :if={!@lecture_quiz_result.passed} class="mt-1 text-body">
+                              Review the lesson, then try again — the next lesson stays locked
+                              until you pass.
+                            </p>
+                            <button
+                              type="button"
+                              phx-click="retake-lecture-quiz"
+                              class="mt-4 rounded-full border border-black/10 bg-white px-5 py-2.5 text-sm font-semibold text-ink transition hover:bg-ink hover:text-white"
+                            >
+                              Retake quiz
+                            </button>
+                          </div>
+
+                          <form
+                            :if={is_nil(@lecture_quiz_result)}
+                            phx-submit="submit-lecture-quiz"
+                            class="mt-5 space-y-4"
+                          >
+                            <div
+                              :for={{question, index} <- Enum.with_index(@lecture_quiz.questions, 1)}
+                              class="rounded-2xl border border-black/5 p-5"
+                            >
+                              <p class="text-xs font-semibold uppercase tracking-wider text-primary">
+                                Question {index} of {total}
+                              </p>
+                              <p class="mt-2 text-sm font-medium text-ink">{question.prompt}</p>
+                              <div class="mt-3 space-y-2.5">
+                                <label
+                                  :for={option <- question.question_options}
+                                  class={[
+                                    "flex cursor-pointer items-center gap-3 rounded-xl border p-3.5 transition",
+                                    if(
+                                      to_string(
+                                        Map.get(@lecture_quiz_answers, to_string(question.id))
+                                      ) ==
+                                        to_string(option.id),
+                                      do: "border-primary bg-mint font-medium text-ink",
+                                      else:
+                                        "border-black/10 text-body hover:border-primary/40 hover:bg-mint/40"
+                                    )
+                                  ]}
+                                >
+                                  <input
+                                    type="radio"
+                                    name={"lecture_quiz_question_#{question.id}"}
+                                    value={option.id}
+                                    checked={
+                                      to_string(
+                                        Map.get(@lecture_quiz_answers, to_string(question.id))
+                                      ) ==
+                                        to_string(option.id)
+                                    }
+                                    phx-click="select-lecture-quiz-option"
+                                    phx-value-question-id={question.id}
+                                    phx-value-option-id={option.id}
+                                    class="h-4 w-4 border-black/20 bg-white text-primary focus:ring-primary"
+                                  />
+                                  <span class="text-sm">{option.label}</span>
+                                </label>
+                              </div>
+                            </div>
+
+                            <div class="flex flex-wrap items-center justify-between gap-3 border-t border-black/5 pt-5">
+                              <span class="text-xs text-muted">
+                                Answered {map_size(@lecture_quiz_answers)} of {total} questions
+                              </span>
+                              <button
+                                type="submit"
+                                disabled={map_size(@lecture_quiz_answers) < total}
+                                class="rounded-full bg-primary px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-ink disabled:cursor-not-allowed disabled:opacity-40"
+                              >
+                                Submit quiz
+                              </button>
+                            </div>
+                          </form>
+                        </div>
+
+                        <%!-- One completion control for the whole lesson, at the end of its
+                        content. A video self-completes once watched, so it shows a readout
+                        instead of a button. --%>
+                        <div class="flex flex-wrap items-center justify-end gap-3 px-7 py-5 sm:px-10">
+                          <p
+                            :if={completed?}
+                            class="inline-flex items-center gap-2 text-sm font-semibold text-primary"
+                          >
+                            <.icon name="hero-check-circle" class="h-5 w-5" /> Lesson complete
+                          </p>
+                          <button
+                            :if={!completed? && !has_video?}
+                            id="mark-lesson-complete"
+                            type="button"
+                            phx-click="complete-lesson"
+                            phx-value-lecture_id={@current_lecture.id}
+                            class="rounded-full bg-primary px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-ink"
+                          >
+                            {if reading_only?,
+                              do: "I've read this — mark complete",
+                              else: "Mark lesson complete"}
+                          </button>
+                          <p
+                            :if={!completed? && has_video?}
+                            id="lecture-watch-progress"
+                            class="inline-flex items-center gap-2 text-sm font-medium text-muted"
+                          >
+                            <.icon name="hero-play-circle" class="h-4 w-4 text-primary" />
+                            {progress_percent(@progress, @current_lecture)}% watched — completes when
+                            you finish the video
+                          </p>
+                        </div>
+                      <% else %>
+                        <div class="grid min-h-80 place-items-center bg-white p-8 text-center text-muted">
+                          This course does not have any content selected.
+                        </div>
+                      <% end %>
+                    <% end %>
+                  </section>
+                </div>
+
+                <section
+                  :if={@active_section == :module_quiz && is_nil(@active_study_tool)}
+                  class="overflow-hidden rounded-3xl bg-white"
+                >
+                  <%= if @current_quiz do %>
+                    <div class="flex items-center justify-between gap-4 border-b border-black/5 px-8 pt-6 lg:px-10">
+                      <button
+                        :if={length(@course.modules) > 1}
+                        type="button"
+                        phx-click="exit-quiz"
+                        class="inline-flex items-center gap-1.5 text-sm font-medium text-muted transition hover:text-primary"
+                      >
+                        <.icon name="hero-arrow-left" class="h-4 w-4" /> Choose a different module
+                      </button>
+                    </div>
+                    <.quiz_taking_panel
+                      current_quiz={@current_quiz}
+                      quiz_result={@quiz_result}
+                      quiz_answers={@quiz_answers}
+                      current_question_index={@current_question_index}
+                    />
+                  <% else %>
+                    <div class="p-8 lg:p-10">
+                      <span class="inline-flex items-center gap-2 rounded-full bg-mint px-3 py-1 text-xs font-semibold uppercase tracking-wider text-primary">
+                        <.icon name="hero-academic-cap" class="h-4 w-4" /> Module Quiz
+                      </span>
+                      <h2 class="mt-3 text-2xl font-semibold tracking-tight text-ink">
+                        Choose a module to take its quiz
+                      </h2>
+                      <p class="mt-2 text-body">
+                        Each module quiz covers everything in that module's lessons.
+                      </p>
+
+                      <div id="module-quiz-picker" class="mt-6 grid gap-3 sm:grid-cols-2">
+                        <%= for module <- @course.modules do %>
+                          <% module_quiz = Map.get(@quizzes_by_module, module.id) %>
+                          <% unlocked? = module_quiz_unlocked?(module, @progress, @preview?) %>
+                          <button
+                            type="button"
+                            phx-click="select-quiz"
+                            phx-value-module_id={module.id}
+                            disabled={!module_quiz || !unlocked?}
+                            class={[
+                              "flex items-center justify-between gap-3 rounded-2xl border p-4 text-left text-sm transition",
+                              module_quiz && unlocked? &&
+                                "border-black/10 text-body hover:border-primary/40 hover:bg-mint/40 hover:text-ink",
+                              (!module_quiz || !unlocked?) &&
+                                "cursor-not-allowed border-black/5 text-muted"
+                            ]}
+                          >
+                            <span class="min-w-0">
+                              <span class="block truncate font-medium text-ink">
+                                Module {module.position}: {module.title}
+                              </span>
+                              <span class="mt-0.5 block text-xs text-muted">
+                                <%= cond do %>
+                                  <% !module_quiz -> %>
+                                    No quiz available yet
+                                  <% !unlocked? -> %>
+                                    Locked — finish this module's lessons first
+                                  <% true -> %>
+                                    {length(module.lectures)} lectures covered
+                                <% end %>
+                              </span>
+                            </span>
+                            <.icon
+                              :if={!module_quiz || !unlocked?}
+                              name="hero-lock-closed"
+                              class="h-4 w-4 shrink-0"
+                            />
+                            <.icon
+                              :if={module_quiz && unlocked?}
+                              name="hero-arrow-right"
+                              class="h-4 w-4 shrink-0 text-primary"
+                            />
+                          </button>
+                        <% end %>
+                      </div>
+                    </div>
+                  <% end %>
+                </section>
+              </div>
+            </div>
           </div>
         </div>
       </div>
-    </.student_layout>
+    </div>
     """
   end
 
   defp section_nav_items do
     [
-      {:lessons, "Study", "hero-book-open"}
+      {:lessons, "Study", "hero-book-open",
+       "Watch the lesson and work through the course outline."}
     ]
+  end
+
+  # Every downloadable/linked resource in the course, in reading order, for the
+  # outline rail's "Resources" tab.
+  defp course_resources(course) do
+    for module <- course.modules,
+        lecture <- module.lectures,
+        resource <- lecture.resources,
+        do: resource
+  end
+
+  # Client-side flip between the outline rail's two tabs — no server round-trip.
+  defp switch_outline_tab(:outline) do
+    JS.show(to: "#outline-panel")
+    |> JS.hide(to: "#resources-panel")
+    |> JS.add_class("border-primary text-dark", to: "#outline-tab")
+    |> JS.remove_class("border-transparent text-muted", to: "#outline-tab")
+    |> JS.add_class("border-transparent text-muted", to: "#resources-tab")
+    |> JS.remove_class("border-primary text-dark", to: "#resources-tab")
+  end
+
+  defp switch_outline_tab(:resources) do
+    JS.show(to: "#resources-panel")
+    |> JS.hide(to: "#outline-panel")
+    |> JS.add_class("border-primary text-dark", to: "#resources-tab")
+    |> JS.remove_class("border-transparent text-muted", to: "#resources-tab")
+    |> JS.add_class("border-transparent text-muted", to: "#outline-tab")
+    |> JS.remove_class("border-primary text-dark", to: "#outline-tab")
   end
 
   # Flashcards/Extra practice/Timed quiz moved to the cross-course
@@ -2043,6 +2147,14 @@ defmodule WasomiWeb.CoursePlayerLive do
       {"study_guide", "Study guide", "hero-light-bulb",
        "Short notes on this lesson, in the style you pick."}
     ]
+  end
+
+  defp course_nav_tooltip(assigns) do
+    ~H"""
+    <span class="pointer-events-none absolute left-1/2 top-full z-50 mt-2 hidden w-max max-w-80 -translate-x-1/2 whitespace-normal rounded-lg bg-ink px-3 py-1.5 text-center text-xs font-medium leading-snug text-white shadow-lg group-hover/top-tooltip:block">
+      {@label}
+    </span>
+    """
   end
 
   defp current_module(%{current_lecture: nil}), do: nil
@@ -2168,32 +2280,19 @@ defmodule WasomiWeb.CoursePlayerLive do
 
   defp course_lectures(course), do: Enum.flat_map(course.modules, & &1.lectures)
 
+  defp final_lecture?(course, %{id: lecture_id}) do
+    case List.last(course_lectures(course)) do
+      %{id: ^lecture_id} -> true
+      _ -> false
+    end
+  end
+
+  defp final_lecture?(_course, _lecture), do: false
+
   # The admin's own estimate wins when they set one: it can account for the
   # reading, the practice questions and the quizzes, none of which a video
   # duration knows about. Falling back to the video sum keeps the figure that
   # existing courses (with no estimate saved) have always shown.
-  defp course_minutes(%{estimated_minutes: minutes}) when is_integer(minutes) and minutes > 0,
-    do: minutes
-
-  defp course_minutes(course) do
-    course
-    |> course_lectures()
-    |> video_minutes()
-  end
-
-  defp module_minutes(%{estimated_minutes: minutes}) when is_integer(minutes) and minutes > 0,
-    do: minutes
-
-  defp module_minutes(module), do: video_minutes(module.lectures)
-
-  defp video_minutes(lectures) do
-    lectures
-    |> Enum.reduce(0, &((&1.duration_seconds || 0) + &2))
-    |> Kernel./(60)
-    |> Float.ceil()
-    |> trunc()
-  end
-
   # What a lesson costs in time, as far as we can tell: the video's own length
   # when there is one, and otherwise a flat reading allowance per PDF, since a
   # document carries no duration. `nil` means we genuinely don't know, and the
@@ -2302,11 +2401,6 @@ defmodule WasomiWeb.CoursePlayerLive do
     |> min(100)
   end
 
-  defp course_certificate?(certificates),
-    do: Enum.any?(certificates, &(&1.type == :course))
-
-  defp certificate_title(%{type: :course, course: course}), do: course.title
-
   defp load_lq_submissions(socket, lecture) do
     if socket.assigns.preview? do
       %{}
@@ -2400,14 +2494,6 @@ defmodule WasomiWeb.CoursePlayerLive do
 
     [
       %{id: :overview, label: "Lesson", icon: "hero-book-open", count: nil, flag: nil},
-      lecture.resources != [] &&
-        %{
-          id: :materials,
-          label: "Materials",
-          icon: "hero-paper-clip",
-          count: length(lecture.resources),
-          flag: nil
-        },
       lecture.questions != [] &&
         %{
           id: :practice,
@@ -2433,15 +2519,6 @@ defmodule WasomiWeb.CoursePlayerLive do
   defp lesson_quiz_passed?(assigns, lecture) do
     lecture_quiz_passed?(assigns, lecture) or
       match?(%{passed: true}, assigns.lecture_quiz_result)
-  end
-
-  defp next_lecture(course, lecture) do
-    lectures = course_lectures(course)
-
-    case Enum.find_index(lectures, &(&1.id == lecture.id)) do
-      nil -> nil
-      index -> Enum.at(lectures, index + 1)
-    end
   end
 
   # Completing a lecture no longer unlocks the next one on its own when the

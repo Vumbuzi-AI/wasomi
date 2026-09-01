@@ -135,5 +135,40 @@ defmodule WasomiWeb.CatalogLiveTest do
       assert html =~ ~s(href="/catalog")
       refute html =~ ~s(href="/courses")
     end
+
+    test "the certificate section previews the template as a sample, without real details", %{
+      conn: conn
+    } do
+      course =
+        course_fixture(
+          status: :published,
+          title: "Certified Course",
+          certificate_enabled: true,
+          certificate_signatory_name: "Jane Signatory",
+          certificate_signatory_title: "Programme Director"
+        )
+
+      {:ok, _view, html} = live(conn, ~p"/courses/#{course.slug}")
+
+      # the preview is the real Template.render_html output in an iframe srcdoc
+      assert html =~ ~s(title="Certified Course certificate preview")
+      assert html =~ "srcdoc="
+      assert html =~ "Certificate of Completion"
+      assert html =~ "Certified Course"
+
+      # ...but as a sample: placeholder signatory, no real name, no printed GDTI
+      assert html =~ "Authorised signatory"
+      refute html =~ "Jane Signatory"
+      refute html =~ "Programme Director"
+      refute html =~ "(253)"
+    end
+
+    test "no certificate section when the course has no certificate", %{conn: conn} do
+      course = course_fixture(status: :published, certificate_enabled: false)
+
+      {:ok, _view, html} = live(conn, ~p"/courses/#{course.slug}")
+
+      refute html =~ "certificate preview"
+    end
   end
 end

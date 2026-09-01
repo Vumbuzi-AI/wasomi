@@ -27,15 +27,9 @@ defmodule WasomiWeb.CertificatesLive do
     ~H"""
     <.student_layout active={:certificates} current_user={@current_user}>
       <div class="w-full px-5 py-8 lg:px-8">
-        <div class="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <p class="text-sm font-semibold uppercase tracking-wider text-primary">Achievements</p>
-            <h1 class="mt-2 text-3xl font-semibold text-ink">Your certificates.</h1>
-          </div>
-          <span :if={@certificates != []} class="text-sm text-muted">
-            {length(@certificates)} earned
-          </span>
-        </div>
+        <.learner_page_header eyebrow="Achievements" title="Your certificates.">
+          <:actions :if={@certificates != []}>{length(@certificates)} earned</:actions>
+        </.learner_page_header>
 
         <div :if={@certificates != []} id="certificates-list" class="mt-8 grid gap-5 md:grid-cols-2">
           <article

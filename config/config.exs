@@ -142,6 +142,7 @@ config :wasomi, WasomiWeb.Endpoint,
 # For production it's recommended to configure a different adapter
 # at the `config/runtime.exs`.
 config :wasomi, :email_delivery_provider, Wasomi.Mailer
+config :wasomi, :email_base_url, "https://wasomi-ai.com"
 
 config :wasomi, Wasomi.Mailer,
   adapter: Swoosh.Adapters.Local,

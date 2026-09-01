@@ -23,7 +23,7 @@ defmodule Wasomi.MagicLinkTest do
     :ok = Accounts.deliver_magic_link(email, &"https://t.example/magic/#{&1}")
     assert_received {:email, sent}
     body = sent.text_body || sent.html_body
-    [_, token] = Regex.run(~r{https://t\.example/magic/([A-Za-z0-9_-]+)}, body)
+    [_, token] = Regex.run(~r{https://wasomi-ai\.com/magic/([A-Za-z0-9_-]+)}, body)
     token
   end
 

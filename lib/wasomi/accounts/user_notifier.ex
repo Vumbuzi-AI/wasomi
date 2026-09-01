@@ -7,6 +7,8 @@ defmodule Wasomi.Accounts.UserNotifier do
   # Delivers the email using the application mailer, rendering both the HTML
   # and text bodies from the same branded template so they can't drift apart.
   defp deliver(recipient, subject, assigns, attachments \\ []) do
+    assigns = canonicalize_email_links(assigns)
+
     email =
       new()
       |> to(recipient)
@@ -391,6 +393,30 @@ defmodule Wasomi.Accounts.UserNotifier do
       Keyword.get(config, :from_name, "Wasomi"),
       Keyword.get(config, :from, "no-reply@gs1kenya.org")
     }
+  end
+
+  # Email links must always point at the public Wasomi site. Callers commonly
+  # build token URLs from the current endpoint, which is localhost in dev and
+  # browser tests, so normalize them immediately before rendering the email.
+  defp canonicalize_email_links(%{cta: %{url: url} = cta} = assigns) when is_binary(url) do
+    put_in(assigns, [:cta], %{cta | url: public_email_url(url)})
+  end
+
+  defp canonicalize_email_links(assigns), do: assigns
+
+  defp public_email_url(url) do
+    supplied = URI.parse(url)
+
+    if supplied.host || String.starts_with?(url, "/") do
+      Application.fetch_env!(:wasomi, :email_base_url)
+      |> URI.parse()
+      |> Map.put(:path, supplied.path || "/")
+      |> Map.put(:query, supplied.query)
+      |> Map.put(:fragment, supplied.fragment)
+      |> URI.to_string()
+    else
+      url
+    end
   end
 
   defp delivery_provider do

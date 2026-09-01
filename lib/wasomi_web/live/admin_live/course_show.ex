@@ -96,18 +96,16 @@ defmodule WasomiWeb.AdminLive.CourseShow do
     params = Map.put(params, "course_id", socket.assigns.course.id)
     selected_learners = find_grantable_learners(socket.assigns.grantable_learners, learner_ids)
 
-    cond do
-      selected_learners == [] ->
-        {:noreply,
-         socket
-         |> put_flash(:error, "Choose at least one learner who does not already have access.")
-         |> assign(
-           :grant_access_form,
-           to_form(Enrollments.change_grant_access(params), action: :validate)
-         )}
-
-      true ->
-        grant_access_to_learners(socket, selected_learners, params)
+    if selected_learners == [] do
+      {:noreply,
+       socket
+       |> put_flash(:error, "Choose at least one learner who does not already have access.")
+       |> assign(
+         :grant_access_form,
+         to_form(Enrollments.change_grant_access(params), action: :validate)
+       )}
+    else
+      grant_access_to_learners(socket, selected_learners, params)
     end
   end
 

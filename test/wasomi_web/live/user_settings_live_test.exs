@@ -339,7 +339,8 @@ defmodule WasomiWeb.UserSettingsLiveTest do
           "occupation" => "Warehouse Manager",
           "experience_level" => "mid",
           "learning_goal" => "upskilling",
-          "gender" => "prefer_not_to_say"
+          "gender" => "prefer_not_to_say",
+          "phone" => "+254712345678"
         }
       })
 
@@ -353,6 +354,7 @@ defmodule WasomiWeb.UserSettingsLiveTest do
       assert updated.experience_level == :mid
       assert updated.learning_goal == :upskilling
       assert updated.gender == :prefer_not_to_say
+      assert updated.phone == "+254712345678"
     end
 
     test "leaves every field optional", %{conn: conn, user: user} do

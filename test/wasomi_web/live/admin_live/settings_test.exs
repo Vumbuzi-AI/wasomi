@@ -19,18 +19,72 @@ defmodule WasomiWeb.AdminLive.SettingsTest do
     %{conn: log_in_user(conn, admin), admin: admin}
   end
 
-  test "renders the email and password sections", %{conn: conn} do
-    {:ok, _lv, html} = live(conn, ~p"/admin/settings")
+  test "renders the profile section by default and supports switching to security tab", %{
+    conn: conn
+  } do
+    {:ok, lv, html} = live(conn, ~p"/admin/settings")
 
     assert html =~ "Account settings"
+    assert html =~ "Profile basics"
+    assert html =~ "Save profile"
+
+    # Switch to security tab
+    html =
+      lv
+      |> element(~s(a[href="/admin/settings?section=security"]))
+      |> render_click()
+
     assert html =~ "Change Email"
     assert html =~ "Change Password"
+  end
+
+  test "updates admin profile information", %{conn: conn, admin: admin} do
+    {:ok, lv, _html} = live(conn, ~p"/admin/settings")
+
+    html =
+      lv
+      |> form("#profile_form", %{
+        "user" => %{
+          "first_name" => "Super",
+          "last_name" => "Admin",
+          "headline" => "Head of Curriculum",
+          "phone" => "+254712345678",
+          "bio" => "Oversees standards training and platform courses."
+        }
+      })
+      |> render_submit()
+
+    assert html =~ "Profile saved successfully."
+
+    updated = Accounts.get_user!(admin.id)
+    assert updated.first_name == "Super"
+    assert updated.last_name == "Admin"
+    assert updated.name == "Super Admin"
+    assert updated.headline == "Head of Curriculum"
+    assert updated.phone == "+254712345678"
+    assert updated.bio == "Oversees standards training and platform courses."
+  end
+
+  test "rejects blank first/last name when edited", %{conn: conn} do
+    {:ok, lv, _html} = live(conn, ~p"/admin/settings")
+
+    html =
+      lv
+      |> form("#profile_form", %{
+        "user" => %{
+          "first_name" => "",
+          "last_name" => ""
+        }
+      })
+      |> render_change()
+
+    assert html =~ "can&#39;t be blank"
   end
 
   test "sends a confirmation link when changing the email", %{conn: conn, admin: admin} do
     new_email = unique_user_email()
 
-    {:ok, lv, _html} = live(conn, ~p"/admin/settings")
+    {:ok, lv, _html} = live(conn, ~p"/admin/settings?section=security")
 
     html =
       lv
@@ -46,7 +100,7 @@ defmodule WasomiWeb.AdminLive.SettingsTest do
   end
 
   test "rejects an email change with the wrong current password", %{conn: conn} do
-    {:ok, lv, _html} = live(conn, ~p"/admin/settings")
+    {:ok, lv, _html} = live(conn, ~p"/admin/settings?section=security")
 
     html =
       lv
@@ -62,7 +116,7 @@ defmodule WasomiWeb.AdminLive.SettingsTest do
   test "updates the password and triggers a re-login", %{conn: conn, admin: admin} do
     new_password = "brand new pass!456"
 
-    {:ok, lv, _html} = live(conn, ~p"/admin/settings")
+    {:ok, lv, _html} = live(conn, ~p"/admin/settings?section=security")
 
     form =
       form(lv, "#password_form", %{

@@ -10,14 +10,14 @@ defmodule Wasomi.Accounts.UserNotifier do
     email =
       new()
       |> to(recipient)
-      |> from({"Wasomi", "contact@example.com"})
+      |> from(configured_sender())
       |> subject(subject)
       |> html_body(Template.render(assigns))
       |> text_body(Template.render_text(assigns))
 
     email = Enum.reduce(attachments, email, fn att, acc -> attachment(acc, att) end)
 
-    with {:ok, _metadata} <- Mailer.deliver(email) do
+    with {:ok, _metadata} <- delivery_provider().deliver(email) do
       {:ok, email}
     end
   end
@@ -383,4 +383,17 @@ defmodule Wasomi.Accounts.UserNotifier do
 
   defp recipient_name(%{email: email}) when is_binary(email), do: email
   defp recipient_name(_), do: "there"
+
+  defp configured_sender do
+    config = Application.get_env(:wasomi, delivery_provider(), [])
+
+    {
+      Keyword.get(config, :from_name, "Wasomi"),
+      Keyword.get(config, :from, "no-reply@gs1kenya.org")
+    }
+  end
+
+  defp delivery_provider do
+    Application.get_env(:wasomi, :email_delivery_provider, Mailer)
+  end
 end

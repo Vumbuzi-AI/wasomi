@@ -141,7 +141,12 @@ config :wasomi, WasomiWeb.Endpoint,
 #
 # For production it's recommended to configure a different adapter
 # at the `config/runtime.exs`.
-config :wasomi, Wasomi.Mailer, adapter: Swoosh.Adapters.Local
+config :wasomi, :email_delivery_provider, Wasomi.Mailer
+
+config :wasomi, Wasomi.Mailer,
+  adapter: Swoosh.Adapters.Local,
+  from: "no-reply@gs1kenya.org",
+  from_name: "Wasomi"
 
 # Configure esbuild (the version is required)
 config :esbuild,

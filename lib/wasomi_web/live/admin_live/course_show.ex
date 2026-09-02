@@ -2,6 +2,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
   use WasomiWeb, :live_view
 
   alias Wasomi.{Accounts, Assessments, Catalog, Enrollments, Learning, Payments}
+  alias Wasomi.Catalog.Analytics
   alias Wasomi.Catalog.{CourseModule, Lecture}
   alias Wasomi.Catalog.PublishGuard
   alias WasomiWeb.CourseLive
@@ -424,6 +425,71 @@ defmodule WasomiWeb.AdminLive.CourseShow do
 
     lecture_count = Enum.sum(Enum.map(course.modules, &length(&1.lectures)))
 
+    # Course analytics
+    funnel = Analytics.funnel(course_id: course.id)
+    module_completion_rates = Analytics.module_completion_rates(course_id: course.id)
+    quiz_scores = Analytics.average_quiz_scores(course_id: course.id)
+    video_dropoffs = Analytics.video_dropoff_seconds(course_id: course.id)
+    monthly_rev = Analytics.monthly_revenue(course_id: course.id)
+
+    overall_completion_rate =
+      Map.get(Analytics.completion_rate_by_course(course_id: course.id), course.id, 0)
+
+    quiz_pass_rate =
+      Map.get(Analytics.quiz_pass_rate_by_course(course_id: course.id), course.id, 0)
+
+    module_analytics_rows =
+      Enum.map(course.modules, fn module ->
+        completion = Map.get(module_completion_rates, module.id)
+        quiz = Map.get(quiz_scores, module.id)
+
+        %{
+          module_id: module.id,
+          title: module.title,
+          completion_percent: (completion && completion.rate_percent) || 0,
+          remaining_learners: (completion && completion.completed_learners) || 0,
+          quiz_score_percent: (quiz && round(quiz.average_score_percent)) || nil,
+          submissions: (quiz && quiz.submissions) || 0
+        }
+      end)
+
+    funnel_steps =
+      funnel
+      |> Enum.with_index()
+      |> Enum.map(fn {%{count: count} = step, index} ->
+        previous_count = index > 0 && Enum.at(funnel, index - 1).count
+
+        Map.merge(step, %{
+          percent_of_previous: previous_count && percent(count, previous_count),
+          last?: index == length(funnel) - 1
+        })
+      end)
+
+    funnel_overall_conversion =
+      case funnel do
+        [%{count: 0} | _] -> nil
+        steps -> percent(List.last(steps).count, hd(steps).count)
+      end
+
+    revenue_chart =
+      Enum.map(monthly_rev, fn %{month: month, revenue_minor: revenue_minor} ->
+        %{
+          label: Calendar.strftime(month, "%b %Y"),
+          value: revenue_minor,
+          value_label: compact_revenue_label(revenue_minor),
+          tooltip: Payments.format_minor(revenue_minor, course.currency)
+        }
+      end)
+
+    avg_quiz_score =
+      module_analytics_rows
+      |> Enum.map(& &1.quiz_score_percent)
+      |> Enum.filter(& &1)
+      |> case do
+        [] -> nil
+        scores -> round(Enum.sum(scores) / length(scores))
+      end
+
     socket
     |> assign(:page_title, course.title)
     |> assign(:course, course)
@@ -445,6 +511,14 @@ defmodule WasomiWeb.AdminLive.CourseShow do
       :lecture_quiz_question_counts,
       Assessments.count_lecture_quiz_questions_by_lecture(course.id)
     )
+    |> assign(:analytics_funnel, funnel_steps)
+    |> assign(:analytics_funnel_conversion, funnel_overall_conversion)
+    |> assign(:analytics_module_rows, module_analytics_rows)
+    |> assign(:analytics_video_dropoffs, video_dropoffs)
+    |> assign(:analytics_revenue_chart, revenue_chart)
+    |> assign(:analytics_completion_rate, overall_completion_rate)
+    |> assign(:analytics_quiz_pass_rate, quiz_pass_rate)
+    |> assign(:analytics_avg_quiz_score, avg_quiz_score)
   end
 
   defp module_ready_for_quiz_generation?(module, lecture_quiz_question_counts) do
@@ -678,7 +752,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
           id="course-detail-tabs"
           role="tablist"
           aria-label="Course details"
-          class="grid grid-cols-2 overflow-hidden rounded-2xl border border-black/5 bg-surface p-1"
+          class="grid grid-cols-3 overflow-hidden rounded-2xl border border-black/5 bg-surface p-1"
         >
           <.link
             id="curriculum-tab"
@@ -717,6 +791,22 @@ defmodule WasomiWeb.AdminLive.CourseShow do
             ]}>
               {@student_count}
             </span>
+          </.link>
+          <.link
+            id="analytics-tab"
+            patch={~p"/admin/courses/#{@course.slug}?#{%{tab: "analytics"}}"}
+            role="tab"
+            aria-selected={to_string(@active_tab == :analytics)}
+            aria-controls="analytics-panel"
+            class={[
+              "rounded-xl py-2.5 text-center text-sm font-medium transition",
+              if(@active_tab == :analytics,
+                do: "bg-ink text-white",
+                else: "text-body hover:text-ink"
+              )
+            ]}
+          >
+            Analytics
           </.link>
         </div>
 
@@ -1197,6 +1287,256 @@ defmodule WasomiWeb.AdminLive.CourseShow do
           </div>
         </section>
 
+        <%!-- Analytics --%>
+        <section
+          :if={@active_tab == :analytics}
+          id="analytics-panel"
+          role="tabpanel"
+          aria-labelledby="analytics-tab"
+          class="space-y-6"
+        >
+          <div class="analytics-card flex flex-wrap items-center justify-between gap-6 px-6 py-7 lg:px-8">
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-bold uppercase tracking-wider text-primary">
+                  Course Intelligence
+                </span>
+              </div>
+              <h2 class="mt-1 text-2xl font-bold text-ink sm:text-3xl">Course analytics</h2>
+              <p class="mt-1 text-sm text-body">
+                Learning progress, quiz performance, conversion, and video drop-off for {@course.title}.
+              </p>
+            </div>
+            <.link
+              navigate={~p"/admin/analytics?#{%{course_id: @course.id}}"}
+              class="inline-flex items-center gap-2 rounded-full border border-ink px-5 py-2.5 text-sm font-medium text-ink transition hover:bg-ink hover:text-white"
+            >
+              <.icon name="hero-arrow-top-right-on-square" class="h-4 w-4" />
+              Open in full Analytics explorer
+            </.link>
+          </div>
+
+          <%!-- Summary KPIs --%>
+          <div class="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
+            <.stat_card
+              label="Completion rate"
+              value={percent_or_dash(@analytics_completion_rate)}
+              icon="hero-rectangle-stack"
+              hint="Average across all modules"
+            />
+            <.stat_card
+              label="Average quiz score"
+              value={percent_or_dash(@analytics_avg_quiz_score)}
+              icon="hero-clipboard-document-check"
+              hint="Across module quizzes"
+            />
+            <.stat_card
+              label="Quiz pass rate"
+              value={percent_or_dash(@analytics_quiz_pass_rate)}
+              icon="hero-academic-cap"
+              hint="Passed vs submitted"
+            />
+            <.stat_card
+              label="Active learners"
+              value={@student_count}
+              icon="hero-users"
+              hint="Currently enrolled"
+            />
+          </div>
+
+          <%!-- Journey / Conversion Funnel --%>
+          <div class="analytics-card overflow-hidden">
+            <div class="flex flex-wrap items-baseline justify-between gap-3 border-b border-neutral-700 px-6 py-7 lg:px-8">
+              <div>
+                <p class="text-xs font-bold uppercase tracking-wider text-primary">Journey</p>
+                <h3 class="mt-2 text-2xl font-semibold text-ink">Conversion funnel</h3>
+              </div>
+              <p :if={@analytics_funnel_conversion} class="text-sm text-body">
+                <span class="font-semibold text-primary">{@analytics_funnel_conversion}%</span>
+                overall conversion
+              </p>
+            </div>
+            <div class="flex flex-wrap items-stretch gap-3 px-6 py-7 lg:px-8">
+              <div :for={step <- @analytics_funnel} class="contents">
+                <div class="min-w-[130px] flex-1 rounded-2xl border border-black/5 bg-white p-4 text-center shadow-sm">
+                  <p class="text-xs font-semibold uppercase tracking-wide text-body">{step.step}</p>
+                  <p class="mt-2 text-2xl font-bold text-ink sm:text-3xl">{step.count}</p>
+                  <p class="mt-1 text-xs font-medium text-body">
+                    {if step.percent_of_previous,
+                      do: "#{step.percent_of_previous}% of prev",
+                      else: raw("&nbsp;")}
+                  </p>
+                </div>
+                <.icon
+                  :if={!step.last?}
+                  name="hero-chevron-right"
+                  class="h-5 w-5 shrink-0 self-center text-body"
+                />
+              </div>
+            </div>
+          </div>
+
+          <%!-- 2-column: Module Performance & Learner Retention --%>
+          <div class="grid gap-6 lg:grid-cols-2">
+            <%!-- Learning performance by module --%>
+            <div class="analytics-card overflow-hidden">
+              <div class="border-b border-neutral-700 px-6 py-7 lg:px-8">
+                <p class="text-xs font-bold uppercase tracking-wider text-primary">Performance</p>
+                <h3 class="mt-2 text-2xl font-semibold text-ink">Completion & Quiz score</h3>
+                <p class="mt-1 text-sm text-body">Module completion vs average quiz result</p>
+              </div>
+
+              <div :if={@analytics_module_rows != []} class="px-6 pb-6 pt-5 lg:px-8">
+                <div class="mb-5 flex justify-end gap-6 text-xs font-semibold text-body">
+                  <span class="flex items-center gap-1.5">
+                    <span class="h-3 w-3 rounded bg-ink" /> Completion
+                  </span>
+                  <span class="flex items-center gap-1.5">
+                    <span class="h-3 w-3 rounded bg-primary" /> Quiz score
+                  </span>
+                </div>
+
+                <div class="divide-y divide-black/5">
+                  <div
+                    :for={row <- @analytics_module_rows}
+                    class="grid items-center gap-4 py-4 sm:grid-cols-[180px_1fr]"
+                  >
+                    <p class="text-sm font-medium text-ink truncate" title={row.title}>{row.title}</p>
+                    <div class="space-y-2">
+                      <.percent_bar
+                        label="Completion"
+                        percent={row.completion_percent}
+                        color="bg-ink"
+                      />
+                      <.percent_bar
+                        label="Quiz score"
+                        percent={row.quiz_score_percent || 0}
+                        color="bg-primary"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <p
+                :if={@analytics_module_rows == []}
+                class="mx-6 my-6 rounded-xl border border-black/5 bg-surface/70 p-6 text-center text-sm text-body"
+              >
+                No modules yet for this course.
+              </p>
+            </div>
+
+            <%!-- Learner retention --%>
+            <div class="analytics-card overflow-hidden">
+              <div class="border-b border-neutral-700 px-6 py-7 lg:px-8">
+                <p class="text-xs font-bold uppercase tracking-wider text-primary">Drop-off</p>
+                <h3 class="mt-2 text-2xl font-semibold text-ink">Learner retention</h3>
+                <p class="mt-1 text-sm text-body">Active learners completing each module milestone</p>
+              </div>
+
+              <div
+                :if={@analytics_module_rows != []}
+                class="divide-y divide-black/5 px-6 py-6 lg:px-8"
+              >
+                <div
+                  :for={{row, index} <- Enum.with_index(@analytics_module_rows, 1)}
+                  class="flex items-start gap-4 py-4 first:pt-0 last:pb-0"
+                >
+                  <span class="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-full border border-primary text-xs font-bold text-primary">
+                    {String.pad_leading(Integer.to_string(index), 2, "0")}
+                  </span>
+                  <div class="min-w-0 flex-1">
+                    <div class="flex items-center justify-between gap-3">
+                      <p class="text-sm font-semibold text-ink truncate">{row.title}</p>
+                      <span class="text-xs font-bold text-primary">{row.completion_percent}%</span>
+                    </div>
+                    <div class="mt-2 h-2.5 overflow-hidden rounded-full bg-neutral-100">
+                      <div
+                        class="h-full rounded-full bg-primary"
+                        style={"width: #{row.completion_percent}%"}
+                      />
+                    </div>
+                    <p class="mt-1 text-xs text-muted">
+                      {row.remaining_learners} learners completed
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <p
+                :if={@analytics_module_rows == []}
+                class="mx-6 my-6 rounded-xl border border-black/5 bg-surface/70 p-6 text-center text-sm text-body"
+              >
+                No module retention data yet.
+              </p>
+            </div>
+          </div>
+
+          <%!-- Video Drop-off & Lecture Engagement --%>
+          <div class="analytics-card overflow-hidden">
+            <div class="border-b border-neutral-700 px-6 py-7 lg:px-8">
+              <p class="text-xs font-bold uppercase tracking-wider text-primary">Engagement</p>
+              <h3 class="mt-2 text-2xl font-semibold text-ink">Video watch drop-off</h3>
+              <p class="mt-1 text-sm text-body">
+                Earliest drop-off points among learners in progress
+              </p>
+            </div>
+
+            <div
+              :if={@analytics_video_dropoffs != []}
+              class="divide-y divide-black/5 px-6 py-6 lg:px-8"
+            >
+              <div
+                :for={row <- @analytics_video_dropoffs}
+                class="grid items-center gap-4 py-4 first:pt-0 last:pb-0 sm:grid-cols-[200px_1fr_100px]"
+              >
+                <div>
+                  <p class="text-sm font-semibold text-ink truncate" title={row.title}>{row.title}</p>
+                  <p class="text-xs text-muted">
+                    {row.viewers} {ngettext("viewer", "viewers", row.viewers)} in progress
+                  </p>
+                </div>
+                <div class="space-y-1">
+                  <div class="h-2.5 overflow-hidden rounded-full bg-neutral-100">
+                    <div
+                      class="h-full rounded-full bg-primary"
+                      style={"width: #{row.dropoff_percent}%"}
+                    />
+                  </div>
+                  <div class="flex justify-between text-xs text-muted">
+                    <span>Avg stop: {round(row.avg_position_seconds)}s</span>
+                    <span>Total: {row.duration_seconds || 0}s</span>
+                  </div>
+                </div>
+                <span class="text-right text-sm font-bold text-ink">{row.dropoff_percent}%</span>
+              </div>
+            </div>
+
+            <p
+              :if={@analytics_video_dropoffs == []}
+              class="mx-6 my-6 rounded-xl border border-black/5 bg-surface/70 p-6 text-center text-sm text-body"
+            >
+              No in-progress video drop-offs recorded. Learners are completing lectures or haven't begun playback yet.
+            </p>
+          </div>
+
+          <%!-- Monthly Revenue Chart (for paid courses) --%>
+          <div :if={!@course.is_free} class="analytics-card overflow-hidden">
+            <div class="border-b border-neutral-700 px-6 py-7 lg:px-8">
+              <p class="text-xs font-bold uppercase tracking-wider text-primary">Financials</p>
+              <h3 class="mt-2 text-2xl font-semibold text-ink">Monthly course revenue</h3>
+              <p class="mt-1 text-sm text-body">Historical payment earnings for {@course.title}</p>
+            </div>
+            <div class="p-6 lg:p-8">
+              <.column_chart
+                title="Revenue by month"
+                data={@analytics_revenue_chart}
+                empty_message="No successful payments recorded for this course."
+              />
+            </div>
+          </div>
+        </section>
+
         <%!-- Course modal --%>
         <.modal :if={@modal == :course} id="course-modal" show on_cancel={JS.push("close_modal")}>
           <.live_component
@@ -1481,9 +1821,36 @@ defmodule WasomiWeb.AdminLive.CourseShow do
   defp format_channel_time(%DateTime{} = dt), do: Calendar.strftime(dt, "%b %-d, %Y")
   defp format_channel_time(_), do: "—"
 
+  defp course_detail_tab("analytics", _current_tab), do: :analytics
   defp course_detail_tab("students", _current_tab), do: :students
   defp course_detail_tab("curriculum", _current_tab), do: :curriculum
   defp course_detail_tab(_tab, current_tab), do: current_tab
+
+  defp percent_or_dash(nil), do: "—"
+  defp percent_or_dash(value), do: "#{value}%"
+
+  defp percent(_count, 0), do: 0
+  defp percent(count, total), do: round(count / total * 100)
+
+  defp compact_revenue_label(amount_minor) do
+    major = amount_minor / 100
+
+    cond do
+      major >= 1_000_000 -> compact_number(major / 1_000_000) <> "M KES"
+      major >= 10_000 -> compact_number(major / 1_000) <> "K KES"
+      true -> Payments.format_minor(amount_minor)
+    end
+  end
+
+  defp compact_number(number) do
+    rounded = Float.round(number, 1)
+
+    if rounded == trunc(rounded) do
+      Integer.to_string(trunc(rounded))
+    else
+      :erlang.float_to_binary(rounded, decimals: 1)
+    end
+  end
 
   defp to_int(value) when is_integer(value), do: value
   defp to_int(value) when is_binary(value), do: String.to_integer(value)

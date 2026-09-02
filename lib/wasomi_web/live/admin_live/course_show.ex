@@ -541,8 +541,6 @@ defmodule WasomiWeb.AdminLive.CourseShow do
     to_string(learner.id) in selected_learner_ids
   end
 
-  defp selected_learner_label(_learners, []), do: "Select learners"
-
   defp selected_learner_label(learners, selected_learner_ids) do
     learners
     |> find_grantable_learners(selected_learner_ids)

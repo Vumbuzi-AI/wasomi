@@ -336,7 +336,7 @@ defmodule WasomiWeb.AdminLiveTest do
 
       {:ok, view, _html} = live(conn, ~p"/admin/courses/#{course.slug}")
 
-      assert has_element?(view, "#course-detail-tabs.grid.grid-cols-2.rounded-2xl")
+      assert has_element?(view, "#course-detail-tabs.grid.grid-cols-3.rounded-2xl")
       assert has_element?(view, "#curriculum-tab[aria-selected='true']")
       assert has_element?(view, "#curriculum-tab", "Curriculum")
 
@@ -354,16 +354,28 @@ defmodule WasomiWeb.AdminLiveTest do
              )
 
       assert has_element?(view, "#students-tab span", "1")
+
+      assert has_element?(view, "#analytics-tab[aria-selected='false']")
+      assert has_element?(view, "#analytics-tab", "Analytics")
+
+      assert has_element?(
+               view,
+               ~s{#analytics-tab[href="/admin/courses/#{course.slug}?tab=analytics"]}
+             )
+
       assert has_element?(view, "#curriculum-panel")
       refute has_element?(view, "#students-panel")
+      refute has_element?(view, "#analytics-panel")
 
       view |> element("#students-tab") |> render_click()
 
       assert_patch(view, ~p"/admin/courses/#{course.slug}?tab=students")
       assert has_element?(view, "#curriculum-tab[aria-selected='false']")
       assert has_element?(view, "#students-tab[aria-selected='true']")
+      assert has_element?(view, "#analytics-tab[aria-selected='false']")
       refute has_element?(view, "#curriculum-panel")
       assert has_element?(view, "#students-panel")
+      refute has_element?(view, "#analytics-panel")
     end
 
     test "shows each enrolled student's completion percent and latest quiz scores", %{

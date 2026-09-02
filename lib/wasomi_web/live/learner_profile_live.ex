@@ -17,7 +17,12 @@ defmodule WasomiWeb.LearnerProfileLive do
   @impl true
   def mount(%{"slug" => slug}, _session, socket) do
     socket =
-      assign(socket, :authed_learner?, match?(%{role: :learner}, socket.assigns[:current_user]))
+      assign(
+        socket,
+        :authed_learner?,
+        socket.assigns[:active_mode] == :learner or
+          match?(%{role: :learner}, socket.assigns[:current_user])
+      )
 
     case Accounts.get_public_profile_by_slug(slug) do
       nil ->

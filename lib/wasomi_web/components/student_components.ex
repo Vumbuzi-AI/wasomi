@@ -111,15 +111,36 @@ defmodule WasomiWeb.StudentComponents do
         </nav>
 
         <div class="border-t border-black/5 p-4">
-          <.link
+          <form
             :if={@current_user.role == :admin}
-            navigate={~p"/admin"}
-            class="sidebar-row group relative mb-2 flex items-center gap-3 rounded-xl bg-ink px-3 py-2.5 text-sm font-medium text-white transition hover:bg-primary"
+            action={~p"/users/active-mode"}
+            method="post"
+            class="mb-3"
           >
-            <.icon name="hero-chart-pie" class="h-5 w-5 shrink-0" />
-            <span class="sidebar-label inline-block">Admin dashboard</span>
-            <.sidebar_tooltip label="Admin dashboard" />
-          </.link>
+            <input type="hidden" name="_csrf_token" value={Phoenix.Controller.get_csrf_token()} />
+            <input type="hidden" name="mode" value="admin" />
+            <button
+              type="submit"
+              class="sidebar-row group relative flex w-full items-center justify-between gap-1.5 rounded-full border border-dark px-4 py-2 text-sm font-medium text-dark transition hover:bg-dark hover:text-white"
+            >
+              <div class="flex items-center gap-2 min-w-0">
+                <.icon name="hero-shield-check" class="h-4 w-4 shrink-0" />
+                <span class="sidebar-label truncate">Switch to Admin Mode</span>
+              </div>
+              <svg
+                class="sidebar-label h-3.5 w-3.5 shrink-0 transition"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <line x1="7" y1="17" x2="17" y2="7" /><polyline points="7 7 17 7 17 17" />
+              </svg>
+              <.sidebar_tooltip label="Switch to Admin Mode" />
+            </button>
+          </form>
           <div class="sidebar-row group relative flex items-center gap-3 rounded-2xl bg-surface px-3 py-3">
             <span class="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-mint font-semibold uppercase text-primary">
               {String.first(@current_user.name || @current_user.email)}

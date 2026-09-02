@@ -101,7 +101,11 @@ defmodule WasomiWeb.UserAuth do
   def fetch_current_user(conn, _opts) do
     {user_token, conn} = ensure_user_token(conn)
     user = user_token && Accounts.get_user_by_session_token(user_token)
-    assign(conn, :current_user, user)
+    active_mode = derive_active_mode(user, get_session(conn, :active_mode))
+
+    conn
+    |> assign(:current_user, user)
+    |> assign(:active_mode, active_mode)
   end
 
   defp ensure_user_token(conn) do
@@ -119,13 +123,35 @@ defmodule WasomiWeb.UserAuth do
   end
 
   @doc """
+  Resolves the effective active mode (:admin or :learner) from the base user role
+  and the session value. Regular learners are always :learner regardless of session.
+  """
+  def derive_active_mode(%Accounts.User{role: :admin}, "learner"), do: :learner
+  def derive_active_mode(%Accounts.User{role: :admin}, _), do: :admin
+  def derive_active_mode(%Accounts.User{role: :learner}, _), do: :learner
+  def derive_active_mode(nil, _), do: :anonymous
+
+  @doc """
+  Checks if the connection or socket is operating in admin mode.
+  """
+  def admin_mode?(%Plug.Conn{assigns: %{active_mode: :admin}}), do: true
+  def admin_mode?(%Phoenix.LiveView.Socket{assigns: %{active_mode: :admin}}), do: true
+  def admin_mode?(_), do: false
+
+  @doc """
+  Checks if the connection or socket is operating in learner mode.
+  """
+  def learner_mode?(%Plug.Conn{assigns: %{active_mode: :learner}}), do: true
+  def learner_mode?(%Phoenix.LiveView.Socket{assigns: %{active_mode: :learner}}), do: true
+  def learner_mode?(_), do: false
+
+  @doc """
   Handles mounting and authenticating the current_user in LiveViews.
 
   ## `on_mount` arguments
 
-    * `:mount_current_user` - Assigns current_user
-      to socket assigns based on user_token, or nil if
-      there's no user_token or no matching user.
+    * `:mount_current_user` - Assigns current_user and active_mode
+      to socket assigns based on user_token and session.
 
     * `:ensure_authenticated` - Authenticates the user from the session,
       and assigns the current_user to socket assigns based
@@ -136,30 +162,10 @@ defmodule WasomiWeb.UserAuth do
       Redirects to signed_in_path if there's a logged user.
 
     * `:ensure_admin` - Authenticates the user and only continues for the
-      `admin` role.
+      `admin` role in `:admin` active mode. If in `:learner` mode, redirects to `/dashboard`.
 
-    * `:redirect_admins_from_learner_area` - Sends `admin` users back to
-      `/admin`. Stacked after `:ensure_authenticated` on the learner
-      live_session so an admin account can't wander into learner-only
-      pages — they keep a separate learner account to take courses.
-
-  ## Examples
-
-  Use the `on_mount` lifecycle macro in LiveViews to mount or authenticate
-  the current_user:
-
-      defmodule WasomiWeb.PageLive do
-        use WasomiWeb, :live_view
-
-        on_mount {WasomiWeb.UserAuth, :mount_current_user}
-        ...
-      end
-
-  Or use the `live_session` of your router to invoke the on_mount callback:
-
-      live_session :authenticated, on_mount: [{WasomiWeb.UserAuth, :ensure_authenticated}] do
-        live "/profile", ProfileLive, :index
-      end
+    * `:redirect_admins_from_learner_area` - Sends `admin` users in `:admin` mode back to
+      `/admin`. When an admin is in `:learner` active mode, allows them through to learner routes.
   """
   def on_mount(:mount_current_user, _params, session, socket) do
     {:cont, mount_current_user(socket, session)}
@@ -196,16 +202,16 @@ defmodule WasomiWeb.UserAuth do
     end
   end
 
-  # Quietly returns an admin who lands on a learner route to the admin area —
-  # no flash, no bounce to the public landing page.
+  # Quietly returns an admin in admin mode who lands on a learner route to the admin area —
+  # but allows admins in `:learner` active mode through to experience learner routes.
   def on_mount(:redirect_admins_from_learner_area, _params, session, socket) do
     socket = mount_current_user(socket, session)
 
-    case socket.assigns.current_user do
-      %{role: :admin} ->
+    case {socket.assigns.current_user, socket.assigns.active_mode} do
+      {%{role: :admin}, :admin} ->
         {:halt, Phoenix.LiveView.redirect(socket, to: ~p"/admin")}
 
-      _user ->
+      _ ->
         {:cont, socket}
     end
   end
@@ -223,14 +229,25 @@ defmodule WasomiWeb.UserAuth do
   def on_mount(:ensure_admin, _params, session, socket) do
     socket = mount_current_user(socket, session)
 
-    case socket.assigns.current_user do
-      %{confirmed_at: nil} ->
+    case {socket.assigns.current_user, socket.assigns.active_mode} do
+      {%{confirmed_at: nil}, _} ->
         {:halt, redirect_unconfirmed_live_user(socket)}
 
-      %{role: :admin} ->
+      {%{role: :admin}, :admin} ->
         {:cont, Phoenix.Component.assign(socket, :page_title_suffix, " · Wasomi Admin")}
 
-      nil ->
+      {%{role: :admin}, :learner} ->
+        socket =
+          socket
+          |> Phoenix.LiveView.put_flash(
+            :error,
+            "Administrative actions are unavailable while in Learner Mode. Switch back to Admin Mode to access the administration area."
+          )
+          |> Phoenix.LiveView.redirect(to: ~p"/dashboard")
+
+        {:halt, socket}
+
+      {nil, _} ->
         socket =
           socket
           |> Phoenix.LiveView.put_flash(:error, "You must log in to access this page.")
@@ -247,11 +264,17 @@ defmodule WasomiWeb.UserAuth do
   end
 
   defp mount_current_user(socket, session) do
-    Phoenix.Component.assign_new(socket, :current_user, fn ->
-      if user_token = session["user_token"] do
-        Accounts.get_user_by_session_token(user_token)
-      end
-    end)
+    socket =
+      Phoenix.Component.assign_new(socket, :current_user, fn ->
+        if user_token = session["user_token"] do
+          Accounts.get_user_by_session_token(user_token)
+        end
+      end)
+
+    user = socket.assigns[:current_user]
+    active_mode = derive_active_mode(user, session["active_mode"])
+
+    Phoenix.Component.assign(socket, :active_mode, active_mode)
   end
 
   @doc """
@@ -291,25 +314,37 @@ defmodule WasomiWeb.UserAuth do
   end
 
   @doc """
-  Restricts controller routes to authenticated administrators.
+  Restricts controller routes to authenticated administrators in `:admin` active mode.
   """
   def require_admin(conn, _opts) do
-    case conn.assigns[:current_user] do
+    active_mode =
+      conn.assigns[:active_mode] || derive_active_mode(conn.assigns[:current_user], nil)
+
+    case {conn.assigns[:current_user], active_mode} do
       # unreachable via router (require_authenticated_user already catches this) — kept for standalone calls
-      %{confirmed_at: nil} ->
+      {%{confirmed_at: nil}, _} ->
         redirect_unconfirmed_conn(conn)
 
-      %{role: :admin} ->
+      {%{role: :admin}, :admin} ->
         conn
 
-      nil ->
+      {%{role: :admin}, :learner} ->
+        conn
+        |> put_flash(
+          :error,
+          "Administrative actions are unavailable while in Learner Mode. Switch back to Admin Mode to access the administration area."
+        )
+        |> redirect(to: ~p"/dashboard")
+        |> halt()
+
+      {nil, _} ->
         conn
         |> put_flash(:error, "You must log in to access this page.")
         |> maybe_store_return_to()
         |> redirect(to: ~p"/users/log_in")
         |> halt()
 
-      _user ->
+      _ ->
         conn
         |> redirect(to: signed_in_path(conn.assigns.current_user))
         |> halt()

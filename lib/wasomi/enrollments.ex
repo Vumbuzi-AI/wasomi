@@ -282,6 +282,34 @@ defmodule Wasomi.Enrollments do
   def enroll_free_course(%User{}, %Course{}), do: {:error, :course_not_free}
 
   @doc """
+  Enrolls an administrator into a course internally without requiring payment.
+  Creates and activates the standard enrollment and sends confirmation notifications.
+  """
+  def enroll_internal(nil, %Course{}), do: {:error, :unauthenticated}
+
+  def enroll_internal(%User{role: :admin} = user, %Course{} = course) do
+    already_enrolled? = can_access_course?(user, course)
+
+    result =
+      Repo.transaction(fn ->
+        with {:ok, enrollment} <- create_pending_enrollment(user, course),
+             {:ok, active_enrollment} <- activate_enrollment(enrollment) do
+          active_enrollment
+        else
+          {:error, reason} -> Repo.rollback(reason)
+        end
+      end)
+
+    with false <- already_enrolled?, {:ok, enrollment} <- result do
+      Notifications.deliver_enrollment_granted(enrollment)
+    end
+
+    result
+  end
+
+  def enroll_internal(%User{}, %Course{}), do: {:error, :forbidden}
+
+  @doc """
   Returns a changeset for the admin "Grant access" form.
   """
   def change_grant_access(attrs \\ %{}) do

@@ -621,7 +621,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                   <p class="text-sm text-muted">One-time course fee</p>
                   <p class="text-2xl font-semibold text-ink">{Catalog.format_price(@course)}</p>
                 </div>
-                <div class="text-right">
+                <div :if={!@course.is_free} class="text-right">
                   <p class="text-sm text-muted">Revenue to date</p>
                   <p class="text-2xl font-semibold text-primary">
                     {Payments.format_minor(@revenue_minor, @course.currency)}
@@ -633,9 +633,13 @@ defmodule WasomiWeb.AdminLive.CourseShow do
         </section>
 
         <%!-- Stats --%>
-        <div class="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
+        <div class={[
+          "grid gap-5 sm:grid-cols-2",
+          if(@course.is_free, do: "lg:grid-cols-3", else: "xl:grid-cols-4")
+        ]}>
           <.stat_card label="Students" value={@student_count} icon="hero-users" />
           <.stat_card
+            :if={!@course.is_free}
             label="Revenue"
             value={Payments.format_minor(@revenue_minor, @course.currency)}
             icon="hero-banknotes"
@@ -1192,280 +1196,284 @@ defmodule WasomiWeb.AdminLive.CourseShow do
             </p>
           </div>
         </section>
-      </div>
 
-      <%!-- Course modal --%>
-      <.modal :if={@modal == :course} id="course-modal" show on_cancel={JS.push("close_modal")}>
-        <.live_component
-          module={CourseLive.FormComponent}
-          id={@course.id}
-          title={@form_title}
-          action={:edit}
-          course={@course}
-          patch={fn course -> ~p"/admin/courses/#{course.slug}" end}
-        />
-      </.modal>
+        <%!-- Course modal --%>
+        <.modal :if={@modal == :course} id="course-modal" show on_cancel={JS.push("close_modal")}>
+          <.live_component
+            module={CourseLive.FormComponent}
+            id={@course.id}
+            title={@form_title}
+            action={:edit}
+            course={@course}
+            patch={fn course -> ~p"/admin/courses/#{course.slug}" end}
+          />
+        </.modal>
 
-      <%!-- Module modal --%>
-      <.modal
-        :if={@modal == :module}
-        id="module-modal"
-        show
-        dismissable={false}
-        on_cancel={JS.push("close_modal")}
-      >
-        <.live_component
-          module={CourseModuleLive.FormComponent}
-          id={@course_module.id || :new_module}
-          title={@form_title}
-          action={if @course_module.id, do: :edit, else: :new}
-          course_module={@course_module}
-          patch={~p"/admin/courses/#{@course.slug}"}
-        />
-      </.modal>
-
-      <%!-- Lecture modal --%>
-      <.modal
-        :if={@modal == :lecture}
-        id="lecture-modal"
-        show
-        dismissable={false}
-        max_width="max-w-4xl"
-        on_cancel={JS.push("close_modal")}
-      >
-        <.live_component
-          module={LectureLive.FormComponent}
-          id={@lecture.id || :new_lecture}
-          title={@form_title}
-          action={if @lecture.id, do: :edit, else: :new}
-          lecture={@lecture}
-          current_user={@current_user}
-          course_slug={@course.slug}
-          patch={~p"/admin/courses/#{@course.slug}"}
-        />
-      </.modal>
-
-      <%!-- Lecture quiz modal --%>
-      <.modal
-        :if={@modal == :quiz}
-        id="quiz-modal"
-        show
-        dismissable={false}
-        max_width="max-w-5xl"
-        on_cancel={JS.push("close_modal")}
-      >
-        {live_render(@socket, WasomiWeb.AdminLive.LectureQuizEdit,
-          id: "quiz-live-#{@quiz_lecture_id}-#{@quiz_modal_tab}",
-          session: %{
-            "course_slug" => @course.slug,
-            "lecture_id" => to_string(@quiz_lecture_id),
-            "initial_tab" => to_string(@quiz_modal_tab),
-            "embedded" => true
-          }
-        )}
-      </.modal>
-
-      <%!-- Course-first access grant modal --%>
-      <.modal
-        :if={@modal == :grant_access}
-        id="grant-access-modal"
-        show
-        on_cancel={JS.push("close_modal")}
-      >
-        <.header>
-          Grant access to {@course.title}
-          <:subtitle>
-            Choose one or more learners. Access activates immediately and each learner is notified
-            by email and in-app.
-          </:subtitle>
-        </.header>
-
-        <.simple_form
-          for={@grant_access_form}
-          id="grant-access-form"
-          phx-change="validate_grant_access"
-          phx-submit="grant_access"
+        <%!-- Module modal --%>
+        <.modal
+          :if={@modal == :module}
+          id="module-modal"
+          show
+          dismissable={false}
+          on_cancel={JS.push("close_modal")}
         >
-          <div>
-            <p class="text-sm font-medium text-ink">Course</p>
-            <p class="mt-1 rounded-xl bg-surface px-3 py-2.5 text-sm text-body">
-              {@course.title}
-            </p>
-          </div>
+          <.live_component
+            module={CourseModuleLive.FormComponent}
+            id={@course_module.id || :new_module}
+            title={@form_title}
+            action={if @course_module.id, do: :edit, else: :new}
+            course_module={@course_module}
+            patch={~p"/admin/courses/#{@course.slug}"}
+          />
+        </.modal>
 
-          <div>
-            <div class="mb-2 flex items-center justify-between gap-3">
-              <p class="text-sm font-semibold text-ink">Learners</p>
-              <p class="text-xs font-semibold uppercase text-muted">
-                {length(@selected_grant_learner_ids)} selected
+        <%!-- Lecture modal --%>
+        <.modal
+          :if={@modal == :lecture}
+          id="lecture-modal"
+          show
+          dismissable={false}
+          max_width="max-w-4xl"
+          on_cancel={JS.push("close_modal")}
+        >
+          <.live_component
+            module={LectureLive.FormComponent}
+            id={@lecture.id || :new_lecture}
+            title={@form_title}
+            action={if @lecture.id, do: :edit, else: :new}
+            lecture={@lecture}
+            current_user={@current_user}
+            course_slug={@course.slug}
+            patch={~p"/admin/courses/#{@course.slug}"}
+          />
+        </.modal>
+
+        <%!-- Lecture quiz modal --%>
+        <.modal
+          :if={@modal == :quiz}
+          id="quiz-modal"
+          show
+          dismissable={false}
+          max_width="max-w-5xl"
+          on_cancel={JS.push("close_modal")}
+        >
+          {live_render(@socket, WasomiWeb.AdminLive.LectureQuizEdit,
+            id: "quiz-live-#{@quiz_lecture_id}-#{@quiz_modal_tab}",
+            session: %{
+              "course_slug" => @course.slug,
+              "lecture_id" => to_string(@quiz_lecture_id),
+              "initial_tab" => to_string(@quiz_modal_tab),
+              "embedded" => true
+            }
+          )}
+        </.modal>
+
+        <%!-- Course-first access grant modal --%>
+        <.modal
+          :if={@modal == :grant_access}
+          id="grant-access-modal"
+          show
+          on_cancel={JS.push("close_modal")}
+        >
+          <.header>
+            Grant access to {@course.title}
+            <:subtitle>
+              Choose one or more learners. Access activates immediately and each learner is notified
+              by email and in-app.
+            </:subtitle>
+          </.header>
+
+          <.simple_form
+            for={@grant_access_form}
+            id="grant-access-form"
+            phx-change="validate_grant_access"
+            phx-submit="grant_access"
+          >
+            <div>
+              <p class="text-sm font-medium text-ink">Course</p>
+              <p class="mt-1 rounded-xl bg-surface px-3 py-2.5 text-sm text-body">
+                {@course.title}
               </p>
             </div>
 
-            <div id="grant-access-learners-combobox" phx-hook="SearchableMultiSelect" class="relative">
-              <button
-                type="button"
-                data-role="trigger"
-                class="flex w-full items-center justify-between rounded-lg border border-black/15 bg-white px-4 py-3 text-left text-sm text-ink transition focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/10"
-              >
-                <span>
-                  <span :if={@selected_grant_learner_ids == []} class="text-muted">
-                    Select learners
-                  </span>
-                  <span :if={@selected_grant_learner_ids != []} class="block truncate">
-                    {selected_learner_label(@grantable_learners, @selected_grant_learner_ids)}
-                  </span>
-                </span>
-                <.icon name="hero-chevron-up-down" class="h-4 w-4 shrink-0 text-muted" />
-              </button>
+            <div>
+              <div class="mb-2 flex items-center justify-between gap-3">
+                <p class="text-sm font-semibold text-ink">Learners</p>
+                <p class="text-xs font-semibold uppercase text-muted">
+                  {length(@selected_grant_learner_ids)} selected
+                </p>
+              </div>
 
               <div
-                data-role="panel"
-                class="absolute z-20 mt-1 hidden w-full overflow-hidden rounded-2xl border border-black/10 bg-white shadow-lg"
+                id="grant-access-learners-combobox"
+                phx-hook="SearchableMultiSelect"
+                class="relative"
               >
-                <div class="p-2">
-                  <input
-                    type="text"
-                    data-role="search"
-                    placeholder="Search learners..."
-                    autocomplete="off"
-                    class="block w-full rounded-lg border border-black/10 px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/10"
-                  />
-                </div>
-
-                <div class="max-h-64 overflow-y-auto px-1 pb-2">
-                  <label
-                    :for={learner <- @grantable_learners}
-                    data-role="option"
-                    class={[
-                      "flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 transition hover:bg-soft",
-                      learner_selected?(learner, @selected_grant_learner_ids) && "bg-mint/40"
-                    ]}
-                  >
-                    <input
-                      type="checkbox"
-                      name="learner_ids[]"
-                      value={learner.id}
-                      checked={learner_selected?(learner, @selected_grant_learner_ids)}
-                      class="h-4 w-4 rounded border-black/20 text-primary focus:ring-primary/20"
-                    />
-                    <span class="min-w-0">
-                      <span class="block truncate text-sm font-semibold text-ink">
-                        {learner.name || "Learner"}
-                      </span>
-                      <span class="block truncate text-xs text-muted">{learner.email}</span>
+                <button
+                  type="button"
+                  data-role="trigger"
+                  class="flex w-full items-center justify-between rounded-lg border border-black/15 bg-white px-4 py-3 text-left text-sm text-ink transition focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/10"
+                >
+                  <span>
+                    <span :if={@selected_grant_learner_ids == []} class="text-muted">
+                      Select learners
                     </span>
-                  </label>
+                    <span :if={@selected_grant_learner_ids != []} class="block truncate">
+                      {selected_learner_label(@grantable_learners, @selected_grant_learner_ids)}
+                    </span>
+                  </span>
+                  <.icon name="hero-chevron-up-down" class="h-4 w-4 shrink-0 text-muted" />
+                </button>
 
-                  <p data-role="empty" class="hidden px-3 py-5 text-center text-sm text-muted">
-                    No learners match.
-                  </p>
+                <div
+                  data-role="panel"
+                  class="absolute z-20 mt-1 hidden w-full overflow-hidden rounded-2xl border border-black/10 bg-white shadow-lg"
+                >
+                  <div class="p-2">
+                    <input
+                      type="text"
+                      data-role="search"
+                      placeholder="Search learners..."
+                      autocomplete="off"
+                      class="block w-full rounded-lg border border-black/10 px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/10"
+                    />
+                  </div>
 
-                  <div :if={@grantable_learners == []} class="px-3 py-5 text-sm text-body">
-                    Every learner already has access to this course.
+                  <div class="max-h-64 overflow-y-auto px-1 pb-2">
+                    <label
+                      :for={learner <- @grantable_learners}
+                      data-role="option"
+                      class={[
+                        "flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 transition hover:bg-soft",
+                        learner_selected?(learner, @selected_grant_learner_ids) && "bg-mint/40"
+                      ]}
+                    >
+                      <input
+                        type="checkbox"
+                        name="learner_ids[]"
+                        value={learner.id}
+                        checked={learner_selected?(learner, @selected_grant_learner_ids)}
+                        class="h-4 w-4 rounded border-black/20 text-primary focus:ring-primary/20"
+                      />
+                      <span class="min-w-0">
+                        <span class="block truncate text-sm font-semibold text-ink">
+                          {learner.name || "Learner"}
+                        </span>
+                        <span class="block truncate text-xs text-muted">{learner.email}</span>
+                      </span>
+                    </label>
+
+                    <p data-role="empty" class="hidden px-3 py-5 text-center text-sm text-muted">
+                      No learners match.
+                    </p>
+
+                    <div :if={@grantable_learners == []} class="px-3 py-5 text-sm text-body">
+                      Every learner already has access to this course.
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
+
+            <input type="hidden" name="grant_access_form[course_id]" value={@course.id} />
+
+            <.input
+              field={@grant_access_form[:reason]}
+              type="textarea"
+              label="Reason for granting access"
+              placeholder="e.g. Manual enrollment for a partner scholarship"
+              rows="3"
+              required
+            />
+
+            <:actions>
+              <.button phx-disable-with="Granting access...">
+                {grant_access_button_label(@selected_grant_learner_ids)}
+              </.button>
+            </:actions>
+          </.simple_form>
+        </.modal>
+
+        <%!-- Publish readiness checklist --%>
+        <.modal
+          :if={@publish_checklist}
+          id="publish-checklist-modal"
+          show
+          on_cancel={JS.push("close_publish_checklist")}
+        >
+          <h2 class="text-xl font-semibold text-ink">
+            "{@course.title}" isn't ready to publish yet
+          </h2>
+          <p class="mt-1 text-sm text-body">
+            Complete the items below before making this course public.
+          </p>
+          <.publish_checklist stages={@publish_checklist} />
+          <div class="mt-7 flex flex-col gap-3 sm:flex-row sm:items-center">
+            <button
+              type="button"
+              phx-click={JS.push("close_publish_checklist") |> JS.push("edit_course")}
+              class="inline-flex items-center justify-center rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-primary"
+            >
+              Edit course
+            </button>
+            <button
+              type="button"
+              phx-click="close_publish_checklist"
+              class="inline-flex items-center justify-center rounded-full border border-black/10 px-5 py-2.5 text-sm font-semibold text-ink transition hover:border-primary hover:text-primary"
+            >
+              Close
+            </button>
           </div>
+        </.modal>
 
-          <input type="hidden" name="grant_access_form[course_id]" value={@course.id} />
+        <%!-- Unpublish confirmation --%>
+        <.confirm_modal
+          :if={@confirming_unpublish?}
+          id="unpublish-course-modal"
+          title={"Unpublish \"#{@course.title}\"?"}
+          confirm_label="Unpublish"
+          confirm={JS.push("unpublish_course")}
+          cancel={JS.push("cancel_unpublish_course")}
+        >
+          It goes back to draft and leaves the public catalog. Enrolled learners keep their access, and you can publish it again at any time.
+        </.confirm_modal>
 
-          <.input
-            field={@grant_access_form[:reason]}
-            type="textarea"
-            label="Reason for granting access"
-            placeholder="e.g. Manual enrollment for a partner scholarship"
-            rows="3"
-            required
-          />
+        <%!-- Delete quiz confirmation --%>
+        <.confirm_modal
+          :if={@deleting_quiz}
+          id="delete-quiz-modal"
+          title={"Delete \"#{@deleting_quiz.title}\"?"}
+          confirm_label="Delete quiz"
+          confirm={JS.push("delete_quiz", value: %{id: @deleting_quiz.id})}
+          cancel={JS.push("cancel_delete_quiz")}
+        >
+          This can't be undone. All of its questions and options will be permanently removed.
+        </.confirm_modal>
 
-          <:actions>
-            <.button phx-disable-with="Granting access...">
-              {grant_access_button_label(@selected_grant_learner_ids)}
-            </.button>
-          </:actions>
-        </.simple_form>
-      </.modal>
+        <%!-- Delete module confirmation --%>
+        <.confirm_modal
+          :if={@deleting_module}
+          id="delete-module-modal"
+          title={"Delete \"#{@deleting_module.title}\" and all its lectures?"}
+          confirm_label="Delete module"
+          confirm={JS.push("delete_module", value: %{id: @deleting_module.id})}
+          cancel={JS.push("cancel_delete_module")}
+        >
+          This can't be undone. All of its lectures will be permanently removed.
+        </.confirm_modal>
 
-      <%!-- Publish readiness checklist --%>
-      <.modal
-        :if={@publish_checklist}
-        id="publish-checklist-modal"
-        show
-        on_cancel={JS.push("close_publish_checklist")}
-      >
-        <h2 class="text-xl font-semibold text-ink">
-          "{@course.title}" isn't ready to publish yet
-        </h2>
-        <p class="mt-1 text-sm text-body">
-          Complete the items below before making this course public.
-        </p>
-        <.publish_checklist stages={@publish_checklist} />
-        <div class="mt-7 flex flex-col gap-3 sm:flex-row sm:items-center">
-          <button
-            type="button"
-            phx-click={JS.push("close_publish_checklist") |> JS.push("edit_course")}
-            class="inline-flex items-center justify-center rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-primary"
-          >
-            Edit course
-          </button>
-          <button
-            type="button"
-            phx-click="close_publish_checklist"
-            class="inline-flex items-center justify-center rounded-full border border-black/10 px-5 py-2.5 text-sm font-semibold text-ink transition hover:border-primary hover:text-primary"
-          >
-            Close
-          </button>
-        </div>
-      </.modal>
-
-      <%!-- Unpublish confirmation --%>
-      <.confirm_modal
-        :if={@confirming_unpublish?}
-        id="unpublish-course-modal"
-        title={"Unpublish \"#{@course.title}\"?"}
-        confirm_label="Unpublish"
-        confirm={JS.push("unpublish_course")}
-        cancel={JS.push("cancel_unpublish_course")}
-      >
-        It goes back to draft and leaves the public catalog. Enrolled learners keep their access, and you can publish it again at any time.
-      </.confirm_modal>
-
-      <%!-- Delete quiz confirmation --%>
-      <.confirm_modal
-        :if={@deleting_quiz}
-        id="delete-quiz-modal"
-        title={"Delete \"#{@deleting_quiz.title}\"?"}
-        confirm_label="Delete quiz"
-        confirm={JS.push("delete_quiz", value: %{id: @deleting_quiz.id})}
-        cancel={JS.push("cancel_delete_quiz")}
-      >
-        This can't be undone. All of its questions and options will be permanently removed.
-      </.confirm_modal>
-
-      <%!-- Delete module confirmation --%>
-      <.confirm_modal
-        :if={@deleting_module}
-        id="delete-module-modal"
-        title={"Delete \"#{@deleting_module.title}\" and all its lectures?"}
-        confirm_label="Delete module"
-        confirm={JS.push("delete_module", value: %{id: @deleting_module.id})}
-        cancel={JS.push("cancel_delete_module")}
-      >
-        This can't be undone. All of its lectures will be permanently removed.
-      </.confirm_modal>
-
-      <%!-- Delete lecture confirmation --%>
-      <.confirm_modal
-        :if={@deleting_lecture}
-        id="delete-lecture-modal"
-        title={"Delete lecture \"#{@deleting_lecture.title}\"?"}
-        confirm_label="Delete lecture"
-        confirm={JS.push("delete_lecture", value: %{id: @deleting_lecture.id})}
-        cancel={JS.push("cancel_delete_lecture")}
-      >
-        This can't be undone.
-      </.confirm_modal>
+        <%!-- Delete lecture confirmation --%>
+        <.confirm_modal
+          :if={@deleting_lecture}
+          id="delete-lecture-modal"
+          title={"Delete lecture \"#{@deleting_lecture.title}\"?"}
+          confirm_label="Delete lecture"
+          confirm={JS.push("delete_lecture", value: %{id: @deleting_lecture.id})}
+          cancel={JS.push("cancel_delete_lecture")}
+        >
+          This can't be undone.
+        </.confirm_modal>
+      </div>
     </.admin_layout>
     """
   end

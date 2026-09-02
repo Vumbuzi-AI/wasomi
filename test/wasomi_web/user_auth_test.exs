@@ -242,7 +242,7 @@ defmodule WasomiWeb.UserAuthTest do
   end
 
   describe "on_mount :redirect_admins_from_learner_area" do
-    test "silently sends admins to /admin", %{conn: conn, user: user} do
+    test "silently sends admins in admin mode to /admin", %{conn: conn, user: user} do
       {:ok, admin} = Accounts.update_user_role(user, :admin)
       user_token = Accounts.generate_user_session_token(admin)
       session = conn |> put_session(:user_token, user_token) |> get_session()
@@ -259,6 +259,28 @@ defmodule WasomiWeb.UserAuthTest do
       assert updated_socket.assigns.flash == %{}
     end
 
+    test "lets admins in learner mode through", %{conn: conn, user: user} do
+      {:ok, admin} = Accounts.update_user_role(user, :admin)
+      user_token = Accounts.generate_user_session_token(admin)
+
+      session =
+        conn
+        |> put_session(:user_token, user_token)
+        |> put_session(:active_mode, "learner")
+        |> get_session()
+
+      assert {:cont, updated_socket} =
+               UserAuth.on_mount(
+                 :redirect_admins_from_learner_area,
+                 %{},
+                 session,
+                 %LiveView.Socket{}
+               )
+
+      assert updated_socket.assigns.current_user.id == admin.id
+      assert updated_socket.assigns.active_mode == :learner
+    end
+
     test "lets learners through", %{conn: conn, user: user} do
       user_token = Accounts.generate_user_session_token(user)
       session = conn |> put_session(:user_token, user_token) |> get_session()
@@ -272,6 +294,7 @@ defmodule WasomiWeb.UserAuthTest do
                )
 
       assert updated_socket.assigns.current_user.id == user.id
+      assert updated_socket.assigns.active_mode == :learner
     end
   end
 
@@ -444,6 +467,49 @@ defmodule WasomiWeb.UserAuthTest do
       assert Phoenix.Flash.get(socket.assigns.flash, :error) == nil
     end
 
+    test "require_admin/2 blocks administrators in learner mode and redirects with notice", %{
+      conn: conn,
+      user: user
+    } do
+      {:ok, admin} = Accounts.update_user_role(user, :admin)
+
+      conn =
+        conn
+        |> fetch_flash()
+        |> assign(:current_user, admin)
+        |> assign(:active_mode, :learner)
+        |> UserAuth.require_admin([])
+
+      assert conn.halted
+      assert redirected_to(conn) == ~p"/dashboard"
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~
+               "Administrative actions are unavailable while in Learner Mode"
+    end
+
+    test "on_mount :ensure_admin blocks administrators in learner mode and redirects with notice",
+         %{
+           conn: conn,
+           user: user
+         } do
+      {:ok, admin} = Accounts.update_user_role(user, :admin)
+      user_token = Accounts.generate_user_session_token(admin)
+
+      session =
+        conn
+        |> put_session(:user_token, user_token)
+        |> put_session(:active_mode, "learner")
+        |> get_session()
+
+      assert {:halt, socket} =
+               UserAuth.on_mount(:ensure_admin, %{}, session, live_socket())
+
+      assert {:redirect, %{to: "/dashboard"}} = socket.redirected
+
+      assert Phoenix.Flash.get(socket.assigns.flash, :error) =~
+               "Administrative actions are unavailable while in Learner Mode"
+    end
+
     test "on_mount :ensure_admin redirects unconfirmed administrators to confirmation", %{
       conn: conn
     } do
@@ -459,6 +525,44 @@ defmodule WasomiWeb.UserAuthTest do
 
       assert Phoenix.Flash.get(updated_socket.assigns.flash, :error) ==
                "Please confirm your email before continuing."
+    end
+  end
+
+  describe "active mode derivation and helpers" do
+    test "derive_active_mode/2 resolves correctly and safely", %{user: user} do
+      {:ok, admin} = Accounts.update_user_role(user, :admin)
+      learner = user_fixture()
+
+      assert UserAuth.derive_active_mode(admin, "learner") == :learner
+      assert UserAuth.derive_active_mode(admin, "admin") == :admin
+      assert UserAuth.derive_active_mode(admin, nil) == :admin
+      assert UserAuth.derive_active_mode(admin, "other") == :admin
+
+      assert UserAuth.derive_active_mode(learner, "admin") == :learner
+      assert UserAuth.derive_active_mode(learner, "learner") == :learner
+      assert UserAuth.derive_active_mode(learner, nil) == :learner
+
+      assert UserAuth.derive_active_mode(nil, "admin") == :anonymous
+      assert UserAuth.derive_active_mode(nil, nil) == :anonymous
+    end
+
+    test "admin_mode?/1 and learner_mode?/1 reflect assigns on conn and socket" do
+      conn_admin = %Plug.Conn{assigns: %{active_mode: :admin}}
+      conn_learner = %Plug.Conn{assigns: %{active_mode: :learner}}
+      socket_admin = %LiveView.Socket{assigns: %{active_mode: :admin}}
+      socket_learner = %LiveView.Socket{assigns: %{active_mode: :learner}}
+
+      assert UserAuth.admin_mode?(conn_admin)
+      refute UserAuth.learner_mode?(conn_admin)
+
+      assert UserAuth.learner_mode?(conn_learner)
+      refute UserAuth.admin_mode?(conn_learner)
+
+      assert UserAuth.admin_mode?(socket_admin)
+      refute UserAuth.learner_mode?(socket_admin)
+
+      assert UserAuth.learner_mode?(socket_learner)
+      refute UserAuth.admin_mode?(socket_learner)
     end
   end
 

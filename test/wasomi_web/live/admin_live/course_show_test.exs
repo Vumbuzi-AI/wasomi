@@ -133,4 +133,31 @@ defmodule WasomiWeb.AdminLive.CourseShowTest do
       assert Enrollments.can_access_course?(learner, course)
     end
   end
+
+  describe "revenue metrics visibility" do
+    test "hides revenue to date indicator and revenue stat card for free courses", %{conn: conn} do
+      course = course_fixture(is_free: true, status: :published)
+
+      {:ok, _view, html} = live(conn, ~p"/admin/courses/#{course.slug}")
+
+      refute html =~ "Revenue to date"
+      refute html =~ ">Revenue</dt>"
+      assert html =~ "Free"
+      assert html =~ "Students"
+      assert html =~ "Modules"
+      assert html =~ "Lectures"
+    end
+
+    test "renders revenue to date indicator and revenue stat card for paid courses", %{conn: conn} do
+      course = course_fixture(is_free: false, price_minor: 50_000, status: :published)
+
+      {:ok, _view, html} = live(conn, ~p"/admin/courses/#{course.slug}")
+
+      assert html =~ "Revenue to date"
+      assert html =~ "500 KES"
+      assert html =~ "Students"
+      assert html =~ "Modules"
+      assert html =~ "Lectures"
+    end
+  end
 end

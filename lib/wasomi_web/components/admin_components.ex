@@ -132,6 +132,31 @@ defmodule WasomiWeb.AdminComponents do
         </nav>
 
         <div class="border-t border-black/5 p-4">
+          <form action={~p"/users/active-mode"} method="post" class="mb-3">
+            <input type="hidden" name="_csrf_token" value={Phoenix.Controller.get_csrf_token()} />
+            <input type="hidden" name="mode" value="learner" />
+            <button
+              type="submit"
+              class="sidebar-row group relative flex w-full items-center justify-between gap-1.5 rounded-full border border-dark px-4 py-2 text-sm font-medium text-dark transition hover:bg-dark hover:text-white"
+            >
+              <div class="flex items-center gap-2 min-w-0">
+                <.icon name="hero-academic-cap" class="h-4 w-4 shrink-0" />
+                <span class="sidebar-label truncate">Switch to Learner Mode</span>
+              </div>
+              <svg
+                class="sidebar-label h-3.5 w-3.5 shrink-0 transition"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <line x1="7" y1="17" x2="17" y2="7" /><polyline points="7 7 17 7 17 17" />
+              </svg>
+              <.sidebar_tooltip label="Switch to Learner Mode" />
+            </button>
+          </form>
           <.link
             navigate={~p"/admin/settings"}
             class="sidebar-row group relative flex items-center gap-3 rounded-2xl bg-surface px-3 py-3 transition hover:bg-mint"

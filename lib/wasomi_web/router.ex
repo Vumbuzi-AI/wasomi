@@ -123,6 +123,7 @@ defmodule WasomiWeb.Router do
     get "/certificates/:id/preview", CertificateController, :preview
     get "/receipts/:id/download", ReceiptController, :download
     get "/payments/paystack/callback", PaystackCallbackController, :show
+    post "/users/active-mode", ActiveModeController, :create
   end
 
   scope "/admin", WasomiWeb do

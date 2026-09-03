@@ -44,7 +44,8 @@ defmodule Wasomi.Accounts.AuditEvent do
     :password_changed,
     :password_reset,
     :profile_updated,
-    :role_changed
+    :role_changed,
+    :active_mode_changed
   ]
 
   schema "account_audit_events" do

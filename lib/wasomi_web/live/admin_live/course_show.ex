@@ -2,6 +2,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
   use WasomiWeb, :live_view
 
   alias Wasomi.{Accounts, Assessments, Catalog, Enrollments, Learning, Payments}
+  alias Wasomi.Catalog.Analytics
   alias Wasomi.Catalog.{CourseModule, Lecture}
   alias Wasomi.Catalog.PublishGuard
   alias WasomiWeb.CourseLive
@@ -424,6 +425,71 @@ defmodule WasomiWeb.AdminLive.CourseShow do
 
     lecture_count = Enum.sum(Enum.map(course.modules, &length(&1.lectures)))
 
+    # Course analytics
+    funnel = Analytics.funnel(course_id: course.id)
+    module_completion_rates = Analytics.module_completion_rates(course_id: course.id)
+    quiz_scores = Analytics.average_quiz_scores(course_id: course.id)
+    video_dropoffs = Analytics.video_dropoff_seconds(course_id: course.id)
+    monthly_rev = Analytics.monthly_revenue(course_id: course.id)
+
+    overall_completion_rate =
+      Map.get(Analytics.completion_rate_by_course(course_id: course.id), course.id, 0)
+
+    quiz_pass_rate =
+      Map.get(Analytics.quiz_pass_rate_by_course(course_id: course.id), course.id, 0)
+
+    module_analytics_rows =
+      Enum.map(course.modules, fn module ->
+        completion = Map.get(module_completion_rates, module.id)
+        quiz = Map.get(quiz_scores, module.id)
+
+        %{
+          module_id: module.id,
+          title: module.title,
+          completion_percent: (completion && completion.rate_percent) || 0,
+          remaining_learners: (completion && completion.completed_learners) || 0,
+          quiz_score_percent: (quiz && round(quiz.average_score_percent)) || nil,
+          submissions: (quiz && quiz.submissions) || 0
+        }
+      end)
+
+    funnel_steps =
+      funnel
+      |> Enum.with_index()
+      |> Enum.map(fn {%{count: count} = step, index} ->
+        previous_count = index > 0 && Enum.at(funnel, index - 1).count
+
+        Map.merge(step, %{
+          percent_of_previous: previous_count && percent(count, previous_count),
+          last?: index == length(funnel) - 1
+        })
+      end)
+
+    funnel_overall_conversion =
+      case funnel do
+        [%{count: 0} | _] -> nil
+        steps -> percent(List.last(steps).count, hd(steps).count)
+      end
+
+    revenue_chart =
+      Enum.map(monthly_rev, fn %{month: month, revenue_minor: revenue_minor} ->
+        %{
+          label: Calendar.strftime(month, "%b %Y"),
+          value: revenue_minor,
+          value_label: compact_revenue_label(revenue_minor),
+          tooltip: Payments.format_minor(revenue_minor, course.currency)
+        }
+      end)
+
+    avg_quiz_score =
+      module_analytics_rows
+      |> Enum.map(& &1.quiz_score_percent)
+      |> Enum.filter(& &1)
+      |> case do
+        [] -> nil
+        scores -> round(Enum.sum(scores) / length(scores))
+      end
+
     socket
     |> assign(:page_title, course.title)
     |> assign(:course, course)
@@ -445,6 +511,14 @@ defmodule WasomiWeb.AdminLive.CourseShow do
       :lecture_quiz_question_counts,
       Assessments.count_lecture_quiz_questions_by_lecture(course.id)
     )
+    |> assign(:analytics_funnel, funnel_steps)
+    |> assign(:analytics_funnel_conversion, funnel_overall_conversion)
+    |> assign(:analytics_module_rows, module_analytics_rows)
+    |> assign(:analytics_video_dropoffs, video_dropoffs)
+    |> assign(:analytics_revenue_chart, revenue_chart)
+    |> assign(:analytics_completion_rate, overall_completion_rate)
+    |> assign(:analytics_quiz_pass_rate, quiz_pass_rate)
+    |> assign(:analytics_avg_quiz_score, avg_quiz_score)
   end
 
   defp module_ready_for_quiz_generation?(module, lecture_quiz_question_counts) do
@@ -466,8 +540,6 @@ defmodule WasomiWeb.AdminLive.CourseShow do
   defp learner_selected?(learner, selected_learner_ids) do
     to_string(learner.id) in selected_learner_ids
   end
-
-  defp selected_learner_label(_learners, []), do: "Select learners"
 
   defp selected_learner_label(learners, selected_learner_ids) do
     learners
@@ -621,7 +693,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
                   <p class="text-sm text-muted">One-time course fee</p>
                   <p class="text-2xl font-semibold text-ink">{Catalog.format_price(@course)}</p>
                 </div>
-                <div class="text-right">
+                <div :if={!@course.is_free} class="text-right">
                   <p class="text-sm text-muted">Revenue to date</p>
                   <p class="text-2xl font-semibold text-primary">
                     {Payments.format_minor(@revenue_minor, @course.currency)}
@@ -633,9 +705,13 @@ defmodule WasomiWeb.AdminLive.CourseShow do
         </section>
 
         <%!-- Stats --%>
-        <div class="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
+        <div class={[
+          "grid gap-5 sm:grid-cols-2",
+          if(@course.is_free, do: "lg:grid-cols-3", else: "xl:grid-cols-4")
+        ]}>
           <.stat_card label="Students" value={@student_count} icon="hero-users" />
           <.stat_card
+            :if={!@course.is_free}
             label="Revenue"
             value={Payments.format_minor(@revenue_minor, @course.currency)}
             icon="hero-banknotes"
@@ -674,7 +750,7 @@ defmodule WasomiWeb.AdminLive.CourseShow do
           id="course-detail-tabs"
           role="tablist"
           aria-label="Course details"
-          class="grid grid-cols-2 overflow-hidden rounded-2xl border border-black/5 bg-surface p-1"
+          class="grid grid-cols-3 overflow-hidden rounded-2xl border border-black/5 bg-surface p-1"
         >
           <.link
             id="curriculum-tab"
@@ -713,6 +789,22 @@ defmodule WasomiWeb.AdminLive.CourseShow do
             ]}>
               {@student_count}
             </span>
+          </.link>
+          <.link
+            id="analytics-tab"
+            patch={~p"/admin/courses/#{@course.slug}?#{%{tab: "analytics"}}"}
+            role="tab"
+            aria-selected={to_string(@active_tab == :analytics)}
+            aria-controls="analytics-panel"
+            class={[
+              "rounded-xl py-2.5 text-center text-sm font-medium transition",
+              if(@active_tab == :analytics,
+                do: "bg-ink text-white",
+                else: "text-body hover:text-ink"
+              )
+            ]}
+          >
+            Analytics
           </.link>
         </div>
 
@@ -1192,280 +1284,534 @@ defmodule WasomiWeb.AdminLive.CourseShow do
             </p>
           </div>
         </section>
-      </div>
 
-      <%!-- Course modal --%>
-      <.modal :if={@modal == :course} id="course-modal" show on_cancel={JS.push("close_modal")}>
-        <.live_component
-          module={CourseLive.FormComponent}
-          id={@course.id}
-          title={@form_title}
-          action={:edit}
-          course={@course}
-          patch={fn course -> ~p"/admin/courses/#{course.slug}" end}
-        />
-      </.modal>
-
-      <%!-- Module modal --%>
-      <.modal
-        :if={@modal == :module}
-        id="module-modal"
-        show
-        dismissable={false}
-        on_cancel={JS.push("close_modal")}
-      >
-        <.live_component
-          module={CourseModuleLive.FormComponent}
-          id={@course_module.id || :new_module}
-          title={@form_title}
-          action={if @course_module.id, do: :edit, else: :new}
-          course_module={@course_module}
-          patch={~p"/admin/courses/#{@course.slug}"}
-        />
-      </.modal>
-
-      <%!-- Lecture modal --%>
-      <.modal
-        :if={@modal == :lecture}
-        id="lecture-modal"
-        show
-        dismissable={false}
-        max_width="max-w-4xl"
-        on_cancel={JS.push("close_modal")}
-      >
-        <.live_component
-          module={LectureLive.FormComponent}
-          id={@lecture.id || :new_lecture}
-          title={@form_title}
-          action={if @lecture.id, do: :edit, else: :new}
-          lecture={@lecture}
-          current_user={@current_user}
-          course_slug={@course.slug}
-          patch={~p"/admin/courses/#{@course.slug}"}
-        />
-      </.modal>
-
-      <%!-- Lecture quiz modal --%>
-      <.modal
-        :if={@modal == :quiz}
-        id="quiz-modal"
-        show
-        dismissable={false}
-        max_width="max-w-5xl"
-        on_cancel={JS.push("close_modal")}
-      >
-        {live_render(@socket, WasomiWeb.AdminLive.LectureQuizEdit,
-          id: "quiz-live-#{@quiz_lecture_id}-#{@quiz_modal_tab}",
-          session: %{
-            "course_slug" => @course.slug,
-            "lecture_id" => to_string(@quiz_lecture_id),
-            "initial_tab" => to_string(@quiz_modal_tab),
-            "embedded" => true
-          }
-        )}
-      </.modal>
-
-      <%!-- Course-first access grant modal --%>
-      <.modal
-        :if={@modal == :grant_access}
-        id="grant-access-modal"
-        show
-        on_cancel={JS.push("close_modal")}
-      >
-        <.header>
-          Grant access to {@course.title}
-          <:subtitle>
-            Choose one or more learners. Access activates immediately and each learner is notified
-            by email and in-app.
-          </:subtitle>
-        </.header>
-
-        <.simple_form
-          for={@grant_access_form}
-          id="grant-access-form"
-          phx-change="validate_grant_access"
-          phx-submit="grant_access"
+        <%!-- Analytics --%>
+        <section
+          :if={@active_tab == :analytics}
+          id="analytics-panel"
+          role="tabpanel"
+          aria-labelledby="analytics-tab"
+          class="space-y-6"
         >
-          <div>
-            <p class="text-sm font-medium text-ink">Course</p>
-            <p class="mt-1 rounded-xl bg-surface px-3 py-2.5 text-sm text-body">
-              {@course.title}
-            </p>
-          </div>
-
-          <div>
-            <div class="mb-2 flex items-center justify-between gap-3">
-              <p class="text-sm font-semibold text-ink">Learners</p>
-              <p class="text-xs font-semibold uppercase text-muted">
-                {length(@selected_grant_learner_ids)} selected
+          <div class="analytics-card flex flex-wrap items-center justify-between gap-6 px-6 py-7 lg:px-8">
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-bold uppercase tracking-wider text-primary">
+                  Course Intelligence
+                </span>
+              </div>
+              <h2 class="mt-1 text-2xl font-bold text-ink sm:text-3xl">Course analytics</h2>
+              <p class="mt-1 text-sm text-body">
+                Learning progress, quiz performance, conversion, and video drop-off for {@course.title}.
               </p>
             </div>
+            <.link
+              navigate={~p"/admin/analytics?#{%{course_id: @course.id}}"}
+              class="inline-flex items-center gap-2 rounded-full border border-ink px-5 py-2.5 text-sm font-medium text-ink transition hover:bg-ink hover:text-white"
+            >
+              <.icon name="hero-arrow-top-right-on-square" class="h-4 w-4" />
+              Open in full Analytics explorer
+            </.link>
+          </div>
 
-            <div id="grant-access-learners-combobox" phx-hook="SearchableMultiSelect" class="relative">
-              <button
-                type="button"
-                data-role="trigger"
-                class="flex w-full items-center justify-between rounded-lg border border-black/15 bg-white px-4 py-3 text-left text-sm text-ink transition focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/10"
-              >
-                <span>
-                  <span :if={@selected_grant_learner_ids == []} class="text-muted">
-                    Select learners
-                  </span>
-                  <span :if={@selected_grant_learner_ids != []} class="block truncate">
-                    {selected_learner_label(@grantable_learners, @selected_grant_learner_ids)}
-                  </span>
-                </span>
-                <.icon name="hero-chevron-up-down" class="h-4 w-4 shrink-0 text-muted" />
-              </button>
+          <%!-- Summary KPIs --%>
+          <div class="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
+            <.stat_card
+              label="Completion rate"
+              value={percent_or_dash(@analytics_completion_rate)}
+              icon="hero-rectangle-stack"
+              hint="Average across all modules"
+            />
+            <.stat_card
+              label="Average quiz score"
+              value={percent_or_dash(@analytics_avg_quiz_score)}
+              icon="hero-clipboard-document-check"
+              hint="Across module quizzes"
+            />
+            <.stat_card
+              label="Quiz pass rate"
+              value={percent_or_dash(@analytics_quiz_pass_rate)}
+              icon="hero-academic-cap"
+              hint="Passed vs submitted"
+            />
+            <.stat_card
+              label="Active learners"
+              value={@student_count}
+              icon="hero-users"
+              hint="Currently enrolled"
+            />
+          </div>
 
-              <div
-                data-role="panel"
-                class="absolute z-20 mt-1 hidden w-full overflow-hidden rounded-2xl border border-black/10 bg-white shadow-lg"
-              >
-                <div class="p-2">
-                  <input
-                    type="text"
-                    data-role="search"
-                    placeholder="Search learners..."
-                    autocomplete="off"
-                    class="block w-full rounded-lg border border-black/10 px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/10"
-                  />
-                </div>
-
-                <div class="max-h-64 overflow-y-auto px-1 pb-2">
-                  <label
-                    :for={learner <- @grantable_learners}
-                    data-role="option"
-                    class={[
-                      "flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 transition hover:bg-soft",
-                      learner_selected?(learner, @selected_grant_learner_ids) && "bg-mint/40"
-                    ]}
-                  >
-                    <input
-                      type="checkbox"
-                      name="learner_ids[]"
-                      value={learner.id}
-                      checked={learner_selected?(learner, @selected_grant_learner_ids)}
-                      class="h-4 w-4 rounded border-black/20 text-primary focus:ring-primary/20"
-                    />
-                    <span class="min-w-0">
-                      <span class="block truncate text-sm font-semibold text-ink">
-                        {learner.name || "Learner"}
-                      </span>
-                      <span class="block truncate text-xs text-muted">{learner.email}</span>
-                    </span>
-                  </label>
-
-                  <p data-role="empty" class="hidden px-3 py-5 text-center text-sm text-muted">
-                    No learners match.
+          <%!-- Journey / Conversion Funnel --%>
+          <div class="analytics-card overflow-hidden">
+            <div class="flex flex-wrap items-baseline justify-between gap-3 border-b border-neutral-700 px-6 py-7 lg:px-8">
+              <div>
+                <p class="text-xs font-bold uppercase tracking-wider text-primary">Journey</p>
+                <h3 class="mt-2 text-2xl font-semibold text-ink">Conversion funnel</h3>
+              </div>
+              <p :if={@analytics_funnel_conversion} class="text-sm text-body">
+                <span class="font-semibold text-primary">{@analytics_funnel_conversion}%</span>
+                overall conversion
+              </p>
+            </div>
+            <div class="flex flex-wrap items-stretch gap-3 px-6 py-7 lg:px-8">
+              <div :for={step <- @analytics_funnel} class="contents">
+                <div class="min-w-[130px] flex-1 rounded-2xl border border-black/5 bg-white p-4 text-center shadow-sm">
+                  <p class="text-xs font-semibold uppercase tracking-wide text-body">{step.step}</p>
+                  <p class="mt-2 text-2xl font-bold text-ink sm:text-3xl">{step.count}</p>
+                  <p class="mt-1 text-xs font-medium text-body">
+                    {if step.percent_of_previous,
+                      do: "#{step.percent_of_previous}% of prev",
+                      else: raw("&nbsp;")}
                   </p>
-
-                  <div :if={@grantable_learners == []} class="px-3 py-5 text-sm text-body">
-                    Every learner already has access to this course.
-                  </div>
                 </div>
+                <.icon
+                  :if={!step.last?}
+                  name="hero-chevron-right"
+                  class="h-5 w-5 shrink-0 self-center text-body"
+                />
               </div>
             </div>
           </div>
 
-          <input type="hidden" name="grant_access_form[course_id]" value={@course.id} />
+          <%!-- 2-column: Module Performance & Learner Retention --%>
+          <div class="grid gap-6 lg:grid-cols-2">
+            <%!-- Learning performance by module --%>
+            <div class="analytics-card overflow-hidden">
+              <div class="border-b border-neutral-700 px-6 py-7 lg:px-8">
+                <p class="text-xs font-bold uppercase tracking-wider text-primary">Performance</p>
+                <h3 class="mt-2 text-2xl font-semibold text-ink">Completion & Quiz score</h3>
+                <p class="mt-1 text-sm text-body">Module completion vs average quiz result</p>
+              </div>
 
-          <.input
-            field={@grant_access_form[:reason]}
-            type="textarea"
-            label="Reason for granting access"
-            placeholder="e.g. Manual enrollment for a partner scholarship"
-            rows="3"
-            required
+              <div :if={@analytics_module_rows != []} class="px-6 pb-6 pt-5 lg:px-8">
+                <div class="mb-5 flex justify-end gap-6 text-xs font-semibold text-body">
+                  <span class="flex items-center gap-1.5">
+                    <span class="h-3 w-3 rounded bg-ink" /> Completion
+                  </span>
+                  <span class="flex items-center gap-1.5">
+                    <span class="h-3 w-3 rounded bg-primary" /> Quiz score
+                  </span>
+                </div>
+
+                <div class="divide-y divide-black/5">
+                  <div
+                    :for={row <- @analytics_module_rows}
+                    class="grid items-center gap-4 py-4 sm:grid-cols-[180px_1fr]"
+                  >
+                    <p class="text-sm font-medium text-ink truncate" title={row.title}>{row.title}</p>
+                    <div class="space-y-2">
+                      <.percent_bar
+                        label="Completion"
+                        percent={row.completion_percent}
+                        color="bg-ink"
+                      />
+                      <.percent_bar
+                        label="Quiz score"
+                        percent={row.quiz_score_percent || 0}
+                        color="bg-primary"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <p
+                :if={@analytics_module_rows == []}
+                class="mx-6 my-6 rounded-xl border border-black/5 bg-surface/70 p-6 text-center text-sm text-body"
+              >
+                No modules yet for this course.
+              </p>
+            </div>
+
+            <%!-- Learner retention --%>
+            <div class="analytics-card overflow-hidden">
+              <div class="border-b border-neutral-700 px-6 py-7 lg:px-8">
+                <p class="text-xs font-bold uppercase tracking-wider text-primary">Drop-off</p>
+                <h3 class="mt-2 text-2xl font-semibold text-ink">Learner retention</h3>
+                <p class="mt-1 text-sm text-body">Active learners completing each module milestone</p>
+              </div>
+
+              <div
+                :if={@analytics_module_rows != []}
+                class="divide-y divide-black/5 px-6 py-6 lg:px-8"
+              >
+                <div
+                  :for={{row, index} <- Enum.with_index(@analytics_module_rows, 1)}
+                  class="flex items-start gap-4 py-4 first:pt-0 last:pb-0"
+                >
+                  <span class="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-full border border-primary text-xs font-bold text-primary">
+                    {String.pad_leading(Integer.to_string(index), 2, "0")}
+                  </span>
+                  <div class="min-w-0 flex-1">
+                    <div class="flex items-center justify-between gap-3">
+                      <p class="text-sm font-semibold text-ink truncate">{row.title}</p>
+                      <span class="text-xs font-bold text-primary">{row.completion_percent}%</span>
+                    </div>
+                    <div class="mt-2 h-2.5 overflow-hidden rounded-full bg-neutral-100">
+                      <div
+                        class="h-full rounded-full bg-primary"
+                        style={"width: #{row.completion_percent}%"}
+                      />
+                    </div>
+                    <p class="mt-1 text-xs text-muted">
+                      {row.remaining_learners} learners completed
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <p
+                :if={@analytics_module_rows == []}
+                class="mx-6 my-6 rounded-xl border border-black/5 bg-surface/70 p-6 text-center text-sm text-body"
+              >
+                No module retention data yet.
+              </p>
+            </div>
+          </div>
+
+          <%!-- Video Drop-off & Lecture Engagement --%>
+          <div class="analytics-card overflow-hidden">
+            <div class="border-b border-neutral-700 px-6 py-7 lg:px-8">
+              <p class="text-xs font-bold uppercase tracking-wider text-primary">Engagement</p>
+              <h3 class="mt-2 text-2xl font-semibold text-ink">Video watch drop-off</h3>
+              <p class="mt-1 text-sm text-body">
+                Earliest drop-off points among learners in progress
+              </p>
+            </div>
+
+            <div
+              :if={@analytics_video_dropoffs != []}
+              class="divide-y divide-black/5 px-6 py-6 lg:px-8"
+            >
+              <div
+                :for={row <- @analytics_video_dropoffs}
+                class="grid items-center gap-4 py-4 first:pt-0 last:pb-0 sm:grid-cols-[200px_1fr_100px]"
+              >
+                <div>
+                  <p class="text-sm font-semibold text-ink truncate" title={row.title}>{row.title}</p>
+                  <p class="text-xs text-muted">
+                    {row.viewers} {ngettext("viewer", "viewers", row.viewers)} in progress
+                  </p>
+                </div>
+                <div class="space-y-1">
+                  <div class="h-2.5 overflow-hidden rounded-full bg-neutral-100">
+                    <div
+                      class="h-full rounded-full bg-primary"
+                      style={"width: #{row.dropoff_percent}%"}
+                    />
+                  </div>
+                  <div class="flex justify-between text-xs text-muted">
+                    <span>Avg stop: {round(row.avg_position_seconds)}s</span>
+                    <span>Total: {row.duration_seconds || 0}s</span>
+                  </div>
+                </div>
+                <span class="text-right text-sm font-bold text-ink">{row.dropoff_percent}%</span>
+              </div>
+            </div>
+
+            <p
+              :if={@analytics_video_dropoffs == []}
+              class="mx-6 my-6 rounded-xl border border-black/5 bg-surface/70 p-6 text-center text-sm text-body"
+            >
+              No in-progress video drop-offs recorded. Learners are completing lectures or haven't begun playback yet.
+            </p>
+          </div>
+
+          <%!-- Monthly Revenue Chart (for paid courses) --%>
+          <div :if={!@course.is_free} class="analytics-card overflow-hidden">
+            <div class="border-b border-neutral-700 px-6 py-7 lg:px-8">
+              <p class="text-xs font-bold uppercase tracking-wider text-primary">Financials</p>
+              <h3 class="mt-2 text-2xl font-semibold text-ink">Monthly course revenue</h3>
+              <p class="mt-1 text-sm text-body">Historical payment earnings for {@course.title}</p>
+            </div>
+            <div class="p-6 lg:p-8">
+              <.column_chart
+                title="Revenue by month"
+                data={@analytics_revenue_chart}
+                empty_message="No successful payments recorded for this course."
+              />
+            </div>
+          </div>
+        </section>
+
+        <%!-- Course modal --%>
+        <.modal :if={@modal == :course} id="course-modal" show on_cancel={JS.push("close_modal")}>
+          <.live_component
+            module={CourseLive.FormComponent}
+            id={@course.id}
+            title={@form_title}
+            action={:edit}
+            course={@course}
+            patch={fn course -> ~p"/admin/courses/#{course.slug}" end}
           />
+        </.modal>
 
-          <:actions>
-            <.button phx-disable-with="Granting access...">
-              {grant_access_button_label(@selected_grant_learner_ids)}
-            </.button>
-          </:actions>
-        </.simple_form>
-      </.modal>
+        <%!-- Module modal --%>
+        <.modal
+          :if={@modal == :module}
+          id="module-modal"
+          show
+          dismissable={false}
+          on_cancel={JS.push("close_modal")}
+        >
+          <.live_component
+            module={CourseModuleLive.FormComponent}
+            id={@course_module.id || :new_module}
+            title={@form_title}
+            action={if @course_module.id, do: :edit, else: :new}
+            course_module={@course_module}
+            patch={~p"/admin/courses/#{@course.slug}"}
+          />
+        </.modal>
 
-      <%!-- Publish readiness checklist --%>
-      <.modal
-        :if={@publish_checklist}
-        id="publish-checklist-modal"
-        show
-        on_cancel={JS.push("close_publish_checklist")}
-      >
-        <h2 class="text-xl font-semibold text-ink">
-          "{@course.title}" isn't ready to publish yet
-        </h2>
-        <p class="mt-1 text-sm text-body">
-          Complete the items below before making this course public.
-        </p>
-        <.publish_checklist stages={@publish_checklist} />
-        <div class="mt-7 flex flex-col gap-3 sm:flex-row sm:items-center">
-          <button
-            type="button"
-            phx-click={JS.push("close_publish_checklist") |> JS.push("edit_course")}
-            class="inline-flex items-center justify-center rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-primary"
+        <%!-- Lecture modal --%>
+        <.modal
+          :if={@modal == :lecture}
+          id="lecture-modal"
+          show
+          dismissable={false}
+          max_width="max-w-4xl"
+          on_cancel={JS.push("close_modal")}
+        >
+          <.live_component
+            module={LectureLive.FormComponent}
+            id={@lecture.id || :new_lecture}
+            title={@form_title}
+            action={if @lecture.id, do: :edit, else: :new}
+            lecture={@lecture}
+            current_user={@current_user}
+            course_slug={@course.slug}
+            patch={~p"/admin/courses/#{@course.slug}"}
+          />
+        </.modal>
+
+        <%!-- Lecture quiz modal --%>
+        <.modal
+          :if={@modal == :quiz}
+          id="quiz-modal"
+          show
+          dismissable={false}
+          max_width="max-w-5xl"
+          on_cancel={JS.push("close_modal")}
+        >
+          {live_render(@socket, WasomiWeb.AdminLive.LectureQuizEdit,
+            id: "quiz-live-#{@quiz_lecture_id}-#{@quiz_modal_tab}",
+            session: %{
+              "course_slug" => @course.slug,
+              "lecture_id" => to_string(@quiz_lecture_id),
+              "initial_tab" => to_string(@quiz_modal_tab),
+              "embedded" => true
+            }
+          )}
+        </.modal>
+
+        <%!-- Course-first access grant modal --%>
+        <.modal
+          :if={@modal == :grant_access}
+          id="grant-access-modal"
+          show
+          on_cancel={JS.push("close_modal")}
+        >
+          <.header>
+            Grant access to {@course.title}
+            <:subtitle>
+              Choose one or more learners. Access activates immediately and each learner is notified
+              by email and in-app.
+            </:subtitle>
+          </.header>
+
+          <.simple_form
+            for={@grant_access_form}
+            id="grant-access-form"
+            phx-change="validate_grant_access"
+            phx-submit="grant_access"
           >
-            Edit course
-          </button>
-          <button
-            type="button"
-            phx-click="close_publish_checklist"
-            class="inline-flex items-center justify-center rounded-full border border-black/10 px-5 py-2.5 text-sm font-semibold text-ink transition hover:border-primary hover:text-primary"
-          >
-            Close
-          </button>
-        </div>
-      </.modal>
+            <div>
+              <p class="text-sm font-medium text-ink">Course</p>
+              <p class="mt-1 rounded-xl bg-surface px-3 py-2.5 text-sm text-body">
+                {@course.title}
+              </p>
+            </div>
 
-      <%!-- Unpublish confirmation --%>
-      <.confirm_modal
-        :if={@confirming_unpublish?}
-        id="unpublish-course-modal"
-        title={"Unpublish \"#{@course.title}\"?"}
-        confirm_label="Unpublish"
-        confirm={JS.push("unpublish_course")}
-        cancel={JS.push("cancel_unpublish_course")}
-      >
-        It goes back to draft and leaves the public catalog. Enrolled learners keep their access, and you can publish it again at any time.
-      </.confirm_modal>
+            <div>
+              <div class="mb-2 flex items-center justify-between gap-3">
+                <p class="text-sm font-semibold text-ink">Learners</p>
+                <p class="text-xs font-semibold uppercase text-muted">
+                  {length(@selected_grant_learner_ids)} selected
+                </p>
+              </div>
 
-      <%!-- Delete quiz confirmation --%>
-      <.confirm_modal
-        :if={@deleting_quiz}
-        id="delete-quiz-modal"
-        title={"Delete \"#{@deleting_quiz.title}\"?"}
-        confirm_label="Delete quiz"
-        confirm={JS.push("delete_quiz", value: %{id: @deleting_quiz.id})}
-        cancel={JS.push("cancel_delete_quiz")}
-      >
-        This can't be undone. All of its questions and options will be permanently removed.
-      </.confirm_modal>
+              <div
+                id="grant-access-learners-combobox"
+                phx-hook="SearchableMultiSelect"
+                class="relative"
+              >
+                <button
+                  type="button"
+                  data-role="trigger"
+                  class="flex w-full items-center justify-between rounded-lg border border-black/15 bg-white px-4 py-3 text-left text-sm text-ink transition focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/10"
+                >
+                  <span>
+                    <span :if={@selected_grant_learner_ids == []} class="text-muted">
+                      Select learners
+                    </span>
+                    <span :if={@selected_grant_learner_ids != []} class="block truncate">
+                      {selected_learner_label(@grantable_learners, @selected_grant_learner_ids)}
+                    </span>
+                  </span>
+                  <.icon name="hero-chevron-up-down" class="h-4 w-4 shrink-0 text-muted" />
+                </button>
 
-      <%!-- Delete module confirmation --%>
-      <.confirm_modal
-        :if={@deleting_module}
-        id="delete-module-modal"
-        title={"Delete \"#{@deleting_module.title}\" and all its lectures?"}
-        confirm_label="Delete module"
-        confirm={JS.push("delete_module", value: %{id: @deleting_module.id})}
-        cancel={JS.push("cancel_delete_module")}
-      >
-        This can't be undone. All of its lectures will be permanently removed.
-      </.confirm_modal>
+                <div
+                  data-role="panel"
+                  class="absolute z-20 mt-1 hidden w-full overflow-hidden rounded-2xl border border-black/10 bg-white shadow-lg"
+                >
+                  <div class="p-2">
+                    <input
+                      type="text"
+                      data-role="search"
+                      placeholder="Search learners..."
+                      autocomplete="off"
+                      class="block w-full rounded-lg border border-black/10 px-3 py-2 text-sm text-ink focus:border-primary focus:outline-none focus:ring-4 focus:ring-primary/10"
+                    />
+                  </div>
 
-      <%!-- Delete lecture confirmation --%>
-      <.confirm_modal
-        :if={@deleting_lecture}
-        id="delete-lecture-modal"
-        title={"Delete lecture \"#{@deleting_lecture.title}\"?"}
-        confirm_label="Delete lecture"
-        confirm={JS.push("delete_lecture", value: %{id: @deleting_lecture.id})}
-        cancel={JS.push("cancel_delete_lecture")}
-      >
-        This can't be undone.
-      </.confirm_modal>
+                  <div class="max-h-64 overflow-y-auto px-1 pb-2">
+                    <label
+                      :for={learner <- @grantable_learners}
+                      data-role="option"
+                      class={[
+                        "flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 transition hover:bg-soft",
+                        learner_selected?(learner, @selected_grant_learner_ids) && "bg-mint/40"
+                      ]}
+                    >
+                      <input
+                        type="checkbox"
+                        name="learner_ids[]"
+                        value={learner.id}
+                        checked={learner_selected?(learner, @selected_grant_learner_ids)}
+                        class="h-4 w-4 rounded border-black/20 text-primary focus:ring-primary/20"
+                      />
+                      <span class="min-w-0">
+                        <span class="block truncate text-sm font-semibold text-ink">
+                          {learner.name || "Learner"}
+                        </span>
+                        <span class="block truncate text-xs text-muted">{learner.email}</span>
+                      </span>
+                    </label>
+
+                    <p data-role="empty" class="hidden px-3 py-5 text-center text-sm text-muted">
+                      No learners match.
+                    </p>
+
+                    <div :if={@grantable_learners == []} class="px-3 py-5 text-sm text-body">
+                      Every learner already has access to this course.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <input type="hidden" name="grant_access_form[course_id]" value={@course.id} />
+
+            <.input
+              field={@grant_access_form[:reason]}
+              type="textarea"
+              label="Reason for granting access"
+              placeholder="e.g. Manual enrollment for a partner scholarship"
+              rows="3"
+              required
+            />
+
+            <:actions>
+              <.button phx-disable-with="Granting access...">
+                {grant_access_button_label(@selected_grant_learner_ids)}
+              </.button>
+            </:actions>
+          </.simple_form>
+        </.modal>
+
+        <%!-- Publish readiness checklist --%>
+        <.modal
+          :if={@publish_checklist}
+          id="publish-checklist-modal"
+          show
+          on_cancel={JS.push("close_publish_checklist")}
+        >
+          <h2 class="text-xl font-semibold text-ink">
+            "{@course.title}" isn't ready to publish yet
+          </h2>
+          <p class="mt-1 text-sm text-body">
+            Complete the items below before making this course public.
+          </p>
+          <.publish_checklist stages={@publish_checklist} />
+          <div class="mt-7 flex flex-col gap-3 sm:flex-row sm:items-center">
+            <button
+              type="button"
+              phx-click={JS.push("close_publish_checklist") |> JS.push("edit_course")}
+              class="inline-flex items-center justify-center rounded-full bg-ink px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-primary"
+            >
+              Edit course
+            </button>
+            <button
+              type="button"
+              phx-click="close_publish_checklist"
+              class="inline-flex items-center justify-center rounded-full border border-black/10 px-5 py-2.5 text-sm font-semibold text-ink transition hover:border-primary hover:text-primary"
+            >
+              Close
+            </button>
+          </div>
+        </.modal>
+
+        <%!-- Unpublish confirmation --%>
+        <.confirm_modal
+          :if={@confirming_unpublish?}
+          id="unpublish-course-modal"
+          title={"Unpublish \"#{@course.title}\"?"}
+          confirm_label="Unpublish"
+          confirm={JS.push("unpublish_course")}
+          cancel={JS.push("cancel_unpublish_course")}
+        >
+          It goes back to draft and leaves the public catalog. Enrolled learners keep their access, and you can publish it again at any time.
+        </.confirm_modal>
+
+        <%!-- Delete quiz confirmation --%>
+        <.confirm_modal
+          :if={@deleting_quiz}
+          id="delete-quiz-modal"
+          title={"Delete \"#{@deleting_quiz.title}\"?"}
+          confirm_label="Delete quiz"
+          confirm={JS.push("delete_quiz", value: %{id: @deleting_quiz.id})}
+          cancel={JS.push("cancel_delete_quiz")}
+        >
+          This can't be undone. All of its questions and options will be permanently removed.
+        </.confirm_modal>
+
+        <%!-- Delete module confirmation --%>
+        <.confirm_modal
+          :if={@deleting_module}
+          id="delete-module-modal"
+          title={"Delete \"#{@deleting_module.title}\" and all its lectures?"}
+          confirm_label="Delete module"
+          confirm={JS.push("delete_module", value: %{id: @deleting_module.id})}
+          cancel={JS.push("cancel_delete_module")}
+        >
+          This can't be undone. All of its lectures will be permanently removed.
+        </.confirm_modal>
+
+        <%!-- Delete lecture confirmation --%>
+        <.confirm_modal
+          :if={@deleting_lecture}
+          id="delete-lecture-modal"
+          title={"Delete lecture \"#{@deleting_lecture.title}\"?"}
+          confirm_label="Delete lecture"
+          confirm={JS.push("delete_lecture", value: %{id: @deleting_lecture.id})}
+          cancel={JS.push("cancel_delete_lecture")}
+        >
+          This can't be undone.
+        </.confirm_modal>
+      </div>
     </.admin_layout>
     """
   end
@@ -1473,9 +1819,36 @@ defmodule WasomiWeb.AdminLive.CourseShow do
   defp format_channel_time(%DateTime{} = dt), do: Calendar.strftime(dt, "%b %-d, %Y")
   defp format_channel_time(_), do: "—"
 
+  defp course_detail_tab("analytics", _current_tab), do: :analytics
   defp course_detail_tab("students", _current_tab), do: :students
   defp course_detail_tab("curriculum", _current_tab), do: :curriculum
   defp course_detail_tab(_tab, current_tab), do: current_tab
+
+  defp percent_or_dash(nil), do: "—"
+  defp percent_or_dash(value), do: "#{value}%"
+
+  defp percent(_count, 0), do: 0
+  defp percent(count, total), do: round(count / total * 100)
+
+  defp compact_revenue_label(amount_minor) do
+    major = amount_minor / 100
+
+    cond do
+      major >= 1_000_000 -> compact_number(major / 1_000_000) <> "M KES"
+      major >= 10_000 -> compact_number(major / 1_000) <> "K KES"
+      true -> Payments.format_minor(amount_minor)
+    end
+  end
+
+  defp compact_number(number) do
+    rounded = Float.round(number, 1)
+
+    if rounded == trunc(rounded) do
+      Integer.to_string(trunc(rounded))
+    else
+      :erlang.float_to_binary(rounded, decimals: 1)
+    end
+  end
 
   defp to_int(value) when is_integer(value), do: value
   defp to_int(value) when is_binary(value), do: String.to_integer(value)

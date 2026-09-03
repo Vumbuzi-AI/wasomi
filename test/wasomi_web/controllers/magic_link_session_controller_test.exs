@@ -8,7 +8,7 @@ defmodule WasomiWeb.MagicLinkSessionControllerTest do
   defp magic_token(email) do
     :ok = Accounts.deliver_magic_link(email, &"https://t.example/magic/#{&1}")
     assert_received {:email, sent}
-    [_, token] = Regex.run(~r{https://t\.example/magic/([A-Za-z0-9_-]+)}, sent.text_body)
+    [_, token] = Regex.run(~r{/magic/([A-Za-z0-9_-]+)}, sent.text_body)
     token
   end
 

@@ -84,14 +84,14 @@ defmodule WasomiWeb.CatalogLive.Show do
   @impl true
   def render(assigns) do
     ~H"""
-    <div :if={!learner?(@current_user)} class="min-h-screen bg-white text-ink">
+    <div :if={!learner_view?(assigns)} class="min-h-screen bg-white text-ink">
       <.home_header current_user={@current_user} />
       <main>
         <.course_body {assigns} />
       </main>
     </div>
 
-    <.student_layout :if={learner?(@current_user)} active={:browse} current_user={@current_user}>
+    <.student_layout :if={learner_view?(assigns)} active={:browse} current_user={@current_user}>
       <div class="pb-12">
         <.course_body {assigns} />
       </div>
@@ -104,6 +104,7 @@ defmodule WasomiWeb.CatalogLive.Show do
   attr :duration_label, :string, required: true
   attr :learner_count, :integer, required: true
   attr :current_user, :any, required: true
+  attr :active_mode, :atom, default: nil
 
   defp course_body(assigns) do
     ~H"""
@@ -111,7 +112,7 @@ defmodule WasomiWeb.CatalogLive.Show do
       <section class="py-8 lg:py-10">
         <div class="mx-auto max-w-container px-5 lg:px-8">
           <.link
-            navigate={if learner?(@current_user), do: ~p"/catalog", else: ~p"/courses"}
+            navigate={if learner_view?(assigns), do: ~p"/catalog", else: ~p"/courses"}
             class="inline-flex items-center gap-1.5 text-sm font-semibold text-muted transition hover:text-ink"
           >
             <.icon name="hero-arrow-left" class="h-4 w-4" /> Back to all courses
@@ -407,8 +408,9 @@ defmodule WasomiWeb.CatalogLive.Show do
     """
   end
 
-  defp learner?(%{role: :learner}), do: true
-  defp learner?(_), do: false
+  defp learner_view?(assigns) do
+    assigns[:active_mode] == :learner or match?(%{role: :learner}, assigns[:current_user])
+  end
 
   defp minutes(seconds) when is_integer(seconds), do: max(1, div(seconds + 59, 60))
   defp minutes(_), do: 0

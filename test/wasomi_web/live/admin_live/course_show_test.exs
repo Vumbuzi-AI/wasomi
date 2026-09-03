@@ -8,6 +8,7 @@ defmodule WasomiWeb.AdminLive.CourseShowTest do
   import Wasomi.EnrollmentsFixtures
 
   alias Wasomi.Enrollments
+  alias Wasomi.Payments
 
   defp admin_fixture(attrs) do
     user = user_fixture(attrs)
@@ -131,6 +132,100 @@ defmodule WasomiWeb.AdminLive.CourseShowTest do
       assert html =~ "Access granted"
       assert html =~ "Internal Learner"
       assert Enrollments.can_access_course?(learner, course)
+    end
+  end
+
+  describe "revenue metrics visibility" do
+    test "hides revenue to date indicator and revenue stat card for free courses", %{conn: conn} do
+      course = course_fixture(is_free: true, status: :published)
+
+      {:ok, _view, html} = live(conn, ~p"/admin/courses/#{course.slug}")
+
+      refute html =~ "Revenue to date"
+      refute html =~ ">Revenue</dt>"
+      assert html =~ "Free"
+      assert html =~ "Students"
+      assert html =~ "Modules"
+      assert html =~ "Lectures"
+    end
+
+    test "renders revenue to date indicator and revenue stat card for paid courses", %{conn: conn} do
+      course = course_fixture(is_free: false, price_minor: 50_000, status: :published)
+
+      {:ok, _view, html} = live(conn, ~p"/admin/courses/#{course.slug}")
+
+      assert html =~ "Revenue to date"
+      assert html =~ "500 KES"
+      assert html =~ "Students"
+      assert html =~ "Modules"
+      assert html =~ "Lectures"
+    end
+  end
+
+  describe "course-filtered analytics tab" do
+    test "renders analytics panel with funnel, module performance, and video dropoff for paid course",
+         %{conn: conn} do
+      course = course_fixture(title: "Strategic Management", is_free: false, status: :published)
+      module = course_module_fixture(course_id: course.id, title: "Module 1: Foundations")
+      lecture = lecture_fixture(module_id: module.id, title: "Lecture 1.1", duration_seconds: 200)
+      enrollment = enrollment_fixture(course_id: course.id, status: :active)
+
+      {:ok, _payment} =
+        Payments.create_payment(%{
+          user_id: enrollment.user_id,
+          course_id: course.id,
+          enrollment_id: enrollment.id,
+          provider: :paystack,
+          provider_reference: "ref-#{System.unique_integer([:positive])}",
+          amount_minor: 10_000,
+          currency: "KES",
+          status: :successful,
+          paid_at: ~U[2026-06-20 10:00:00Z],
+          raw_payload: %{}
+        })
+
+      Wasomi.LearningFixtures.lecture_progress_fixture(
+        user_id: enrollment.user_id,
+        lecture_id: lecture.id,
+        status: :in_progress,
+        last_position_seconds: 80
+      )
+
+      {:ok, view, html} = live(conn, ~p"/admin/courses/#{course.slug}?tab=analytics")
+
+      assert has_element?(view, "#analytics-panel")
+      assert html =~ "Course analytics"
+      assert html =~ "Conversion funnel"
+      assert html =~ "Checkout started"
+      assert html =~ "Module 1: Foundations"
+      assert html =~ "Completion &amp; Quiz score"
+      assert html =~ "Learner retention"
+      assert html =~ "Video watch drop-off"
+      assert html =~ "Monthly course revenue"
+      assert html =~ "Open in full Analytics explorer"
+
+      # Also test switching tabs via LiveView patch
+      view |> element("#curriculum-tab") |> render_click()
+      assert has_element?(view, "#curriculum-panel")
+      refute has_element?(view, "#analytics-panel")
+
+      view |> element("#analytics-tab") |> render_click()
+      assert has_element?(view, "#analytics-panel")
+    end
+
+    test "omits monthly course revenue section for free courses in analytics tab", %{conn: conn} do
+      course = course_fixture(title: "Free Workshop", is_free: true, status: :published)
+      module = course_module_fixture(course_id: course.id, title: "Overview Module")
+      _lecture = lecture_fixture(module_id: module.id, duration_seconds: 120)
+      _enrollment = enrollment_fixture(course_id: course.id, status: :active)
+
+      {:ok, view, html} = live(conn, ~p"/admin/courses/#{course.slug}?tab=analytics")
+
+      assert has_element?(view, "#analytics-panel")
+      assert html =~ "Course analytics"
+      assert html =~ "Conversion funnel"
+      assert html =~ "Overview Module"
+      refute html =~ "Monthly course revenue"
     end
   end
 end

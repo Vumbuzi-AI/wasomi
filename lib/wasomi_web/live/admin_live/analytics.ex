@@ -598,11 +598,15 @@ defmodule WasomiWeb.AdminLive.Analytics do
     |> Map.get(course_id, 0)
   end
 
-  defp revenue_bar_percent(_revenue_minor, []), do: 0
-
   defp revenue_bar_percent(revenue_minor, rows) do
-    max_revenue = rows |> Enum.map(& &1.revenue_minor) |> Enum.max()
-    if max_revenue > 0, do: round(revenue_minor / max_revenue * 100), else: 0
+    case Enum.map(rows, & &1.revenue_minor) do
+      [] ->
+        0
+
+      revs ->
+        max_revenue = Enum.max(revs)
+        if max_revenue > 0, do: round(revenue_minor / max_revenue * 100), else: 0
+    end
   end
 
   defp retained_label([]), do: "—"

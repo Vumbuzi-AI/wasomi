@@ -35,6 +35,21 @@ defmodule WasomiWeb.CheckoutLive do
              |> redirect(to: ~p"/courses/#{course.slug}")}
         end
 
+      match?(%{role: :admin}, user) ->
+        case Enrollments.enroll_internal(user, course) do
+          {:ok, _enrollment} ->
+            {:ok,
+             socket
+             |> put_flash(:info, "Enrolled in #{course.title} successfully.")
+             |> redirect(to: ~p"/learn/courses/#{course.slug}")}
+
+          {:error, _reason} ->
+            {:ok,
+             socket
+             |> put_flash(:error, "Could not enroll in course. Please try again.")
+             |> redirect(to: ~p"/courses/#{course.slug}")}
+        end
+
       true ->
         if connected?(socket), do: Payments.subscribe(user)
 

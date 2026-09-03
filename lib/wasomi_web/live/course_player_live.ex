@@ -2287,7 +2287,7 @@ defmodule WasomiWeb.CoursePlayerLive do
     end
   end
 
-  defp final_lecture?(_course, _lecture), do: false
+  defp final_lecture?(_course, nil), do: false
 
   # The admin's own estimate wins when they set one: it can account for the
   # reading, the practice questions and the quizzes, none of which a video

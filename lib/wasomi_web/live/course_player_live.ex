@@ -107,6 +107,7 @@ defmodule WasomiWeb.CoursePlayerLive do
          |> assign(:channel_highlight_message_id, channel_highlight_message_id)
          |> assign(:active_study_tool, nil)
          |> assign(:lesson_tab, :overview)
+         |> assign(:quiz_focus_token, 0)
          |> assign(:preview?, preview?)
          |> assign(:requested_preview_lecture_id, params["lecture_id"])
          |> assign(:preview_progress, %{})
@@ -467,15 +468,24 @@ defmodule WasomiWeb.CoursePlayerLive do
           # way a video lecture completes — without it, preview mode could never
           # reach a completed lecture, and the two modes would drift on exactly
           # the unlock rules this module exists to keep identical.
+          was_completed? = progress_status(socket.assigns.progress, lecture.id) == :completed
+
           status =
             if preview_watched_to_completion?(lecture, position),
               do: :completed,
               else: :in_progress
 
-          {:noreply,
-           socket
-           |> put_preview_progress(lecture.id, status, position)
-           |> refresh_progress()}
+          socket =
+            socket
+            |> put_preview_progress(lecture.id, status, position)
+            |> refresh_progress()
+
+          socket =
+            if status == :completed and not was_completed?,
+              do: focus_pending_quiz(socket, lecture),
+              else: socket
+
+          {:noreply, socket}
         else
           persist_progress(socket, lecture, position, false)
         end
@@ -830,8 +840,16 @@ defmodule WasomiWeb.CoursePlayerLive do
         socket = socket |> refresh_progress() |> focus_pending_quiz(lecture)
         {:noreply, put_flash(socket, :info, lecture_completed_flash(socket, lecture))}
 
-      {:ok, _progress, _events} ->
-        {:noreply, refresh_progress(socket)}
+      # A video tick that just crossed the auto-complete threshold: send the
+      # learner to the pending quiz, same as an explicit completion would.
+      {:ok, _progress, events} ->
+        socket = refresh_progress(socket)
+
+        if Enum.any?(events, &match?({:lecture_completed, _}, &1)) do
+          {:noreply, focus_pending_quiz(socket, lecture)}
+        else
+          {:noreply, socket}
+        end
 
       {:error, :forbidden} ->
         {:noreply, redirect_to_checkout(socket)}
@@ -1559,6 +1577,26 @@ defmodule WasomiWeb.CoursePlayerLive do
                             </div>
                           </div>
                         </div>
+
+                        <button
+                          :if={
+                            @current_lecture.duration_seconds &&
+                              lecture_quiz_pending?(assigns, @current_lecture)
+                          }
+                          type="button"
+                          phx-click={
+                            JS.push("select-lesson-tab", value: %{tab: "quiz"})
+                            |> JS.dispatch("wasomi:scroll-into-view", to: "#lesson-tabs")
+                          }
+                          class="flex w-full items-center justify-between gap-3 border-b border-black/10 bg-mint px-7 py-3 text-left text-sm font-semibold text-primary transition hover:bg-primary hover:text-white sm:px-10"
+                        >
+                          <span class="inline-flex items-center gap-2">
+                            <.icon name="hero-clipboard-document-check" class="h-4 w-4" />
+                            A lesson quiz is required to finish this lesson
+                          </span>
+                          <.icon name="hero-arrow-right" class="h-4 w-4 shrink-0" />
+                        </button>
+
                         <% completed? = progress_status(@progress, @current_lecture.id) == :completed %>
                         <% has_video? = not is_nil(@current_lecture.duration_seconds) %>
                         <% reading_only? = reading_only_lecture?(@current_lecture) %>
@@ -1575,6 +1613,8 @@ defmodule WasomiWeb.CoursePlayerLive do
                         <div
                           :if={length(tabs) > 1}
                           id="lesson-tabs"
+                          phx-hook="ScrollIntoViewOnKeyChange"
+                          data-scroll-key={@quiz_focus_token}
                           role="tablist"
                           aria-label="Lesson material"
                           class="flex gap-1 overflow-x-auto border-b border-black/5 px-7 sm:px-10"
@@ -2516,9 +2556,13 @@ defmodule WasomiWeb.CoursePlayerLive do
 
   # Finishing the video is the moment the quiz matters, so the lesson opens it
   # rather than leaving a graded step sitting in a tab the learner never opened.
+  # Switches to the lesson-quiz tab and bumps a token the `#lesson-tabs` hook
+  # watches to scroll the quiz into view.
   defp focus_pending_quiz(socket, lecture) do
     if lecture_quiz_pending?(socket.assigns, lecture) do
-      assign(socket, :lesson_tab, :quiz)
+      socket
+      |> assign(:lesson_tab, :quiz)
+      |> update(:quiz_focus_token, &(&1 + 1))
     else
       socket
     end

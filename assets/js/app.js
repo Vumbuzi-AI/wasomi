@@ -122,6 +122,22 @@ Hooks.ScrollContainerOnKeyChange = {
   },
 };
 
+// Scrolls its own element into view whenever `data-scroll-key` changes —
+// used to bring the lesson quiz into view when the server switches to it
+// after a video finishes.
+Hooks.ScrollIntoViewOnKeyChange = {
+  mounted() {
+    this.scrollKey = this.el.dataset.scrollKey;
+  },
+  updated() {
+    if (this.el.dataset.scrollKey === this.scrollKey) return;
+    this.scrollKey = this.el.dataset.scrollKey;
+    window.requestAnimationFrame(() =>
+      this.el.scrollIntoView({ behavior: "smooth", block: "start" }),
+    );
+  },
+};
+
 Hooks.ReviewCarousel = {
   mounted() {
     this.container = this.el;

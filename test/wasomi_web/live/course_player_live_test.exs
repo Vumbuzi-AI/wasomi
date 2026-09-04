@@ -917,6 +917,46 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
       assert has_element?(view, "#lesson-quiz form")
     end
 
+    test "a video lecture with a pending quiz shows a CTA and opens the quiz on completion",
+         %{conn: conn, user: user} do
+      course = course_fixture(status: :published)
+      module = course_module_fixture(course_id: course.id, position: 1)
+      lecture = lecture_fixture(module_id: module.id, position: 1, duration_seconds: 100)
+      _second = lecture_fixture(module_id: module.id, position: 2)
+      {_quiz, question} = lecture_quiz_with_question(lecture, :published)
+      correct = Enum.find(question.question_options, & &1.correct)
+      {:ok, pending} = Enrollments.create_pending_enrollment(user, course)
+      {:ok, _active} = Enrollments.activate_enrollment(pending)
+
+      # Seed ~90% watched so the video's "ended" -> complete-lecture check passes.
+      # (Backdate the row so the anti-jump clamp allows the second advance.)
+      {:ok, _, _} = Learning.record_progress(user, lecture, 1)
+
+      Wasomi.Repo.update_all(Wasomi.Learning.LectureProgress,
+        set: [updated_at: DateTime.utc_now() |> DateTime.add(-3600) |> DateTime.truncate(:second)]
+      )
+
+      {:ok, _, _} = Learning.record_progress(user, lecture, 90)
+
+      {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
+
+      # Standing CTA, quiz tab not focused yet.
+      assert has_element?(view, "button", "A lesson quiz is required to finish this lesson")
+      assert has_element?(view, "#lesson-tabs[phx-hook='ScrollIntoViewOnKeyChange']")
+      assert has_element?(view, "#lesson-tab-quiz[aria-selected='false']")
+
+      # The player's "ended" event fires complete-lecture.
+      render_hook(view, "complete-lecture", %{"lecture_id" => to_string(lecture.id)})
+
+      assert has_element?(view, "#lesson-tab-quiz[aria-selected='true']")
+
+      # Once passed, the CTA is gone.
+      view |> element("#lesson-quiz input[value='#{correct.id}']") |> render_click()
+      view |> element("#lesson-quiz form") |> render_submit()
+
+      refute has_element?(view, "button", "A lesson quiz is required to finish this lesson")
+    end
+
     defp lecture_quiz_with_question(lecture, status) do
       quiz = Wasomi.AssessmentsFixtures.lecture_quiz_fixture(lecture: lecture)
 

@@ -7,6 +7,15 @@ defmodule Wasomi.Certificates.Renderer.ChromicPdf do
 
   alias Wasomi.Certificates.Template
 
+  @doc """
+  Whether the headless-Chrome pool is actually running. `false` on a host
+  where `:start_chromic_pdf` is off or Chrome isn't installed — the
+  application starts anyway (see `Wasomi.Application.chromic_pdf_child/0`),
+  so without this gate every render would raise and burn retries.
+  """
+  @impl true
+  def available?, do: is_pid(Process.whereis(ChromicPDF))
+
   # A4 landscape, in inches (11.69x8.27in), with no default Chrome print
   # margins — the certificate design carries its own internal padding and is
   # meant to sit full-bleed on the page.

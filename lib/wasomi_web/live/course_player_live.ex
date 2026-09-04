@@ -117,6 +117,7 @@ defmodule WasomiWeb.CoursePlayerLive do
          |> assign(:lecture_quiz_answers, %{})
          |> assign(:lecture_quiz_result, nil)
          |> assign(:celebrating_certificate, nil)
+         |> assign(:pending_certificate, nil)
          |> assign(:awaiting_certificate?, false)
          |> assign(:certificate_slow?, false)
          |> assign(:course_review, course_review)
@@ -702,17 +703,28 @@ defmodule WasomiWeb.CoursePlayerLive do
   defp trigger_certificate_flow(socket) do
     socket = refresh_certificates(socket)
 
-    case List.first(socket.assigns.certificates) do
+    certificate =
+      socket.assigns[:pending_certificate] || List.first(socket.assigns.certificates)
+
+    case certificate do
       nil ->
-        Process.send_after(self(), :recheck_certificate, 4_000)
-        Process.send_after(self(), :certificate_wait_elapsed, 5_000)
-        assign(socket, :awaiting_certificate?, true)
+        # Nothing to show yet — make sure a job is actually running before we
+        # poll for its result.
+        Certificates.ensure_issued(socket.assigns.current_user, socket.assigns.course)
+
+        Process.send_after(self(), :recheck_certificate, 3_000)
+        Process.send_after(self(), :certificate_wait_elapsed, 6_000)
+
+        socket
+        |> assign(:awaiting_certificate?, true)
+        |> assign(:certificate_slow?, false)
 
       certificate ->
         certificate = %{certificate | course: socket.assigns.course}
 
         socket
         |> assign(:celebrating_certificate, certificate)
+        |> assign(:pending_certificate, nil)
         |> assign(:awaiting_certificate?, false)
     end
   end
@@ -869,9 +881,8 @@ defmodule WasomiWeb.CoursePlayerLive do
     {:noreply, refresh_progress(socket)}
   end
 
-  # When the course is fully completed, refresh progress.
-  # If the learner hasn't rated the course yet, we let them rate inline on the page.
-  # If already rated, we trigger the certificate flow directly.
+  # Ensure a certificate job exists; the celebration is separate (shown now if
+  # rated, else held for the inline rating on the final lecture).
   def handle_info({:course_completed, _subject}, socket) do
     socket = refresh_progress(socket)
 
@@ -883,6 +894,7 @@ defmodule WasomiWeb.CoursePlayerLive do
         {:noreply, socket}
 
       is_nil(socket.assigns.course_review) ->
+        Certificates.ensure_issued(socket.assigns.current_user, socket.assigns.course)
         {:noreply, socket}
 
       true ->
@@ -925,17 +937,18 @@ defmodule WasomiWeb.CoursePlayerLive do
     if course_id == socket.assigns.course.id do
       certificate = %{certificate | course: socket.assigns.course}
 
-      # If the learner just completed the course and hasn't rated it yet,
-      # hold the celebration modal until they submit/skip the rating prompt on the page.
+      # Not rated yet: hold the celebration, but stash the certificate (this
+      # message is one-shot) so the rating submit can pop it without a poll.
       if is_nil(socket.assigns.course_review) and
            socket.assigns.course_progress.complete? and
            not socket.assigns.awaiting_certificate? and
            not socket.assigns.preview? do
-        {:noreply, socket}
+        {:noreply, assign(socket, :pending_certificate, certificate)}
       else
         {:noreply,
          socket
          |> assign(:celebrating_certificate, certificate)
+         |> assign(:pending_certificate, nil)
          |> assign(:awaiting_certificate?, false)}
       end
     else
@@ -1376,6 +1389,24 @@ defmodule WasomiWeb.CoursePlayerLive do
                 </div>
               </aside>
               <div class="min-w-0 space-y-6">
+                <%!-- Route back to the inline rating form when it's out of view. --%>
+                <button
+                  :if={
+                    !@preview? and @course_progress.complete? and is_nil(@course_review) and
+                      not final_lecture?(@course, @current_lecture)
+                  }
+                  type="button"
+                  phx-click="select-lecture"
+                  phx-value-id={final_lecture_id(@course)}
+                  class="flex w-full items-center justify-between gap-3 rounded-2xl border border-primary/30 bg-mint px-4 py-3 text-left text-sm font-semibold text-primary transition hover:bg-primary hover:text-white"
+                >
+                  <span class="inline-flex items-center gap-2">
+                    <.icon name="hero-star" class="h-4 w-4" />
+                    You've completed this course — rate it to get your certificate
+                  </span>
+                  <.icon name="hero-arrow-right" class="h-4 w-4 shrink-0" />
+                </button>
+
                 <nav class="flex items-center gap-1 overflow-x-auto rounded-2xl border border-black/10 bg-white p-1.5 lg:overflow-visible">
                   <button
                     :for={{section, label, icon, description} <- section_nav_items()}
@@ -2288,6 +2319,13 @@ defmodule WasomiWeb.CoursePlayerLive do
   end
 
   defp final_lecture?(_course, nil), do: false
+
+  defp final_lecture_id(course) do
+    case List.last(course_lectures(course)) do
+      %{id: id} -> id
+      _ -> nil
+    end
+  end
 
   # The admin's own estimate wins when they set one: it can account for the
   # reading, the practice questions and the quizzes, none of which a video

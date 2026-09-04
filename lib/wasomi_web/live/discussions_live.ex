@@ -72,7 +72,7 @@ defmodule WasomiWeb.DiscussionsLive do
     ~H"""
     <.student_layout active={:discussions} current_user={@current_user}>
       <div class="px-5 py-8 lg:px-8">
-        <.learner_page_header eyebrow="Community" title="Discussions">
+        <.learner_page_header title="Discussions">
           <:subtitle>Your course cohorts, all in one place.</:subtitle>
         </.learner_page_header>
 

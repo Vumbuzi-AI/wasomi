@@ -43,13 +43,13 @@ defmodule WasomiWeb.AdminLearnerModeTest do
         |> log_in_user(admin)
         |> put_session(:active_mode, "learner")
 
-      {:ok, _view, html} = live(conn, ~p"/dashboard")
-      assert html =~ "Learner dashboard"
+      {:ok, view, html} = live(conn, ~p"/dashboard")
+      assert has_element?(view, "#dashboard-starter, #dashboard-stats")
       assert html =~ "Switch to Admin Mode"
 
       # Also verify catalog, courses-taken, and course detail page
       {:ok, _catalog_view, catalog_html} = live(conn, ~p"/catalog")
-      assert catalog_html =~ "Browse catalog"
+      assert catalog_html =~ "Explore all GS1 courses."
       assert catalog_html =~ "Switch to Admin Mode"
 
       {:ok, _courses_view, courses_html} = live(conn, ~p"/courses-taken")

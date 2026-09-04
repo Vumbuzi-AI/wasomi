@@ -25,7 +25,7 @@ defmodule WasomiWeb.ReferLive do
     ~H"""
     <.student_layout active={:refer} current_user={@current_user}>
       <div class="mx-auto max-w-3xl px-5 py-8 lg:px-8">
-        <.learner_page_header eyebrow="Referrals" title="Refer a friend to Wasomi">
+        <.learner_page_header title="Refer a friend to Wasomi">
           <:subtitle>
             Share your link with someone who'd get value from Wasomi. When they sign up through
             it, we'll credit the referral to you.

@@ -30,7 +30,7 @@ defmodule WasomiWeb.ReceiptsLive do
     ~H"""
     <.student_layout active={:receipts} current_user={@current_user}>
       <div class="w-full px-5 py-8 lg:px-8">
-        <.learner_page_header eyebrow="Billing" title="Payment receipts">
+        <.learner_page_header title="Payment receipts">
           <:subtitle>
             A record of every course payment on your account. Download a PDF for your files.
           </:subtitle>

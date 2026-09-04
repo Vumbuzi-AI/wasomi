@@ -12,7 +12,7 @@ defmodule WasomiWeb.UserSettingsLive do
     ~H"""
     <.student_layout active={:account} current_user={@current_user}>
       <div class="mx-auto max-w-6xl px-5 py-8 lg:px-8">
-        <.learner_page_header eyebrow="Settings" title="Account Settings">
+        <.learner_page_header title="Account Settings">
           <:subtitle>Manage your profile, learning preferences, email and password.</:subtitle>
         </.learner_page_header>
 

@@ -40,7 +40,7 @@ defmodule WasomiWeb.CertificatesLive do
     ~H"""
     <.student_layout active={:certificates} current_user={@current_user}>
       <div class="w-full px-5 py-8 lg:px-8">
-        <.learner_page_header eyebrow="Achievements" title="Your certificates.">
+        <.learner_page_header title="Your certificates.">
           <:actions :if={@certificates != []}>{length(@certificates)} earned</:actions>
         </.learner_page_header>
 

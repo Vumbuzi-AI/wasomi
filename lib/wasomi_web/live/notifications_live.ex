@@ -61,7 +61,7 @@ defmodule WasomiWeb.NotificationsLive do
     ~H"""
     <.student_layout active={:notifications} current_user={@current_user}>
       <div class="w-full px-5 py-8 lg:px-8">
-        <.learner_page_header eyebrow="Activity" title="Notifications">
+        <.learner_page_header title="Notifications">
           <:subtitle>Keep track of course access, learning nudges and account updates.</:subtitle>
         </.learner_page_header>
 

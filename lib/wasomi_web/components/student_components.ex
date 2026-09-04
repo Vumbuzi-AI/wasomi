@@ -185,12 +185,10 @@ defmodule WasomiWeb.StudentComponents do
   end
 
   @doc """
-  The standard learner-area page header: an uppercase accent eyebrow, the
-  page `<h1>`, an optional subtitle, and an optional right-aligned `:actions`
-  slot (usually a small count). Sits directly on the page background — never
-  inside a card.
+  The standard learner-area page header: the page `<h1>`, an optional
+  subtitle, and an optional right-aligned `:actions` slot (usually a small
+  count). Sits directly on the page background — never inside a card.
   """
-  attr :eyebrow, :string, required: true
   attr :title, :string, required: true
   slot :subtitle
   slot :actions
@@ -199,8 +197,7 @@ defmodule WasomiWeb.StudentComponents do
     ~H"""
     <div class="flex flex-wrap items-end justify-between gap-4">
       <div>
-        <p class="text-sm font-semibold uppercase tracking-wider text-primary">{@eyebrow}</p>
-        <h1 class="mt-2 text-3xl font-semibold text-ink">{@title}</h1>
+        <h1 class="text-3xl font-semibold text-ink">{@title}</h1>
         <p :if={@subtitle != []} class="mt-2 max-w-2xl text-body">{render_slot(@subtitle)}</p>
       </div>
       <div :if={@actions != []} class="shrink-0 text-sm text-muted">{render_slot(@actions)}</div>

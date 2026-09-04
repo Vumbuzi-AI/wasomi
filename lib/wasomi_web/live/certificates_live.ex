@@ -23,15 +23,32 @@ defmodule WasomiWeb.CertificatesLive do
   def handle_info(_message, socket), do: {:noreply, socket}
 
   @impl true
+  def handle_event("retry-certificate", %{"course-id" => course_id}, socket) do
+    Certificates.ensure_issued(
+      socket.assigns.current_user.id,
+      String.to_integer(course_id)
+    )
+
+    {:noreply,
+     socket
+     |> put_flash(:info, "We're preparing your certificate — this can take a moment.")
+     |> load_certificates()}
+  end
+
+  @impl true
   def render(assigns) do
     ~H"""
     <.student_layout active={:certificates} current_user={@current_user}>
       <div class="w-full px-5 py-8 lg:px-8">
-        <.learner_page_header eyebrow="Achievements" title="Your certificates.">
+        <.learner_page_header title="Your certificates.">
           <:actions :if={@certificates != []}>{length(@certificates)} earned</:actions>
         </.learner_page_header>
 
-        <div :if={@certificates != []} id="certificates-list" class="mt-8 grid gap-5 md:grid-cols-2">
+        <div
+          :if={@certificates != [] or @pending != []}
+          id="certificates-list"
+          class="mt-8 grid gap-5 md:grid-cols-2"
+        >
           <article
             :for={certificate <- @certificates}
             id={"certificate-#{certificate.id}"}
@@ -51,10 +68,36 @@ defmodule WasomiWeb.CertificatesLive do
               <.icon name="hero-arrow-down-tray" class="h-4 w-4" /> Download
             </.link>
           </article>
+
+          <%!-- Course finished, certificate not written yet — acknowledge it and
+          offer a manual retry rather than showing nothing. --%>
+          <article
+            :for={course <- @pending}
+            id={"certificate-pending-#{course.id}"}
+            class="flex items-center justify-between gap-4 rounded-3xl border border-dashed border-primary/30 bg-mint/40 p-6"
+          >
+            <div class="min-w-0">
+              <p class="text-xs font-semibold uppercase tracking-wider text-primary">
+                Course certificate
+              </p>
+              <h3 class="mt-1 truncate font-medium text-ink">{course.title}</h3>
+              <p class="mt-1 inline-flex items-center gap-1.5 text-xs text-muted">
+                <.icon name="hero-arrow-path" class="h-3.5 w-3.5 animate-spin" /> Preparing…
+              </p>
+            </div>
+            <button
+              type="button"
+              phx-click="retry-certificate"
+              phx-value-course-id={course.id}
+              class="inline-flex shrink-0 items-center gap-2 rounded-full border border-primary/40 px-4 py-2 text-sm font-medium text-primary transition hover:bg-primary hover:text-white"
+            >
+              <.icon name="hero-arrow-path" class="h-4 w-4" /> Retry
+            </button>
+          </article>
         </div>
 
         <div
-          :if={@certificates == []}
+          :if={@certificates == [] and @pending == []}
           id="certificates-empty"
           class="mt-8 rounded-3xl border border-black/5 bg-white p-8 text-center shadow-card sm:p-12"
         >
@@ -78,7 +121,11 @@ defmodule WasomiWeb.CertificatesLive do
   end
 
   defp load_certificates(socket) do
-    assign(socket, :certificates, Certificates.list_for_user(socket.assigns.current_user))
+    user = socket.assigns.current_user
+
+    socket
+    |> assign(:certificates, Certificates.list_for_user(user))
+    |> assign(:pending, Certificates.pending_certificate_courses(user))
   end
 
   defp certificate_type(%{type: :course}), do: "Course certificate"

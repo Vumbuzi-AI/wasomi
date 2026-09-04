@@ -1,5 +1,6 @@
 defmodule Wasomi.CertificatesTest do
   use Wasomi.DataCase
+  use Oban.Testing, repo: Wasomi.Repo
 
   import Wasomi.AccountsFixtures
   import Wasomi.CatalogFixtures
@@ -15,6 +16,13 @@ defmodule Wasomi.CertificatesTest do
   alias Wasomi.Certificates.Workers.IssueCertificate
 
   setup :verify_on_exit!
+
+  # The renderer is "up" by default; individual tests override to exercise
+  # the browserless / preflight path.
+  setup do
+    stub(Wasomi.CertificateRendererMock, :available?, fn -> true end)
+    :ok
+  end
 
   setup do
     user = user_fixture()
@@ -246,7 +254,7 @@ defmodule Wasomi.CertificatesTest do
     assert Repo.aggregate(Certificate, :count) == 0
   end
 
-  test "IssueCertificate worker succeeds as a no-op instead of retrying when certificates are disabled",
+  test "IssueCertificate worker cancels instead of retrying when certificates are disabled",
        context do
     {:ok, _course} =
       Wasomi.Catalog.update_course_certificate(context.course, %{
@@ -256,10 +264,9 @@ defmodule Wasomi.CertificatesTest do
     {:ok, _, _events} =
       complete_lecture_via_progress!(context.user, context.lecture)
 
-    # :ok (not {:error, _}) is the whole point here — Oban retries any
-    # {:error, _} return up to max_attempts, which would be pointless for a
-    # deterministic "admin turned this off" condition.
-    assert :ok =
+    # {:cancel, _} not {:error, _}: no retry burn for a deterministic condition,
+    # but still re-enqueueable by the sweep if it's re-enabled later.
+    assert {:cancel, :certificates_disabled} =
              Oban.Testing.perform_job(
                IssueCertificate,
                %{
@@ -270,6 +277,127 @@ defmodule Wasomi.CertificatesTest do
              )
 
     assert Repo.aggregate(Certificate, :count) == 0
+  end
+
+  describe "ensure_issued/2" do
+    test "returns the existing certificate when one is already issued", context do
+      certificate = certificate_fixture(user_id: context.user.id, course_id: context.course.id)
+
+      assert {:ok, %Certificate{id: id}} =
+               Certificates.ensure_issued(context.user, context.course)
+
+      assert id == certificate.id
+      refute_enqueued(worker: IssueCertificate)
+    end
+
+    test "enqueues a job for a completed course with no certificate", context do
+      {:ok, _, _} = complete_lecture_via_progress!(context.user, context.lecture)
+
+      assert :enqueued = Certificates.ensure_issued(context.user, context.course)
+      assert_enqueued(worker: IssueCertificate, args: %{"user_id" => context.user.id})
+    end
+
+    test "re-enqueues after a previous job finished (relaxed unique states)", context do
+      {:ok, _, _} = complete_lecture_via_progress!(context.user, context.lecture)
+
+      assert :enqueued = Certificates.ensure_issued(context.user, context.course)
+
+      # Simulate the first job reaching a terminal state.
+      Repo.update_all(
+        from(j in Oban.Job, where: j.worker == "Wasomi.Certificates.Workers.IssueCertificate"),
+        set: [state: "cancelled", cancelled_at: DateTime.utc_now()]
+      )
+
+      assert :enqueued = Certificates.ensure_issued(context.user, context.course)
+
+      available =
+        Repo.aggregate(
+          from(j in Oban.Job,
+            where:
+              j.worker == "Wasomi.Certificates.Workers.IssueCertificate" and
+                j.state == "available"
+          ),
+          :count
+        )
+
+      assert available == 1
+    end
+
+    test "refuses a course that isn't complete", context do
+      assert {:error, :incomplete} = Certificates.ensure_issued(context.user, context.course)
+      refute_enqueued(worker: IssueCertificate)
+    end
+
+    test "refuses a course with certificates disabled", context do
+      {:ok, _} =
+        Wasomi.Catalog.update_course_certificate(context.course, %{
+          "certificate_enabled" => "false"
+        })
+
+      {:ok, _, _} = complete_lecture_via_progress!(context.user, context.lecture)
+
+      assert {:error, :certificates_disabled} =
+               Certificates.ensure_issued(context.user, context.course)
+    end
+  end
+
+  describe "worker error classification" do
+    test "a browserless host cancels the job instead of retrying", context do
+      stub(Wasomi.CertificateRendererMock, :available?, fn -> false end)
+      {:ok, _, _} = complete_lecture_via_progress!(context.user, context.lecture)
+
+      assert {:cancel, :renderer_unavailable} =
+               Oban.Testing.perform_job(
+                 IssueCertificate,
+                 %{user_id: context.user.id, course_id: context.course.id},
+                 []
+               )
+
+      assert Repo.aggregate(Certificate, :count) == 0
+    end
+
+    test "a transient render failure is retried", context do
+      expect(Wasomi.CertificateRendererMock, :render, fn _ -> {:error, :timeout} end)
+      {:ok, _, _} = complete_lecture_via_progress!(context.user, context.lecture)
+
+      assert {:error, :timeout} =
+               Oban.Testing.perform_job(
+                 IssueCertificate,
+                 %{user_id: context.user.id, course_id: context.course.id},
+                 []
+               )
+    end
+  end
+
+  describe "pending_certificate_courses/1 and the sweep" do
+    test "lists a completed course still missing its certificate", context do
+      {:ok, _, _} = complete_lecture_via_progress!(context.user, context.lecture)
+
+      assert [%{id: id}] = Certificates.pending_certificate_courses(context.user)
+      assert id == context.course.id
+
+      certificate_fixture(user_id: context.user.id, course_id: context.course.id)
+      assert Certificates.pending_certificate_courses(context.user) == []
+    end
+
+    test "SweepMissingCertificates enqueues for each pending course", context do
+      {:ok, _, _} = complete_lecture_via_progress!(context.user, context.lecture)
+      # Drop the job the inline completion path enqueued.
+      Repo.delete_all(
+        from(j in Oban.Job, where: j.worker == "Wasomi.Certificates.Workers.IssueCertificate")
+      )
+
+      refute_enqueued(worker: IssueCertificate)
+
+      assert :ok =
+               Oban.Testing.perform_job(
+                 Wasomi.Certificates.Workers.SweepMissingCertificates,
+                 %{},
+                 []
+               )
+
+      assert_enqueued(worker: IssueCertificate, args: %{"course_id" => context.course.id})
+    end
   end
 
   defp expect_render_and_upload(count) do

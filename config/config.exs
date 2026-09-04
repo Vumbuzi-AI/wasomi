@@ -94,6 +94,8 @@ config :wasomi, Oban,
     {Oban.Plugins.Cron,
      crontab: [
        {"* * * * *", Wasomi.Payments.Workers.ReconcilePendingPayments},
+       # Re-issues certificates missed by the inline enqueue at completion.
+       {"*/15 * * * *", Wasomi.Certificates.Workers.SweepMissingCertificates},
        # Each reengagement trigger is a 3-touch sequence (see
        # Wasomi.Learning's @never_started_touches/@gone_quiet_touches) —
        # one crontab entry per touch, staggered 15 minutes apart so they

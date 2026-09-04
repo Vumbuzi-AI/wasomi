@@ -17,7 +17,7 @@ defmodule WasomiWeb.CatalogLive.PortalTest do
 
     assert html =~ course.title
     refute html =~ "student-sidebar"
-    refute html =~ "Browse catalog"
+    refute html =~ "Explore all GS1 courses."
   end
 
   test "renders the learner sidebar and published courses for an authenticated learner", %{
@@ -31,7 +31,7 @@ defmodule WasomiWeb.CatalogLive.PortalTest do
     {:ok, _view, html} = live(conn, ~p"/catalog")
 
     assert html =~ "student-sidebar"
-    assert html =~ "Browse catalog"
+    assert html =~ "Explore all GS1 courses."
     assert html =~ course.title
     refute html =~ "Hidden Draft Course"
   end

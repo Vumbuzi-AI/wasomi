@@ -46,10 +46,7 @@ defmodule WasomiWeb.DashboardLive do
     <.student_layout active={:dashboard} current_user={@current_user}>
       <section class="bg-surface py-12 lg:py-16">
         <div class="w-full px-5 lg:px-8">
-          <span class="rounded-full bg-mint px-3 py-1 text-sm font-medium text-primary">
-            Learner dashboard
-          </span>
-          <h1 class="mt-5 text-4xl font-semibold leading-[1.1] text-ink sm:text-5xl">
+          <h1 class="text-4xl font-semibold leading-[1.1] text-ink sm:text-5xl">
             {@welcome_state.title}
           </h1>
           <p class="mt-4 max-w-2xl text-lg text-body">
@@ -111,12 +108,7 @@ defmodule WasomiWeb.DashboardLive do
           <%!-- First-time learner: courses to start from, not empty progress. --%>
           <div :if={@first_run?} id="dashboard-starter">
             <div class="flex flex-wrap items-end justify-between gap-4">
-              <div>
-                <p class="text-sm font-semibold uppercase tracking-wider text-primary">
-                  Start learning
-                </p>
-                <h2 class="mt-2 text-3xl font-semibold text-ink">Choose a course to begin.</h2>
-              </div>
+              <h2 class="text-3xl font-semibold text-ink">Choose a course to begin.</h2>
               <.link
                 :if={@starter_courses != []}
                 navigate={~p"/catalog"}
@@ -149,12 +141,7 @@ defmodule WasomiWeb.DashboardLive do
 
           <div :if={!@first_run?}>
             <div class="flex flex-wrap items-end justify-between gap-4">
-              <div>
-                <p class="text-sm font-semibold uppercase tracking-wider text-primary">
-                  Continue learning
-                </p>
-                <h2 class="mt-2 text-3xl font-semibold text-ink">Pick up where you left off.</h2>
-              </div>
+              <h2 class="text-3xl font-semibold text-ink">Pick up where you left off.</h2>
               <.link
                 :if={@course_cards != []}
                 navigate={~p"/courses-taken"}

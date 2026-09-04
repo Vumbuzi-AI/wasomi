@@ -92,7 +92,7 @@ defmodule WasomiWeb.CatalogLive.Portal do
     ~H"""
     <.student_layout active={:browse} current_user={@current_user}>
       <div class="w-full px-5 py-8 lg:px-8">
-        <.learner_page_header eyebrow="Browse catalog" title="Explore all GS1 courses.">
+        <.learner_page_header title="Explore all GS1 courses.">
           <:actions>
             {@page.total_count} {ngettext("course", "courses", @page.total_count)}
           </:actions>

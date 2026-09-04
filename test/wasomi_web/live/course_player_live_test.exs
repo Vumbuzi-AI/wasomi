@@ -1,5 +1,6 @@
 defmodule WasomiWeb.CoursePlayerLiveTest do
   use WasomiWeb.ConnCase
+  use Oban.Testing, repo: Wasomi.Repo
 
   import Phoenix.LiveViewTest
   import Wasomi.CatalogFixtures
@@ -916,6 +917,46 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
       assert has_element?(view, "#lesson-quiz form")
     end
 
+    test "a video lecture with a pending quiz shows a CTA and opens the quiz on completion",
+         %{conn: conn, user: user} do
+      course = course_fixture(status: :published)
+      module = course_module_fixture(course_id: course.id, position: 1)
+      lecture = lecture_fixture(module_id: module.id, position: 1, duration_seconds: 100)
+      _second = lecture_fixture(module_id: module.id, position: 2)
+      {_quiz, question} = lecture_quiz_with_question(lecture, :published)
+      correct = Enum.find(question.question_options, & &1.correct)
+      {:ok, pending} = Enrollments.create_pending_enrollment(user, course)
+      {:ok, _active} = Enrollments.activate_enrollment(pending)
+
+      # Seed ~90% watched so the video's "ended" -> complete-lecture check passes.
+      # (Backdate the row so the anti-jump clamp allows the second advance.)
+      {:ok, _, _} = Learning.record_progress(user, lecture, 1)
+
+      Wasomi.Repo.update_all(Wasomi.Learning.LectureProgress,
+        set: [updated_at: DateTime.utc_now() |> DateTime.add(-3600) |> DateTime.truncate(:second)]
+      )
+
+      {:ok, _, _} = Learning.record_progress(user, lecture, 90)
+
+      {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
+
+      # Standing CTA, quiz tab not focused yet.
+      assert has_element?(view, "button", "A lesson quiz is required to finish this lesson")
+      assert has_element?(view, "#lesson-tabs[phx-hook='ScrollIntoViewOnKeyChange']")
+      assert has_element?(view, "#lesson-tab-quiz[aria-selected='false']")
+
+      # The player's "ended" event fires complete-lecture.
+      render_hook(view, "complete-lecture", %{"lecture_id" => to_string(lecture.id)})
+
+      assert has_element?(view, "#lesson-tab-quiz[aria-selected='true']")
+
+      # Once passed, the CTA is gone.
+      view |> element("#lesson-quiz input[value='#{correct.id}']") |> render_click()
+      view |> element("#lesson-quiz form") |> render_submit()
+
+      refute has_element?(view, "button", "A lesson quiz is required to finish this lesson")
+    end
+
     defp lecture_quiz_with_question(lecture, status) do
       quiz = Wasomi.AssessmentsFixtures.lecture_quiz_fixture(lecture: lecture)
 
@@ -1247,7 +1288,7 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
 
     test "appears on the final lecture once completed, allowing star rating and comment submission",
          %{conn: conn, course: course, first: first, last: last, last_pdf: last_pdf, user: user} do
-      _certificate = certificate_fixture(user_id: user.id, course_id: course.id)
+      certificate = certificate_fixture(user_id: user.id, course_id: course.id)
       # Complete first lecture
       {:ok, _progress, _} = Learning.mark_complete(user, first)
 
@@ -1295,6 +1336,81 @@ defmodule WasomiWeb.CoursePlayerLiveTest do
 
       # Certificate celebration modal pops after rating submission
       assert has_element?(view, "#certificate-celebration")
+      assert has_element?(view, "a[href='/certificates/#{certificate.id}/download']")
+    end
+
+    test "with no certificate yet, submitting the rating enqueues issuance and shows a preparing state",
+         %{conn: conn, course: course, first: first, last: last, user: user} do
+      {:ok, _progress, _} = Learning.mark_complete(user, first)
+
+      assert {:ok, view, _html} =
+               live(conn, ~p"/learn/courses/#{course.slug}?lecture_id=#{last.id}")
+
+      view |> element("#mark-lesson-complete") |> render_click()
+      view |> element("#rate-star-4") |> render_click()
+      view |> element("#course-review-form") |> render_submit()
+
+      # No cert row, nothing stashed: a job is guaranteed in flight and the
+      # learner sees a "preparing" state rather than a dead end.
+      assert_enqueued(
+        worker: Wasomi.Certificates.Workers.IssueCertificate,
+        args: %{"user_id" => user.id, "course_id" => course.id}
+      )
+
+      assert has_element?(view, "#certificate-preparing")
+      assert has_element?(view, "#certificate-preparing a[href='/certificates']")
+      refute has_element?(view, "#certificate-celebration")
+
+      # When the job finishes, the broadcast upgrades it to the celebration.
+      certificate = certificate_fixture(user_id: user.id, course_id: course.id)
+      Certificates.broadcast_ready(certificate)
+
+      assert has_element?(view, "#certificate-celebration")
+      refute has_element?(view, "#certificate-preparing")
+    end
+
+    test "a certificate that lands before the rating is stashed and pops the instant it's submitted",
+         %{conn: conn, course: course, first: first, last: last, user: user} do
+      {:ok, _progress, _} = Learning.mark_complete(user, first)
+
+      assert {:ok, view, _html} =
+               live(conn, ~p"/learn/courses/#{course.slug}?lecture_id=#{last.id}")
+
+      view |> element("#mark-lesson-complete") |> render_click()
+
+      # Certificate finishes while the learner is still on the rating form.
+      certificate = certificate_fixture(user_id: user.id, course_id: course.id)
+      Certificates.broadcast_ready(certificate)
+
+      # Held — not shown yet.
+      refute has_element?(view, "#certificate-celebration")
+      assert has_element?(view, "#course-rating-section")
+
+      view |> element("#rate-star-5") |> render_click()
+      view |> element("#course-review-form") |> render_submit()
+
+      # Pops immediately from the stash, no poll.
+      assert has_element?(view, "#certificate-celebration")
+    end
+
+    test "a completed-but-unrated course keeps a nudge to the rating on other lectures",
+         %{conn: conn, course: course, first: first, last: last, user: user} do
+      {:ok, _progress, _} = Learning.mark_complete(user, first)
+      {:ok, _progress, _} = Learning.mark_complete(user, last)
+
+      {:ok, view, _html} = live(conn, ~p"/learn/courses/#{course.slug}")
+
+      # Mount lands on the final lecture, so the rating is visible.
+      assert has_element?(view, "#course-rating-section")
+
+      # Navigating to an earlier lecture hides the inline form — the nudge
+      # keeps a one-click way back to it.
+      view |> element("button[phx-value-id='#{first.id}']") |> render_click()
+      refute has_element?(view, "#course-rating-section")
+
+      assert view
+             |> element("button", "rate it to get your certificate")
+             |> render_click() =~ "Rate this course"
     end
 
     test "rating is required with no skip option on the final lecture",

@@ -31,6 +31,7 @@ defmodule Wasomi.Certificates do
   alias Wasomi.Certificates.GDTI
   alias Wasomi.Certificates.VerificationQR
   alias Wasomi.Certificates.Workers.IssueCertificate
+  alias Wasomi.Enrollments
   alias Wasomi.Learning
   alias Wasomi.Repo
 
@@ -152,6 +153,75 @@ defmodule Wasomi.Certificates do
     |> Enum.map(&Oban.insert/1)
     |> then(fn results ->
       if Enum.all?(results, &match?({:ok, _}, &1)), do: :ok, else: {:error, results}
+    end)
+  end
+
+  @doc """
+  Idempotently guarantees an issuance is in flight for a completed course:
+  `{:ok, certificate}` if one exists, `:enqueued` if a job was inserted, or
+  `{:error, reason}` (not complete / unknown / certificates disabled).
+  """
+  def ensure_issued(%User{} = user, %Course{} = course) do
+    ensure_issued(user.id, course.id)
+  end
+
+  def ensure_issued(user_id, course_id) when is_integer(user_id) and is_integer(course_id) do
+    case get_by_course(user_id, course_id) do
+      %Certificate{} = certificate ->
+        {:ok, preload_certificate(certificate)}
+
+      nil ->
+        with %User{} = user <- Repo.get(User, user_id),
+             {:ok, course} <- load_completed_course(user, course_id) do
+          if course.certificate_enabled do
+            case Oban.insert(IssueCertificate.for_completion(user_id, course_id)) do
+              {:ok, _job} -> :enqueued
+              {:error, _} = error -> error
+            end
+          else
+            {:error, :certificates_disabled}
+          end
+        else
+          nil -> {:error, :user_not_found}
+          {:error, reason} -> {:error, reason}
+        end
+    end
+  end
+
+  @doc "Whether the PDF renderer can produce output now (e.g. Chrome pool is up)."
+  def renderer_available? do
+    mod = renderer()
+    if function_exported?(mod, :available?, 0), do: mod.available?(), else: true
+  end
+
+  @doc """
+  Sorts an issuance failure into `:retry` (transient) or `:cancel` (won't fix
+  itself — the sweep re-enqueues cancelled scopes once the cause is gone).
+  """
+  def classify_error(:renderer_unavailable), do: :cancel
+  def classify_error(:certificates_disabled), do: :cancel
+  def classify_error(:incomplete), do: :cancel
+  def classify_error(:scope_not_found), do: :cancel
+  def classify_error(:user_not_found), do: :cancel
+  def classify_error({:branding_incomplete, _}), do: :cancel
+  def classify_error(%Ecto.Changeset{}), do: :cancel
+  def classify_error(_other), do: :retry
+
+  @doc "Finished courses that should have a certificate but don't yet."
+  def pending_certificate_courses(%User{} = user) do
+    issued_ids =
+      Certificate
+      |> where([c], c.user_id == ^user.id)
+      |> select([c], c.course_id)
+      |> Repo.all()
+      |> MapSet.new()
+
+    user
+    |> Enrollments.list_active_for_user()
+    |> Enum.map(& &1.course)
+    |> Enum.filter(fn course ->
+      course.certificate_enabled and course.id not in issued_ids and
+        Learning.course_complete?(user, course)
     end)
   end
 
@@ -298,6 +368,27 @@ defmodule Wasomi.Certificates do
   defp issue_new(user, course), do: issue_new(user, course, @max_gdti_attempts)
 
   defp issue_new(user, course, attempts_left) do
+    with :ok <- preflight(course) do
+      do_issue_new(user, course, attempts_left)
+    end
+  end
+
+  # Fail fast with a typed reason before spending a render on a request that
+  # can't succeed (no browser, missing signatory).
+  defp preflight(course) do
+    cond do
+      not renderer_available?() ->
+        {:error, :renderer_unavailable}
+
+      course.certificate_enabled and course.certificate_signatory_name in [nil, ""] ->
+        {:error, {:branding_incomplete, [:certificate_signatory_name]}}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp do_issue_new(user, course, attempts_left) do
     issued_at = DateTime.utc_now() |> DateTime.truncate(:second)
     gdti = GDTI.generate()
     file_key = file_key(user.id, course.id)

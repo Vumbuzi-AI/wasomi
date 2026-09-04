@@ -11,8 +11,13 @@ defmodule Wasomi.Certificates.Workers.IssueCertificate do
       period: :infinity,
       fields: [:worker, :args],
       keys: [:user_id, :course_id],
-      states: :all
+      # Only a live job blocks a fresh insert, so `ensure_issued/2` and the
+      # sweep can recover a terminal one. `issue/2`'s `get_by_course` check
+      # still prevents a double-issue.
+      states: [:available, :scheduled, :executing, :retryable, :suspended]
     ]
+
+  require Logger
 
   alias Wasomi.Certificates
   alias Wasomi.Notifications.Workers.DeliverCertificateIssued
@@ -29,7 +34,7 @@ defmodule Wasomi.Certificates.Workers.IssueCertificate do
   end
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"user_id" => user_id, "course_id" => course_id}}) do
+  def perform(%Oban.Job{args: %{"user_id" => user_id, "course_id" => course_id}} = job) do
     case Certificates.issue(user_id, course_id) do
       {:ok, certificate, :created} ->
         :ok = Certificates.broadcast_ready(certificate)
@@ -39,18 +44,21 @@ defmodule Wasomi.Certificates.Workers.IssueCertificate do
       {:ok, _certificate, :existing} ->
         :ok
 
-      # Not transient — retrying can never issue a certificate for a course
-      # the admin has turned off, so treat it as a deliberate no-op instead
-      # of burning all 8 retry attempts and surfacing as a job failure.
-      # Note this job's `unique` config (period: :infinity, states: :all)
-      # still blocks a fresh insert for this scope even after completing
-      # here — if the admin re-enables certificates later, nothing
-      # re-triggers issuance for a learner who completed while disabled.
-      {:error, :certificates_disabled} ->
-        :ok
-
       {:error, reason} ->
-        {:error, reason}
+        # Transient errors retry; the rest cancel (no 8-retry burn) and the
+        # sweep re-enqueues once the cause is fixed.
+        case Certificates.classify_error(reason) do
+          :retry ->
+            {:error, reason}
+
+          :cancel ->
+            Logger.error(
+              "IssueCertificate cancelled for user=#{user_id} course=#{course_id} " <>
+                "attempt=#{job.attempt}: #{inspect(reason)}"
+            )
+
+            {:cancel, reason}
+        end
     end
   end
 end

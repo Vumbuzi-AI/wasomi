@@ -28,7 +28,7 @@ defmodule WasomiWeb.CoursesTakenLive do
     ~H"""
     <.student_layout active={:courses} current_user={@current_user}>
       <div class="w-full px-5 py-8 lg:px-8">
-        <.learner_page_header eyebrow="My courses" title="Courses you're taking.">
+        <.learner_page_header title="Courses you're taking.">
           <:actions :if={@course_cards != []}>
             {pluralize(length(@course_cards), "course")}
           </:actions>

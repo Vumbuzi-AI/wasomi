@@ -1,4 +1,4 @@
-# Wasomi Business Institute — E-Learning Platform
+# Wasomi AI — E-Learning Platform
 
 ## Architecture & Technical Design (`project.md`)
 
@@ -10,7 +10,7 @@
 
 ## 1. Overview & Goals
 
-Wasomi Business Institute needs a website that doubles as a paid, video-based
+Wasomi AI needs a website that doubles as a paid, video-based
 e-learning platform. A learner must be able to **register → pay → watch
 protected video lectures → track progress → receive certificates**, entirely
 online. The first course loaded is _"The Human Stack: Communication and
@@ -57,24 +57,24 @@ option and note what to revisit later — as the brief requests in §6.
 
 ## 3. Technology Stack
 
-| Concern                           | Choice                                                                    | Rationale / Notes                                                                                                          |
-| --------------------------------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Language / framework              | **Elixir 1.17+, Phoenix 1.8, LiveView 1.0**                               | Real-time, fault-tolerant, low-JS.                                                                                         |
-| Database                          | **PostgreSQL 16** (Ecto)                                                  | Single source of truth; also backs Oban.                                                                                   |
-| Auth                              | **`phx.gen.auth`** (extended with `phone`)                                | Battle-tested email/password + confirmation, generated into our codebase (we own it).                                      |
-| Background jobs                   | **Oban** (free tier)                                                      | Durable jobs for callbacks, certificates, emails, reconciliation.                                                          |
-| Email                             | **Swoosh** + transactional provider (Resend / Amazon SES)                 | Swoosh ships with Phoenix; SES is cheap & deliverable from Africa.                                                         |
-| Payments — mobile money           | **M-Pesa Daraja API** (STK Push)                                          | Primary payment rail for the Kenyan audience.                                                                              |
-| Payments — card/regional          | **Paystack**                                                              | Cards + regional methods; we never touch raw card data (PCI offload).                                                      |
-| Video hosting/streaming           | **Cloudflare Stream**                                                     | HLS adaptive streaming + signed/expiring playback tokens. See §8. `FUTURE`: evaluate DRM tiers.                            |
-| Object storage                    | **Cloudflare R2** (S3-compatible)                                         | Stores generated certificate PDFs & thumbnails. Zero egress fees.                                                          |
-| PDF certificates                  | **ChromicPDF** (Heex → PDF)                                               | Render branded HTML/Tailwind templates to PDF. `FUTURE`/alt: Typst if we want to avoid the Chrome dependency in the image. |
-| Money math                        | **`money` / `ex_money`**                                                  | Integer minor units, currency-aware formatting.                                                                            |
-| Styling                           | **Tailwind CSS + esbuild** (Phoenix default)                              | Navy/orange brand system; mobile-first.                                                                                    |
-| Admin CRUD (optional accelerator) | **Backpex** or custom LiveView                                            | Custom LiveView for learner-facing flows; Backpex can fast-track internal CRUD.                                            |
-| Error tracking                    | **Sentry** (or AppSignal)                                                 | Plus `Phoenix.LiveDashboard` + Telemetry.                                                                                  |
-| Hosting                           | **Fly.io** (region `jnb` — Johannesburg)                                  | Good Elixir support, low African latency. Alt: Hetzner/Dockerized release.                                                 |
-| CI                                | **GitHub Actions**                                                        | format · credo · test · deploy.                                                                                            |
+| Concern                           | Choice                                                    | Rationale / Notes                                                                                                          |
+| --------------------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Language / framework              | **Elixir 1.17+, Phoenix 1.8, LiveView 1.0**               | Real-time, fault-tolerant, low-JS.                                                                                         |
+| Database                          | **PostgreSQL 16** (Ecto)                                  | Single source of truth; also backs Oban.                                                                                   |
+| Auth                              | **`phx.gen.auth`** (extended with `phone`)                | Battle-tested email/password + confirmation, generated into our codebase (we own it).                                      |
+| Background jobs                   | **Oban** (free tier)                                      | Durable jobs for callbacks, certificates, emails, reconciliation.                                                          |
+| Email                             | **Swoosh** + transactional provider (Resend / Amazon SES) | Swoosh ships with Phoenix; SES is cheap & deliverable from Africa.                                                         |
+| Payments — mobile money           | **M-Pesa Daraja API** (STK Push)                          | Primary payment rail for the Kenyan audience.                                                                              |
+| Payments — card/regional          | **Paystack**                                              | Cards + regional methods; we never touch raw card data (PCI offload).                                                      |
+| Video hosting/streaming           | **Cloudflare Stream**                                     | HLS adaptive streaming + signed/expiring playback tokens. See §8. `FUTURE`: evaluate DRM tiers.                            |
+| Object storage                    | **Cloudflare R2** (S3-compatible)                         | Stores generated certificate PDFs & thumbnails. Zero egress fees.                                                          |
+| PDF certificates                  | **ChromicPDF** (Heex → PDF)                               | Render branded HTML/Tailwind templates to PDF. `FUTURE`/alt: Typst if we want to avoid the Chrome dependency in the image. |
+| Money math                        | **`money` / `ex_money`**                                  | Integer minor units, currency-aware formatting.                                                                            |
+| Styling                           | **Tailwind CSS + esbuild** (Phoenix default)              | Navy/orange brand system; mobile-first.                                                                                    |
+| Admin CRUD (optional accelerator) | **Backpex** or custom LiveView                            | Custom LiveView for learner-facing flows; Backpex can fast-track internal CRUD.                                            |
+| Error tracking                    | **Sentry** (or AppSignal)                                 | Plus `Phoenix.LiveDashboard` + Telemetry.                                                                                  |
+| Hosting                           | **Fly.io** (region `jnb` — Johannesburg)                  | Good Elixir support, low African latency. Alt: Hetzner/Dockerized release.                                                 |
+| CI                                | **GitHub Actions**                                        | format · credo · test · deploy.                                                                                            |
 
 ---
 

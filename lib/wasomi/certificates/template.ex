@@ -91,7 +91,7 @@ defmodule Wasomi.Certificates.Template do
         "Identifier, added as a printed label at render time, not part " <>
         "of the identifier's own value)"
 
-  attr :issuer_name, :string, default: "Wasomi Business Institute"
+  attr :issuer_name, :string, default: "Wasomi AI"
 
   attr :headline, :string, default: "Certificate of Completion"
   attr :presented_line, :string, default: "This is proudly presented to"

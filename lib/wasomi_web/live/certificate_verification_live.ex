@@ -61,7 +61,7 @@ defmodule WasomiWeb.CertificateVerificationLive do
     )
     |> assign(
       :meta_description,
-      "Verified credential issued by GS1 Kenya and Wasomi Business Institute on " <>
+      "Verified credential issued by GS1 Kenya and Wasomi AI on " <>
         Calendar.strftime(certificate.issued_at, "%B %-d, %Y") <> "."
     )
     |> assign(:meta_image, url(~p"/images/og-certificate.png"))
@@ -116,7 +116,7 @@ defmodule WasomiWeb.CertificateVerificationLive do
                   <dt class="text-xs font-semibold uppercase tracking-wider text-muted">
                     Issuing organization
                   </dt>
-                  <dd class="mt-1 font-medium text-ink">GS1 Kenya · Wasomi Business Institute</dd>
+                  <dd class="mt-1 font-medium text-ink">GS1 Kenya · Wasomi AI</dd>
                 </div>
               </dl>
 

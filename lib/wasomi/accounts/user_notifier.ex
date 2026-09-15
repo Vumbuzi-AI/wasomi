@@ -49,7 +49,7 @@ defmodule Wasomi.Accounts.UserNotifier do
       title: "Join the Wasomi admin team",
       intro: "Hi there,",
       body: [
-        "#{invited_by_name} has invited you to be an admin on Wasomi Business Institute.",
+        "#{invited_by_name} has invited you to be an admin on Wasomi AI.",
         "Click the button below to accept. This link expires in 7 days."
       ],
       cta: %{label: "Accept invitation", url: url}

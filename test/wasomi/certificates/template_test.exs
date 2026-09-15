@@ -46,10 +46,10 @@ defmodule Wasomi.Certificates.TemplateTest do
     refute html =~ "Certificate of Completion"
   end
 
-  test "defaults the issuer to Wasomi Business Institute" do
+  test "defaults the issuer to Wasomi AI" do
     html = Template.render_html(@base_assigns)
 
-    assert html =~ "Wasomi Business Institute"
+    assert html =~ "Wasomi AI"
   end
 
   test "uses the course's configured issuer name" do

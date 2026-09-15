@@ -3,6 +3,6 @@ defmodule WasomiWeb.PageControllerTest do
 
   test "GET /", %{conn: conn} do
     conn = get(conn, ~p"/")
-    assert html_response(conn, 200) =~ "Wasomi Business Institute"
+    assert html_response(conn, 200) =~ "Wasomi AI"
   end
 end

@@ -11,11 +11,11 @@ defmodule WasomiWeb.HomeLive do
   def mount(_params, session, socket) do
     {:ok,
      socket
-     |> assign(:page_title, "Wasomi Business Institute")
+     |> assign(:page_title, "Wasomi AI")
      |> assign(:page_title_suffix, "")
      |> assign(
        :meta_description,
-       "Build practical GS1 standards skills with online courses from Wasomi Business Institute."
+       "Build practical GS1 standards skills with online courses from Wasomi AI."
      )
      |> assign(:meta_robots, "index, follow")
      |> assign(:canonical_url, url(~p"/"))

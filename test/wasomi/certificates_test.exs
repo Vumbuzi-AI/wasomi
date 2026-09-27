@@ -356,6 +356,24 @@ defmodule Wasomi.CertificatesTest do
       assert Repo.aggregate(Certificate, :count) == 0
     end
 
+    test "a cancelled job broadcasts a failure so a waiting learner isn't left hanging",
+         context do
+      stub(Wasomi.CertificateRendererMock, :available?, fn -> false end)
+      {:ok, _, _} = complete_lecture_via_progress!(context.user, context.lecture)
+
+      Certificates.subscribe(context.user)
+
+      assert {:cancel, :renderer_unavailable} =
+               Oban.Testing.perform_job(
+                 IssueCertificate,
+                 %{user_id: context.user.id, course_id: context.course.id},
+                 []
+               )
+
+      course_id = context.course.id
+      assert_received {:certificate_failed, %{course_id: ^course_id}}
+    end
+
     test "a transient render failure is retried", context do
       expect(Wasomi.CertificateRendererMock, :render, fn _ -> {:error, :timeout} end)
       {:ok, _, _} = complete_lecture_via_progress!(context.user, context.lecture)

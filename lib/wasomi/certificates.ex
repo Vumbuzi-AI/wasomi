@@ -260,6 +260,19 @@ defmodule Wasomi.Certificates do
     )
   end
 
+  @doc """
+  Announces a permanent (non-retryable) issuance failure so a learner
+  waiting on the "preparing your certificate" modal isn't left indefinitely
+  thinking it's still processing.
+  """
+  def broadcast_failed(user_id, course_id) do
+    Phoenix.PubSub.broadcast(
+      Wasomi.PubSub,
+      user_topic(user_id),
+      {:certificate_failed, %{course_id: course_id}}
+    )
+  end
+
   def download_url(%User{} = user, certificate_or_id, opts \\ []) do
     certificate =
       case certificate_or_id do

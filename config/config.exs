@@ -131,7 +131,7 @@ config :wasomi, WasomiWeb.Endpoint,
   adapter: Bandit.PhoenixAdapter,
   render_errors: [
     formats: [html: WasomiWeb.ErrorHTML, json: WasomiWeb.ErrorJSON],
-    layout: false
+    layout: [html: {WasomiWeb.Layouts, :root}]
   ],
   pubsub_server: Wasomi.PubSub,
   live_view: [signing_salt: "YpHs4ZS0"]

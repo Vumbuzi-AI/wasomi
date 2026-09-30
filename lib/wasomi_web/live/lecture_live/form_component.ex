@@ -124,7 +124,7 @@ defmodule WasomiWeb.LectureLive.FormComponent do
         <div :if={@video_upload_state == :idle} class="space-y-2">
           <.icon name="hero-arrow-up-tray" class="mx-auto h-6 w-6 text-muted" />
           <p class="text-sm font-medium text-ink">Drop a video here, or click to choose one</p>
-          <p class="text-xs text-muted">MP4, MOV or WebM</p>
+          <p class="text-xs text-muted">MP4, MOV or WebM, up to 1 GB</p>
         </div>
 
         <div :if={@video_upload_state != :idle} class="space-y-3">

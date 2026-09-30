@@ -1305,6 +1305,8 @@ defmodule WasomiWeb.HomeComponents do
   end
 
   def footer(assigns) do
+    assigns = assign(assigns, :support_email, Application.get_env(:wasomi, :support_email))
+
     ~H"""
     <footer class="bg-dark pb-8 pt-16">
       <div class="mx-auto max-w-container px-5 lg:px-8">
@@ -1404,7 +1406,7 @@ defmodule WasomiWeb.HomeComponents do
             <ul class="mt-5 space-y-3 text-white/70">
               <li><a href="#faqs" class="transition hover:text-primary">FAQs</a></li>
               <li>
-                <a href="mailto:hello@wasomi.com" class="transition hover:text-primary">
+                <a href={"mailto:#{@support_email}"} class="transition hover:text-primary">
                   Contact us
                 </a>
               </li>

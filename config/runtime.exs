@@ -308,6 +308,8 @@ if config_env() == :prod do
   # See https://hexdocs.pm/swoosh/Swoosh.html#module-installation for details.
 end
 
+config :wasomi, :support_email, System.get_env("SUPPORT_EMAIL", "hello@wasomi-ai.com")
+
 # Key for pseudonymising attempted email addresses in the account audit trail
 # (Wasomi.Accounts.audit_email_metadata/1). Derived from the endpoint signing
 # secret — which is resolved by this point for every environment — via its own

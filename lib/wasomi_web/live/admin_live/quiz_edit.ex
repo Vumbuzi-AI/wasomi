@@ -664,7 +664,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
                       Custom document upload
                     </h3>
                     <p class="mt-1 text-xs text-body">
-                      Upload a PDF or DOCX file (up to 25MB) to generate questions directly from document text.
+                      Upload a PDF file (up to 25MB) to generate questions directly from document text.
                     </p>
 
                     <div class="mt-4">
@@ -1188,7 +1188,7 @@ defmodule WasomiWeb.AdminLive.QuizEdit do
   defp error_to_string(:too_large), do: "File is too large (max 25MB)."
   defp error_to_string(:not_accepted), do: "Only PDF files are accepted."
   defp error_to_string(:too_many_files), do: "Only one file at a time."
-  defp error_to_string(other), do: to_string(other)
+  defp error_to_string(_other), do: "Could not accept that file."
 
   attr :status, :atom, required: true
   attr :generated_count, :integer, default: nil

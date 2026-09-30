@@ -121,6 +121,7 @@ defmodule WasomiWeb.CoursePlayerLive do
          |> assign(:pending_certificate, nil)
          |> assign(:awaiting_certificate?, false)
          |> assign(:certificate_slow?, false)
+         |> assign(:certificate_failed?, false)
          |> assign(:course_review, course_review)
          |> assign(:review_form_rating, nil)
          |> assign(:review_form_body, "")
@@ -652,7 +653,8 @@ defmodule WasomiWeb.CoursePlayerLive do
     {:noreply,
      socket
      |> assign(:awaiting_certificate?, false)
-     |> assign(:certificate_slow?, false)}
+     |> assign(:certificate_slow?, false)
+     |> assign(:certificate_failed?, false)}
   end
 
   @impl true
@@ -728,6 +730,7 @@ defmodule WasomiWeb.CoursePlayerLive do
         socket
         |> assign(:awaiting_certificate?, true)
         |> assign(:certificate_slow?, false)
+        |> assign(:certificate_failed?, false)
 
       certificate ->
         certificate = %{certificate | course: socket.assigns.course}
@@ -993,12 +996,22 @@ defmodule WasomiWeb.CoursePlayerLive do
          )
          |> assign(:awaiting_certificate?, false)}
 
-      not socket.assigns.certificate_slow? ->
-        Process.send_after(self(), :recheck_certificate, 4_000)
+      socket.assigns.certificate_slow? or socket.assigns.certificate_failed? ->
         {:noreply, socket}
 
       true ->
+        Process.send_after(self(), :recheck_certificate, 4_000)
         {:noreply, socket}
+    end
+  end
+
+  # A permanent (non-retryable) issuance failure — stop the learner staring
+  # at a "preparing" spinner that will never resolve on its own.
+  def handle_info({:certificate_failed, %{course_id: course_id}}, socket) do
+    if course_id == socket.assigns.course.id and socket.assigns.awaiting_certificate? do
+      {:noreply, assign(socket, :certificate_failed?, true)}
+    else
+      {:noreply, socket}
     end
   end
 
@@ -1010,6 +1023,8 @@ defmodule WasomiWeb.CoursePlayerLive do
 
   @impl true
   def render(assigns) do
+    assigns = assign(assigns, :support_email, Application.get_env(:wasomi, :support_email))
+
     ~H"""
     <div class="min-h-screen bg-surface text-body">
       <div
@@ -1036,13 +1051,24 @@ defmodule WasomiWeb.CoursePlayerLive do
           <p class="mt-1 text-body">
             You've completed <span class="font-semibold text-ink">{@course.title}</span>.
           </p>
-          <p :if={!@certificate_slow?} class="mt-4 inline-flex items-center gap-2 text-sm text-muted">
+          <p
+            :if={!@certificate_slow? && !@certificate_failed?}
+            class="mt-4 inline-flex items-center gap-2 text-sm text-muted"
+          >
             <.icon name="hero-arrow-path" class="h-4 w-4 animate-spin" /> Preparing your certificate…
           </p>
-          <p :if={@certificate_slow?} class="mt-4 text-sm text-body">
+          <p :if={@certificate_slow? && !@certificate_failed?} class="mt-4 text-sm text-body">
             Your certificate is taking a little longer than usual. It'll be waiting under
             <span class="font-semibold text-ink">Certificates</span>
             shortly — no need to stay here.
+          </p>
+          <p :if={@certificate_failed?} class="mt-4 text-sm text-body">
+            We ran into a problem generating your certificate. Our team has been notified —
+            <a href={"mailto:#{@support_email}"} class="font-semibold text-ink underline">
+              contact support
+            </a>
+            if it doesn't show up under <span class="font-semibold text-ink">Certificates</span>
+            soon.
           </p>
 
           <div class="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-center">

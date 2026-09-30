@@ -413,6 +413,7 @@ defmodule WasomiWeb.AdminLive.LandingImages do
         Choose file
         <input type="file" data-role="picker" accept="image/png,image/jpeg" class="hidden" />
       </label>
+      <p class="mt-1 text-xs text-muted">PNG or JPG, up to 5 MB.</p>
     </div>
     <%!-- Outside the phx-update="ignore" wrapper on purpose: LiveView must
     patch this input's data-phx-*-refs, or auto_upload never preflights. --%>

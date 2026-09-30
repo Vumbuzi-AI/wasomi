@@ -57,6 +57,7 @@ defmodule Wasomi.Certificates.Workers.IssueCertificate do
                 "attempt=#{job.attempt}: #{inspect(reason)}"
             )
 
+            :ok = Certificates.broadcast_failed(user_id, course_id)
             {:cancel, reason}
         end
     end
